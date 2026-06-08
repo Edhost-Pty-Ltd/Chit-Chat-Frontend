@@ -46,6 +46,25 @@ export interface StatusUpdate {
   time: string;
 }
 
+// ─── Calendar ─────────────────────────────────────────────────────────────
+export interface CalendarEvent {
+  id: number;
+  title: string;
+  date: string;       // "YYYY-MM-DD"
+  startTime: string;
+  endTime: string;
+  color: string;
+}
+
+// ─── Notes ────────────────────────────────────────────────────────────────
+export interface Note {
+  id: number;
+  title: string;
+  preview: string;
+  date: string;
+  checked?: boolean;
+}
+
 // ─── Navigation param list ─────────────────────────────────────────────────
 export type RootStackParamList = {
   SignIn: undefined;
@@ -53,4 +72,9 @@ export type RootStackParamList = {
   Chat: { contact: Contact };
   Calls: undefined;
   Status: undefined;
+  Contacts: undefined;
+  Calendar: undefined;
+  Notes: undefined;
+  CloudBackup: undefined;
+  Settings: undefined;
 };

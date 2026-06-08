@@ -1,50 +1,116 @@
-// ─── Design Tokens ────────────────────────────────────────────────────────────
-// Single source of truth for every colour, radius and shadow in the app.
+// ─── Design Tokens — Light Sky Blue Glass ────────────────────────────────────
 
 export const COLORS = {
-  sky1:      '#e8f4ff',   // page background
-  sky2:      '#c5e3ff',   // soft accent
-  sky3:      '#72b8f5',   // mid-blue
-  blue:      '#1a7fe8',   // primary brand blue
-  blueDark:  '#1260c4',
-  blueDeep:  '#0a3d8f',   // deep navy
+  // ── Backgrounds ───────────────────────────────────────────────────────
+  sky1:      '#C5E8F7',
+  sky2:      '#87CEEB',
+  sky3:      '#E8F6FF',
+  bg1:       '#C5E8F7',
+  bg2:       '#E8F6FF',
+
+  // ── Brand blues ────────────────────────────────────────────────────────
+  blue:      '#1E9CF0',
+  blueDark:  '#0a72c4',
+  blueDeep:  '#0a72c4',
+  blueGlow:  'rgba(30,156,240,0.30)',
+
+  // ── Glass surfaces — clear, not white ─────────────────────────────────
+  glass:         'rgba(255,255,255,0.18)',
+  glassMid:      'rgba(255,255,255,0.24)',
+  glassHigh:     'rgba(255,255,255,0.30)',
+  glassBorder:   'rgba(255,255,255,0.45)',
+  glassBorderSub:'rgba(30,156,240,0.20)',
+
+  // ── Text ───────────────────────────────────────────────────────────────
+  text:      '#1a2840',
+  sub:       '#5a7fa0',
+  textSub:   '#5a7fa0',
+  textFaint: 'rgba(90,127,160,0.55)',
+
+  // ── Utility ────────────────────────────────────────────────────────────
   white:     '#ffffff',
-  text:      '#1a2840',   // primary text
-  sub:       '#6b8aad',   // secondary / muted text
-  missed:    '#e84343',   // missed call / error
-  green:     '#22c55e',   // online indicator
-  border:    'rgba(26,127,232,0.12)',
-  cardBg:    'rgba(255,255,255,0.88)',
-  inputBg:   'rgba(232,244,255,0.6)',
+  missed:    '#e84343',
+  green:     '#22c55e',
+  amber:     '#f59e0b',
+  border:    'rgba(30,156,240,0.14)',
+  cardBg:    'rgba(255,255,255,0.18)',
+  inputBg:   'rgba(255,255,255,0.22)',
+
+  // ── Bg gradient aliases ────────────────────────────────────────────────
+  bgGrad1:   '#87CEEB',
+  bgGrad2:   '#C5E8F7',
+  bgGrad3:   '#E8F6FF',
 } as const;
 
 export const GRADIENTS = {
-  primary:   [COLORS.blue,    COLORS.blueDeep] as [string, string],
-  sky:       [COLORS.blueDeep, COLORS.blue, COLORS.sky3] as [string, string, string],
-  card:      ['rgba(255,255,255,0.95)', 'rgba(232,244,255,0.85)'] as [string, string],
+  primary:  ['#1E9CF0', '#0a72c4']                               as [string, string],
+  sky:      ['#0a72c4', '#1E9CF0', '#87CEEB']                    as [string, string, string],
+  bg:       ['#87CEEB', '#C5E8F7', '#E8F6FF']                    as [string, string, string],
+  card:     ['rgba(255,255,255,0.28)', 'rgba(255,255,255,0.14)'] as [string, string],
+  glow:     ['rgba(30,156,240,0.35)',  'rgba(30,156,240,0.0)']   as [string, string],
+  chatSent: ['#1E9CF0', '#0a72c4']                               as [string, string],
+  chatRecv: ['rgba(255,255,255,0.30)', 'rgba(255,255,255,0.18)'] as [string, string],
+} as const;
+
+export const GLASS = {
+  // 3D glass card — top edge catches light, bottom has depth
+  card: {
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    // Simulated inner bevel via shadow
+  },
+  elevated: {
+    backgroundColor: 'rgba(180,225,245,0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.50)',
+  },
+  input: {
+    backgroundColor: 'rgba(180,225,245,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.42)',
+  },
+  nav: {
+    backgroundColor: 'rgba(160,215,240,0.50)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.55)',
+  },
+  header: {
+    backgroundColor: 'rgba(160,215,240,0.35)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.40)',
+  },
 } as const;
 
 export const RADIUS = {
-  sm:   8,
-  md:   12,
+  sm:   10,
+  md:   14,
   lg:   18,
   xl:   24,
   full: 999,
 } as const;
 
+// 3D glass shadows — light comes from top-left
 export const SHADOW = {
   card: {
-    shadowColor:   COLORS.blue,
-    shadowOffset:  { width: 0, height: 4 },
-    shadowOpacity: 0.10,
-    shadowRadius:  16,
-    elevation:     6,
+    shadowColor:   '#0e6ea8',
+    shadowOffset:  { width: 2, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius:  10,
+    elevation:     4,
   },
   button: {
-    shadowColor:   COLORS.blue,
+    shadowColor:   '#1E9CF0',
     shadowOffset:  { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius:  10,
-    elevation:     8,
+    shadowOpacity: 0.40,
+    shadowRadius:  12,
+    elevation:     10,
+  },
+  glow: {
+    shadowColor:   '#1E9CF0',
+    shadowOffset:  { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius:  20,
+    elevation:     14,
   },
 } as const;
