@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "825582316169",
+    "project_id": "chit-chat-67a7f",
+    "storage_bucket": "chit-chat-67a7f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:825582316169:android:8c1dbb74c2ad54e177f458",
+        "android_client_info": {
+          "package_name": "com.edhost.chitchat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDCPz9ZC-VCEXe8J2RRYzOhDUiKwA5_u3w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,15 +1,16 @@
-// ─── Screen 2: Chats ─────────────────────────────────────────────────────────
+// ─── Screen 2: Chats — Glassmorphism ─────────────────────────────────────────
 import React from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, TextInput, ScrollView,
+  StyleSheet, TextInput, ScrollView, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Avatar, BottomNav } from '../components';
+import { BlurView } from 'expo-blur';
+import { Avatar, BottomNav, GlassCard } from '../components';
 import { CONTACTS } from '../data/mockData';
-import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
+import { COLORS, GRADIENTS, RADIUS, SHADOW } from '../types/theme';
 import { Contact, RootStackParamList } from '../types';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
@@ -17,22 +18,19 @@ type NavProp = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
 export default function ChatsScreen() {
   const navigation = useNavigation<NavProp>();
 
-  // ── Story row ────────────────────────────────────────────────────────────
   const renderStory = ({ item }: { item: Contact }) => (
-    <View style={styles.storyItem}>
-      {/* Gradient ring */}
-      <LinearGradient colors={[item.color, COLORS.blue]} style={styles.storyRing}>
+    <TouchableOpacity style={styles.storyItem} activeOpacity={0.8}>
+      <LinearGradient colors={[item.color, '#1a7fe8']} style={styles.storyRing}>
         <View style={styles.storyInner}>
-          <Avatar initials={item.avatar} color={item.color} size={46} />
+          <Avatar initials={item.avatar} color={item.color} size={44} />
         </View>
       </LinearGradient>
       <Text style={styles.storyName} numberOfLines={1}>
         {item.name.split(' ')[0]}
       </Text>
-    </View>
+    </TouchableOpacity>
   );
 
-  // ── Chat row ─────────────────────────────────────────────────────────────
   const renderChat = ({ item }: { item: Contact }) => (
     <TouchableOpacity
       style={styles.chatRow}
@@ -40,36 +38,32 @@ export default function ChatsScreen() {
       onPress={() => navigation.navigate('Chat', { contact: item })}
     >
       <Avatar initials={item.avatar} color={item.color} size={50} status={item.status} />
-
       <View style={styles.chatMeta}>
-        {/* Name + time */}
         <View style={styles.rowBetween}>
           <Text style={styles.chatName}>{item.name}</Text>
           <Text style={[styles.chatTime, item.unread > 0 && styles.chatTimeUnread]}>
             {item.time}
           </Text>
         </View>
-
-        {/* Preview + badge */}
         <View style={styles.rowBetween}>
-          <Text style={styles.chatPreview} numberOfLines={1}>
-            {item.lastMsg}
-          </Text>
+          <Text style={styles.chatPreview} numberOfLines={1}>{item.lastMsg}</Text>
           {item.unread > 0 && (
             <LinearGradient colors={GRADIENTS.primary} style={styles.badge}>
               <Text style={styles.badgeText}>{item.unread}</Text>
             </LinearGradient>
           )}
-          {item.pinned && !item.unread && (
-            <Text style={{ fontSize: 13 }}>📌</Text>
-          )}
+          {item.pinned && !item.unread && <Text style={{ fontSize: 12 }}>📌</Text>}
         </View>
       </View>
     </TouchableOpacity>
   );
 
   return (
-    <View style={styles.root}>
+    <LinearGradient colors={GRADIENTS.bg} style={styles.root}>
+      {/* Blobs */}
+      <View style={[styles.blob, { width: 300, height: 300, top: -100, right: -80 }]} />
+      <View style={[styles.blob, { width: 200, height: 200, bottom: 100, left: -60 }]} />
+
       {/* ── Header ───────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title}>Chats</Text>
@@ -80,106 +74,114 @@ export default function ChatsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Search bar ───────────────────────────────────────────── */}
+      {/* ── Search ───────────────────────────────────────────────── */}
       <View style={styles.searchWrap}>
         <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search"
-          placeholderTextColor={COLORS.sub}
+          placeholder="Search conversations..."
+          placeholderTextColor="rgba(255,255,255,0.40)"
         />
       </View>
 
       {/* ── Stories ──────────────────────────────────────────────── */}
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+        horizontal showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.storiesRow}
       >
         {/* My story */}
         <View style={styles.storyItem}>
-          <LinearGradient colors={[COLORS.sky2, COLORS.blue]} style={[styles.storyRing, styles.myStoryRing]}>
+          <LinearGradient colors={['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.08)']} style={[styles.storyRing, { borderStyle: 'dashed' }]}>
             <View style={styles.storyInner}>
               <View style={styles.myStoryCircle}>
                 <Text style={styles.myStoryPlus}>+</Text>
               </View>
             </View>
           </LinearGradient>
-          <Text style={styles.storyName}>Your Story</Text>
+          <Text style={styles.storyName}>My Story</Text>
         </View>
-
         {CONTACTS.slice(0, 5).map((c) => (
           <View key={c.id}>{renderStory({ item: c })}</View>
         ))}
       </ScrollView>
 
       {/* ── Chat list ─────────────────────────────────────────────── */}
-      <FlatList
-        data={CONTACTS}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderChat}
-        ItemSeparatorComponent={() => <View style={styles.divider} />}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 12 }}
-      />
+      <GlassCard style={styles.listCard}>
+        <FlatList
+          data={CONTACTS}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderChat}
+          ItemSeparatorComponent={() => <View style={styles.divider} />}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 8 }}
+        />
+      </GlassCard>
 
       <BottomNav active="chats" />
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+  root: { flex: 1 },
+  blob: {
+    position: 'absolute', borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
 
   // Header
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 10,
+    paddingHorizontal: 22, paddingTop: 58, paddingBottom: 12,
   },
-  title:      { fontSize: 26, fontWeight: '800', color: COLORS.blueDeep },
-  addBtn:     { width: 34, height: 34, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
-  addBtnText: { color: '#fff', fontSize: 22, lineHeight: 26 },
+  title:      { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  addBtn:     { width: 36, height: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
+  addBtnText: { color: '#fff', fontSize: 24, lineHeight: 28 },
 
   // Search
   searchWrap: {
-    flexDirection: 'row', alignItems: 'center',
-    marginHorizontal: 20, marginBottom: 10,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 12, paddingVertical: 9,
-    borderWidth: 1, borderColor: COLORS.border,
-    gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: 22, marginBottom: 14,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
   },
-  searchIcon:  { fontSize: 14, color: COLORS.sub },
-  searchInput: { flex: 1, fontSize: 14, color: COLORS.text },
+  searchIcon:  { fontSize: 14 },
+  searchInput: { flex: 1, fontSize: 14, color: '#fff' },
 
   // Stories
-  storiesRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 14 },
-  storyItem:  { alignItems: 'center', gap: 5, width: 62 },
-  storyName:  { fontSize: 10, color: COLORS.sub, textAlign: 'center' },
-  storyRing:  { borderRadius: 999, padding: 2.5 },
-  myStoryRing:{ borderStyle: 'dashed' },
-  storyInner: { backgroundColor: COLORS.sky1, borderRadius: 999, padding: 2 },
+  storiesRow:    { paddingHorizontal: 18, paddingVertical: 4, gap: 14, paddingBottom: 12 },
+  storyItem:     { alignItems: 'center', gap: 6, width: 64 },
+  storyName:     { fontSize: 10, color: 'rgba(255,255,255,0.70)', textAlign: 'center' },
+  storyRing:     { borderRadius: 999, padding: 2.5 },
+  storyInner:    { backgroundColor: 'rgba(10,36,99,0.5)', borderRadius: 999, padding: 2 },
   myStoryCircle: {
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: COLORS.inputBg,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
   },
-  myStoryPlus: { fontSize: 22, color: COLORS.blue, lineHeight: 26 },
+  myStoryPlus: { fontSize: 22, color: '#fff', lineHeight: 26 },
+
+  // List card
+  listCard: {
+    flex: 1, marginHorizontal: 16, marginBottom: 8,
+    borderRadius: RADIUS.xl, overflow: 'hidden',
+  },
 
   // Chat rows
   chatRow: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 10, gap: 12,
-    backgroundColor: 'transparent',
+    paddingHorizontal: 16, paddingVertical: 12, gap: 12,
   },
-  chatMeta:    { flex: 1, gap: 4 },
-  rowBetween:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chatName:    { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  chatTime:    { fontSize: 11, color: COLORS.sub },
-  chatTimeUnread: { color: COLORS.blue },
-  chatPreview: { fontSize: 13, color: COLORS.sub, flex: 1, marginRight: 8 },
-  badge:       { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
-  badgeText:   { color: '#fff', fontSize: 11, fontWeight: '700' },
-  divider:     { height: 1, backgroundColor: COLORS.border, marginLeft: 82 },
+  chatMeta:       { flex: 1, gap: 4 },
+  rowBetween:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  chatName:       { fontSize: 15, fontWeight: '700', color: '#fff' },
+  chatTime:       { fontSize: 11, color: 'rgba(255,255,255,0.45)' },
+  chatTimeUnread: { color: '#7dd3fc' },
+  chatPreview:    { fontSize: 13, color: 'rgba(255,255,255,0.60)', flex: 1, marginRight: 8 },
+  badge:          { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
+  badgeText:      { color: '#fff', fontSize: 11, fontWeight: '700' },
+  divider:        { height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginLeft: 78 },
 });

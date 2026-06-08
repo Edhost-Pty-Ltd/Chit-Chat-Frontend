@@ -1,14 +1,40 @@
-// ─── Shared Components ────────────────────────────────────────────────────────
+// ─── Shared Components — Glassmorphism Edition ───────────────────────────────
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ViewStyle,
+  View, Text, TouchableOpacity, StyleSheet,
+  ViewStyle, Platform,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { COLORS, RADIUS, SHADOW } from '../types/theme';
+import { COLORS, GLASS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList, ContactStatus } from '../types';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
+
+// ─── GlassCard ───────────────────────────────────────────────────────────────
+// Wrapper that renders BlurView on native, plain View on web
+interface GlassCardProps {
+  children: React.ReactNode;
+  style?: ViewStyle | ViewStyle[];
+  intensity?: number;
+}
+
+export function GlassCard({ children, style, intensity = 55 }: GlassCardProps) {
+  if (Platform.OS === 'web') {
+    return (
+      <View style={[styles.glassCardWeb, style]}>
+        {children}
+      </View>
+    );
+  }
+  return (
+    <BlurView intensity={intensity} tint="light" style={[styles.glassCardNative, style]}>
+      {children}
+    </BlurView>
+  );
+}
 
 // ─── Avatar ──────────────────────────────────────────────────────────────────
 interface AvatarProps {
@@ -21,10 +47,15 @@ interface AvatarProps {
 
 export function Avatar({ initials, color, size = 44, status, style }: AvatarProps) {
   const dotSize = Math.round(size * 0.27);
-
   return (
     <View style={[{ width: size, height: size }, style]}>
-      {/* Circle */}
+      {/* Glass ring behind avatar */}
+      <View style={[styles.avatarRing, {
+        width: size + 4, height: size + 4,
+        borderRadius: (size + 4) / 2,
+        top: -2, left: -2,
+      }]} />
+      {/* Coloured circle */}
       <View style={[styles.avatarCircle, {
         width: size, height: size, borderRadius: size / 2,
         backgroundColor: color,
@@ -33,15 +64,14 @@ export function Avatar({ initials, color, size = 44, status, style }: AvatarProp
           {initials}
         </Text>
       </View>
-
-      {/* Online dot */}
+      {/* Status dot */}
       {status && (
         <View style={[styles.statusDot, {
           width: dotSize, height: dotSize, borderRadius: dotSize / 2,
           bottom: 0, right: 0,
           backgroundColor:
-            status === 'online'  ? COLORS.green  :
-            status === 'away'    ? '#f59e0b'      : '#94a3b8',
+            status === 'online' ? COLORS.green :
+            status === 'away'   ? COLORS.amber  : 'rgba(255,255,255,0.30)',
         }]} />
       )}
     </View>
@@ -59,15 +89,13 @@ const TABS: { id: TabKey; icon: string; label: string; screen?: keyof RootStackP
   { id: 'more',     icon: '⋯',  label: 'More'                       },
 ];
 
-interface BottomNavProps {
-  active: TabKey;
-}
+interface BottomNavProps { active: TabKey; }
 
 export function BottomNav({ active }: BottomNavProps) {
   const navigation = useNavigation<NavProp>();
 
-  return (
-    <View style={styles.navBar}>
+  const inner = (
+    <View style={styles.navInner}>
       {TABS.map((t) => {
         const isActive = active === t.id;
         return (
@@ -77,100 +105,87 @@ export function BottomNav({ active }: BottomNavProps) {
             activeOpacity={0.7}
             onPress={() => t.screen && navigation.navigate(t.screen as any)}
           >
+            {isActive && (
+              <LinearGradient colors={GRADIENTS.primary} style={styles.navActivePill} />
+            )}
             <Text style={styles.navIcon}>{t.icon}</Text>
             <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
               {t.label}
             </Text>
-            {isActive && <View style={styles.navDot} />}
           </TouchableOpacity>
         );
       })}
     </View>
   );
-}
 
-// ─── AppHeader ────────────────────────────────────────────────────────────────
-interface AppHeaderProps {
-  title: string;
-  showBack?: boolean;
-  rightIcon?: string;
-  onRightPress?: () => void;
-}
-
-export function AppHeader({ title, showBack, rightIcon, onRightPress }: AppHeaderProps) {
-  const navigation = useNavigation<NavProp>();
-
+  if (Platform.OS === 'web') {
+    return <View style={[styles.navBarWeb]}>{inner}</View>;
+  }
   return (
-    <View style={styles.header}>
-      {showBack ? (
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBack}>
-          <Text style={styles.headerBackText}>‹</Text>
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.headerBack} />
-      )}
-      <Text style={styles.headerTitle}>{title}</Text>
-      {rightIcon ? (
-        <TouchableOpacity onPress={onRightPress} style={styles.headerRight}>
-          <View style={styles.headerRightBtn}>
-            <Text style={{ fontSize: 16 }}>{rightIcon}</Text>
-          </View>
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.headerRight} />
-      )}
-    </View>
+    <BlurView intensity={70} tint="dark" style={styles.navBarNative}>
+      {inner}
+    </BlurView>
   );
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  // GlassCard
+  glassCardWeb: {
+    backgroundColor: 'rgba(255,255,255,0.13)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    // CSS backdrop-filter via boxShadow workaround on web
+  },
+  glassCardNative: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    overflow: 'hidden',
+  },
+
   // Avatar
+  avatarRing: {
+    position: 'absolute',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
   avatarCircle: {
     alignItems: 'center', justifyContent: 'center',
     ...SHADOW.card,
   },
-  avatarText: {
-    color: '#fff', fontWeight: '700',
-  },
+  avatarText: { color: '#fff', fontWeight: '700' },
   statusDot: {
     position: 'absolute',
-    borderWidth: 2, borderColor: COLORS.sky1,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.25)',
   },
 
   // BottomNav
-  navBar: {
+  navBarNative: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.18)',
+    paddingBottom: 28,
+  },
+  navBarWeb: {
+    backgroundColor: 'rgba(10,36,99,0.75)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.18)',
+    paddingBottom: 12,
+  },
+  navInner: {
     flexDirection: 'row',
-    borderTopWidth: 1, borderTopColor: COLORS.border,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    paddingBottom: 24, paddingTop: 8,
+    paddingTop: 10,
   },
   navItem: {
-    flex: 1, alignItems: 'center', gap: 3,
+    flex: 1, alignItems: 'center', gap: 4,
+    position: 'relative', paddingVertical: 2,
   },
-  navIcon: { fontSize: 20 },
-  navLabel: { fontSize: 10, fontWeight: '500', color: COLORS.sub },
-  navLabelActive: { fontWeight: '700', color: COLORS.blue },
-  navDot: {
-    width: 4, height: 4, borderRadius: 2,
-    backgroundColor: COLORS.blue, marginTop: 1,
+  navActivePill: {
+    position: 'absolute',
+    top: -4, width: '70%', height: '140%',
+    borderRadius: RADIUS.full,
+    opacity: 0.25,
   },
-
-  // AppHeader
-  header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-  },
-  headerBack: { width: 40 },
-  headerBackText: { fontSize: 28, color: COLORS.blue, fontWeight: '300' },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: COLORS.blueDeep },
-  headerRight: { width: 40, alignItems: 'flex-end' },
-  headerRightBtn: {
-    width: 32, height: 32, borderRadius: RADIUS.sm,
-    backgroundColor: COLORS.blue,
-    alignItems: 'center', justifyContent: 'center',
-    ...SHADOW.button,
-  },
+  navIcon:        { fontSize: 20 },
+  navLabel:       { fontSize: 10, fontWeight: '500', color: 'rgba(255,255,255,0.55)' },
+  navLabelActive: { fontWeight: '700', color: '#fff' },
 });

@@ -1,12 +1,12 @@
-// ─── Screen 4: Calls ─────────────────────────────────────────────────────────
+// ─── Screen 4: Calls — Glassmorphism ─────────────────────────────────────────
 import React, { useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Avatar, BottomNav } from '../components';
+import { Avatar, BottomNav, GlassCard } from '../components';
 import { CALLS } from '../data/mockData';
-import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
+import { COLORS, GRADIENTS, RADIUS, SHADOW } from '../types/theme';
 import { Call } from '../types';
 
 type CallTab = 'All' | 'Missed' | 'Voicemail';
@@ -19,13 +19,11 @@ const CALL_ICON: Record<string, string> = {
 
 export default function CallsScreen() {
   const [tab, setTab] = useState<CallTab>('All');
-
   const filtered = tab === 'Missed' ? CALLS.filter((c) => c.missed) : CALLS;
 
   const renderCall = ({ item }: { item: Call }) => (
-    <View style={styles.callRow}>
-      <Avatar initials={item.avatar} color={item.color} size={46} />
-
+    <TouchableOpacity style={styles.callRow} activeOpacity={0.7}>
+      <Avatar initials={item.avatar} color={item.color} size={48} />
       <View style={styles.callMeta}>
         <Text style={styles.callName}>{item.name}</Text>
         <View style={styles.callSubRow}>
@@ -35,24 +33,27 @@ export default function CallsScreen() {
           </Text>
         </View>
       </View>
-
       <View style={styles.callRight}>
         <Text style={styles.callTime}>{item.time}</Text>
         <TouchableOpacity style={styles.infoBtn}>
-          <Text style={{ fontSize: 16 }}>ℹ️</Text>
+          <Text style={{ fontSize: 15 }}>ℹ️</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
-    <View style={styles.root}>
+    <LinearGradient colors={GRADIENTS.bg} style={styles.root}>
+      {/* Blobs */}
+      <View style={[styles.blob, { width: 280, height: 280, top: -80, left: -60 }]} />
+      <View style={[styles.blob, { width: 200, height: 200, bottom: 140, right: -60 }]} />
+
       {/* ── Header ───────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title}>Calls</Text>
         <TouchableOpacity>
           <LinearGradient colors={GRADIENTS.primary} style={styles.newCallBtn}>
-            <Text style={{ fontSize: 16 }}>📞</Text>
+            <Text style={{ fontSize: 18 }}>📞</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -69,10 +70,8 @@ export default function CallsScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              key={t}
-              onPress={() => setTab(t)}
-              style={styles.tabPillInactive}
-              activeOpacity={0.7}
+              key={t} onPress={() => setTab(t)}
+              style={styles.tabPillInactive} activeOpacity={0.7}
             >
               <Text style={styles.tabTextInactive}>{t}</Text>
             </TouchableOpacity>
@@ -81,80 +80,88 @@ export default function CallsScreen() {
       </View>
 
       {/* ── Call list ────────────────────────────────────────────── */}
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderCall}
-        ItemSeparatorComponent={() => <View style={styles.divider} />}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 12 }}
-        ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>📵</Text>
-            <Text style={styles.emptyText}>No missed calls</Text>
-          </View>
-        }
-      />
+      <GlassCard style={styles.listCard}>
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderCall}
+          ItemSeparatorComponent={() => <View style={styles.divider} />}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 8 }}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyIcon}>📵</Text>
+              <Text style={styles.emptyText}>No missed calls</Text>
+            </View>
+          }
+        />
+      </GlassCard>
 
       <BottomNav active="calls" />
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+  root: { flex: 1 },
+  blob: {
+    position: 'absolute', borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    zIndex: 0,
+  },
 
   // Header
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14,
+    paddingHorizontal: 22, paddingTop: 58, paddingBottom: 14,
   },
-  title:      { fontSize: 26, fontWeight: '800', color: COLORS.blueDeep },
-  newCallBtn: {
-    width: 34, height: 34, borderRadius: RADIUS.sm,
-    alignItems: 'center', justifyContent: 'center',
-    ...SHADOW.button,
-  },
+  title:      { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  newCallBtn: { width: 36, height: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
 
   // Tabs
-  tabRow: {
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: 20, paddingBottom: 14,
-  },
+  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 22, paddingBottom: 14 },
   tabPill: {
-    paddingHorizontal: 18, paddingVertical: 8,
-    borderRadius: RADIUS.full,
-    ...SHADOW.button,
+    paddingHorizontal: 20, paddingVertical: 9,
+    borderRadius: RADIUS.full, ...SHADOW.button,
   },
   tabPillInactive: {
-    paddingHorizontal: 18, paddingVertical: 8,
+    paddingHorizontal: 20, paddingVertical: 9,
     borderRadius: RADIUS.full,
-    backgroundColor: 'rgba(26,127,232,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
   },
   tabTextActive:   { fontSize: 13, fontWeight: '700', color: '#fff' },
-  tabTextInactive: { fontSize: 13, fontWeight: '500', color: COLORS.sub },
+  tabTextInactive: { fontSize: 13, fontWeight: '500', color: 'rgba(255,255,255,0.65)' },
+
+  // List
+  listCard: {
+    flex: 1, marginHorizontal: 16, marginBottom: 8,
+    borderRadius: RADIUS.xl, overflow: 'hidden',
+    zIndex: 1,
+  },
 
   // Call rows
   callRow: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 10, gap: 12,
+    paddingHorizontal: 16, paddingVertical: 12, gap: 14,
   },
-  callMeta:    { flex: 1 },
-  callName:    { fontSize: 15, fontWeight: '700', color: COLORS.text, marginBottom: 3 },
-  callSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  callType:    { fontSize: 12, color: COLORS.sub },
+  callMeta:       { flex: 1 },
+  callName:       { fontSize: 15, fontWeight: '700', color: '#fff', marginBottom: 3 },
+  callSubRow:     { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  callType:       { fontSize: 12, color: 'rgba(255,255,255,0.55)' },
   callTypeMissed: { color: COLORS.missed, fontWeight: '600' },
-  callRight:   { alignItems: 'flex-end', gap: 6 },
-  callTime:    { fontSize: 12, color: COLORS.sub },
+  callRight:      { alignItems: 'flex-end', gap: 6 },
+  callTime:       { fontSize: 12, color: 'rgba(255,255,255,0.45)' },
   infoBtn: {
     width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(26,127,232,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
   },
-  divider: { height: 1, backgroundColor: COLORS.border, marginLeft: 78 },
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginLeft: 78 },
 
-  // Empty state
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
+  // Empty
+  emptyWrap: { alignItems: 'center', paddingTop: 60 },
   emptyIcon: { fontSize: 40, marginBottom: 12 },
-  emptyText: { fontSize: 15, color: COLORS.sub },
+  emptyText: { fontSize: 15, color: 'rgba(255,255,255,0.55)' },
 });
