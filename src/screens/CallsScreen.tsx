@@ -1,64 +1,158 @@
-// ─── Screen 4: Calls — Glassmorphism ─────────────────────────────────────────
+// ─── Screen: Calls ───────────────────────────────────────────────────────────
 import React, { useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, Platform,
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  Modal, Pressable, ScrollView, Linking, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Avatar, BottomNav, GlassCard } from '../components';
-import { CALLS } from '../data/mockData';
-import { COLORS, GRADIENTS, RADIUS, SHADOW } from '../types/theme';
-import { Call } from '../types';
+import { Ionicons } from '@expo/vector-icons';
+import { Avatar, BottomNav } from '../components';
+import { CALLS, CONTACTS } from '../data/mockData';
+import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
+import { Call, Contact } from '../types';
 
 type CallTab = 'All' | 'Missed' | 'Voicemail';
 
-const CALL_ICON: Record<string, string> = {
-  Outgoing: '↗️',
-  Incoming: '↙️',
-  Missed:   '❌',
+// Mock phone numbers mapped by contact name
+const PHONE_NUMBERS: Record<string, string> = {
+  'Anna Martin':  '+27 71 234 5678',
+  'Kevin Patel':  '+27 82 345 6789',
+  'Sophie Lee':   '+27 61 456 7890',
+  'Team Office':  '+27 11 567 8901',
+  'Liam Johnson': '+27 73 678 9012',
+  'Family Group': '+27 83 789 0123',
+  'Design Team':  '+27 64 890 1234',
 };
 
+function CallDirectionIcon({ type, missed }: { type: string; missed?: boolean }) {
+  if (missed)              return <Ionicons name="call"             size={14} color={COLORS.missed} />;
+  if (type === 'Outgoing') return <Ionicons name="arrow-up-outline" size={14} color={COLORS.green}  />;
+  return                          <Ionicons name="arrow-down-outline" size={14} color={COLORS.blue}  />;
+}
+
+// ─── Contact Picker Sheet ────────────────────────────────────────────────────
+function ContactPickerSheet({
+  visible,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (c: Contact) => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide"
+      onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={styles.overlay} onPress={onClose} />
+      <View style={styles.sheet}>
+        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill}
+          start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
+        <View style={styles.handle} />
+
+        {/* Sheet header */}
+        <View style={styles.sheetHeader}>
+          <TouchableOpacity onPress={onClose} style={styles.iconPad}>
+            <Ionicons name="close" size={22} color={COLORS.sub} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sheetTitle}>Call a contact</Text>
+            <Text style={styles.sheetSub}>{CONTACTS.length} contacts</Text>
+          </View>
+          <Ionicons name="search-outline" size={22} color={COLORS.sub} style={styles.iconPad} />
+        </View>
+
+        <Text style={styles.sectionHint}>SELECT CONTACT TO CALL</Text>
+
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+          {CONTACTS.map((c) => (
+            <TouchableOpacity key={c.id} style={styles.contactCard}
+              activeOpacity={0.75} onPress={() => onSelect(c)}>
+              <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
+              <View style={styles.contactMeta}>
+                <Text style={styles.contactName}>{c.name}</Text>
+                <Text style={styles.contactNum}>
+                  {PHONE_NUMBERS[c.name] ?? 'No number'}
+                </Text>
+              </View>
+              {/* Light blue call button */}
+              <TouchableOpacity onPress={() => onSelect(c)} activeOpacity={0.8}>
+                <View style={styles.callBtn}>
+                  <Ionicons name="call" size={17} color={COLORS.blue} />
+                </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function CallsScreen() {
-  const [tab, setTab] = useState<CallTab>('All');
+  const [tab,         setTab]         = useState<CallTab>('All');
+  const [pickerOpen,  setPickerOpen]  = useState(false);
+
   const filtered = tab === 'Missed' ? CALLS.filter((c) => c.missed) : CALLS;
 
+  const handleSelectContact = (contact: Contact) => {
+    setPickerOpen(false);
+    const number = PHONE_NUMBERS[contact.name];
+    if (number) {
+      const tel = `tel:${number.replace(/\s/g, '')}`;
+      Linking.canOpenURL(tel).then((can) => {
+        if (can) {
+          Linking.openURL(tel);
+        } else {
+          Alert.alert('Cannot place call', `Dialling ${number}`);
+        }
+      });
+    } else {
+      Alert.alert('No number', `${contact.name} has no phone number saved.`);
+    }
+  };
+
   const renderCall = ({ item }: { item: Call }) => (
-    <TouchableOpacity style={styles.callRow} activeOpacity={0.7}>
+    <View style={styles.callCard}>
       <Avatar initials={item.avatar} color={item.color} size={48} />
       <View style={styles.callMeta}>
         <Text style={styles.callName}>{item.name}</Text>
         <View style={styles.callSubRow}>
-          <Text style={{ fontSize: 12 }}>{CALL_ICON[item.type]}</Text>
-          <Text style={[styles.callType, item.missed && styles.callTypeMissed]}>
-            {item.type}
-          </Text>
+          <CallDirectionIcon type={item.type} missed={item.missed} />
+          <Text style={[styles.callType, item.missed && styles.callTypeMissed]}>{item.type}</Text>
         </View>
       </View>
       <View style={styles.callRight}>
         <Text style={styles.callTime}>{item.time}</Text>
         <TouchableOpacity style={styles.infoBtn}>
-          <Text style={{ fontSize: 15 }}>ℹ️</Text>
+          <Ionicons name="information-circle-outline" size={20} color={COLORS.blue} />
         </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 
   return (
-    <LinearGradient colors={GRADIENTS.bg} style={styles.root}>
-      {/* Blobs */}
-      <View style={[styles.blob, { width: 280, height: 280, top: -80, left: -60 }]} />
-      <View style={[styles.blob, { width: 200, height: 200, bottom: 140, right: -60 }]} />
+    <View style={styles.root}>
+      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
 
-      {/* ── Header ───────────────────────────────────────────────── */}
+      <ContactPickerSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={handleSelectContact}
+      />
+
       <View style={styles.header}>
         <Text style={styles.title}>Calls</Text>
-        <TouchableOpacity>
+        {/* New call button — phone icon + "+" as a clean pill */}
+        <TouchableOpacity activeOpacity={0.85} onPress={() => setPickerOpen(true)}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.newCallBtn}>
-            <Text style={{ fontSize: 18 }}>📞</Text>
+            <Ionicons name="call" size={16} color="#fff" />
+            <Text style={styles.newCallPlus}>+</Text>
           </LinearGradient>
         </TouchableOpacity>
       </View>
 
-      {/* ── Tab pills ────────────────────────────────────────────── */}
+      {/* Tab pills */}
       <View style={styles.tabRow}>
         {(['All', 'Missed', 'Voicemail'] as CallTab[]).map((t) => {
           const isActive = tab === t;
@@ -69,99 +163,131 @@ export default function CallsScreen() {
               </LinearGradient>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              key={t} onPress={() => setTab(t)}
-              style={styles.tabPillInactive} activeOpacity={0.7}
-            >
+            <TouchableOpacity key={t} onPress={() => setTab(t)}
+              style={styles.tabPillInactive} activeOpacity={0.7}>
               <Text style={styles.tabTextInactive}>{t}</Text>
             </TouchableOpacity>
           );
         })}
       </View>
 
-      {/* ── Call list ────────────────────────────────────────────── */}
-      <GlassCard style={styles.listCard}>
-        <FlatList
-          data={filtered}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderCall}
-          ItemSeparatorComponent={() => <View style={styles.divider} />}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 8 }}
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyIcon}>📵</Text>
-              <Text style={styles.emptyText}>No missed calls</Text>
-            </View>
-          }
-        />
-      </GlassCard>
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderCall}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+        ListEmptyComponent={
+          <View style={styles.emptyWrap}>
+            <Ionicons name="call-outline" size={48} color={COLORS.sub} />
+            <Text style={styles.emptyText}>No missed calls</Text>
+          </View>
+        }
+      />
 
       <BottomNav active="calls" />
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  blob: {
-    position: 'absolute', borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    zIndex: 0,
-  },
+  root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  // Header
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 22, paddingTop: 58, paddingBottom: 14,
+    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14,
   },
-  title:      { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  newCallBtn: { width: 36, height: 36, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
-
-  // Tabs
-  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 22, paddingBottom: 14 },
-  tabPill: {
-    paddingHorizontal: 20, paddingVertical: 9,
-    borderRadius: RADIUS.full, ...SHADOW.button,
-  },
-  tabPillInactive: {
-    paddingHorizontal: 20, paddingVertical: 9,
+  title:      { fontSize: 26, fontWeight: '800', color: COLORS.text },
+  // New call button — horizontal pill with phone + "+" 
+  newCallBtnWrap: {},
+  newCallBtnInner: {},
+  newCallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: RADIUS.full,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
+    ...SHADOW.button,
   },
+  newCallPlus: {
+    fontSize: 18,
+    fontWeight: '300',
+    color: '#fff',
+    lineHeight: 20,
+    marginTop: -1,
+  },
+  callPlusIcon: {},
+  callPlusText: {},
+  plusBadge: {},
+  plusBadgeText: {},
+
+  tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 14 },
+  tabPill:         { paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full, ...SHADOW.button },
+  tabPillInactive: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full, ...GLASS.card },
   tabTextActive:   { fontSize: 13, fontWeight: '700', color: '#fff' },
-  tabTextInactive: { fontSize: 13, fontWeight: '500', color: 'rgba(255,255,255,0.65)' },
+  tabTextInactive: { fontSize: 13, fontWeight: '500', color: COLORS.sub },
 
-  // List
-  listCard: {
-    flex: 1, marginHorizontal: 16, marginBottom: 8,
-    borderRadius: RADIUS.xl, overflow: 'hidden',
-    zIndex: 1,
-  },
+  listContent: { paddingHorizontal: 14, paddingBottom: 20 },
 
-  // Call rows
-  callRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12, gap: 14,
+  callCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    ...GLASS.card, borderRadius: RADIUS.lg,
+    paddingHorizontal: 14, paddingVertical: 13, ...SHADOW.card,
   },
   callMeta:       { flex: 1 },
-  callName:       { fontSize: 15, fontWeight: '700', color: '#fff', marginBottom: 3 },
-  callSubRow:     { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  callType:       { fontSize: 12, color: 'rgba(255,255,255,0.55)' },
+  callName:       { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 3 },
+  callSubRow:     { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  callType:       { fontSize: 12, color: COLORS.sub },
   callTypeMissed: { color: COLORS.missed, fontWeight: '600' },
   callRight:      { alignItems: 'flex-end', gap: 6 },
-  callTime:       { fontSize: 12, color: 'rgba(255,255,255,0.45)' },
-  infoBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
-  },
-  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginLeft: 78 },
+  callTime:       { fontSize: 12, color: COLORS.sub },
+  infoBtn:        { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
 
-  // Empty
-  emptyWrap: { alignItems: 'center', paddingTop: 60 },
-  emptyIcon: { fontSize: 40, marginBottom: 12 },
-  emptyText: { fontSize: 15, color: 'rgba(255,255,255,0.55)' },
+  emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
+  emptyText: { fontSize: 15, color: COLORS.sub },
+
+  // ── Contact picker sheet ──────────────────────────────────────────────────
+  overlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.22)' },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: '82%',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    overflow: 'hidden',
+    ...SHADOW.glow,
+  },
+  handle: {
+    alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(30,156,240,0.30)', marginTop: 10, marginBottom: 4,
+  },
+  sheetHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, gap: 10,
+  },
+  iconPad:    { padding: 4 },
+  sheetTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
+  sheetSub:   { fontSize: 12, color: COLORS.sub, marginTop: 1 },
+  sectionHint:{
+    fontSize: 10, fontWeight: '700', color: COLORS.sub,
+    letterSpacing: 1, paddingHorizontal: 20, paddingVertical: 6,
+  },
+
+  // Contact cards in sheet
+  contactCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    marginHorizontal: 14, marginBottom: 8,
+    ...GLASS.card, borderRadius: RADIUS.lg,
+    paddingHorizontal: 14, paddingVertical: 12, ...SHADOW.card,
+  },
+  contactMeta: { flex: 1 },
+  contactName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
+  contactNum:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
+  callBtnWrap: {},
+  callBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(30,156,240,0.15)',
+    borderWidth: 1, borderColor: 'rgba(30,156,240,0.25)',
+    alignItems: 'center', justifyContent: 'center',
+  },
 });

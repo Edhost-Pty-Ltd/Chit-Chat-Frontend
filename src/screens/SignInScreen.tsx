@@ -1,270 +1,211 @@
-// ─── Screen 1: Sign In — Glassmorphism ───────────────────────────────────────
+// ─── Screen: Sign In ─────────────────────────────────────────────────────────
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { COLORS, GRADIENTS, RADIUS, SHADOW, GLASS } from '../types/theme';
+import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'SignIn'>;
 
-// Glass card — BlurView on native, styled View on web
-function GlassCard({ children, style }: { children: React.ReactNode; style?: any }) {
-  if (Platform.OS === 'web') {
-    return <View style={[styles.glassWeb, style]}>{children}</View>;
-  }
-  return (
-    <BlurView intensity={55} tint="light" style={[styles.glassNative, style]}>
-      {children}
-    </BlurView>
-  );
-}
-
 export default function SignInScreen() {
   const navigation = useNavigation<NavProp>();
-  const [email, setEmail] = useState('');
+  const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
+  const [showPass, setShowPass] = useState(false);
 
   return (
-    <LinearGradient colors={GRADIENTS.bg} style={styles.root}>
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
 
-      {/* Decorative blobs */}
-      <View style={[styles.blob, { width: 280, height: 280, top: -80, left: -60, opacity: 0.18 }]} />
-      <View style={[styles.blob, { width: 200, height: 200, top: 180, right: -80, opacity: 0.12 }]} />
-      <View style={[styles.blob, { width: 160, height: 160, bottom: 120, left: -40, opacity: 0.10 }]} />
+      {/* Hero */}
+      <LinearGradient colors={GRADIENTS.sky} style={styles.hero}>
+        <View style={styles.heroOrb} />
+        <View style={styles.logoBox}>
+          <Ionicons name="chatbubbles" size={30} color="#fff" />
+        </View>
+        <Text style={styles.appName}>ChitChat</Text>
+        <Text style={styles.tagline}>Connect. Share. Anywhere.</Text>
+        <Text style={styles.subTagline}>Messages, calls and more.{'\n'}Simple. Secure. Powerful.</Text>
+      </LinearGradient>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* ── Hero ─────────────────────────────────────────────── */}
-          <View style={styles.hero}>
-            <GlassCard style={styles.logoBox}>
-              <Text style={styles.logoIcon}>💬</Text>
-            </GlassCard>
-            <Text style={styles.appName}>SkyConnect</Text>
-            <Text style={styles.tagline}>Connect. Share. Anywhere.</Text>
-            <Text style={styles.subTagline}>
-              Messages, calls and more.{'\n'}Simple. Secure. Powerful.
-            </Text>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        {/* Sign In card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Sign In</Text>
+
+          {/* Email input */}
+          <View style={styles.inputWrap}>
+            <Ionicons name="mail-outline" size={18} color={COLORS.sub} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Email or Phone"
+              placeholderTextColor={COLORS.textFaint}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={setEmail}
+            />
           </View>
 
-          {/* ── Sign In card ──────────────────────────────────────── */}
-          <GlassCard style={styles.card}>
-            <Text style={styles.cardTitle}>Sign In</Text>
-
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>✉️</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Email or Phone"
-                placeholderTextColor={COLORS.textMuted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-              />
-            </View>
-
-            <View style={styles.inputWrap}>
-              <Text style={styles.inputIcon}>🔒</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor={COLORS.textMuted}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-            </View>
-
-            <View style={styles.row}>
-              <TouchableOpacity
-                style={styles.checkRow}
-                onPress={() => setRemember(!remember)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.checkbox, remember && styles.checkboxActive]}>
-                  {remember && <Text style={styles.checkmark}>✓</Text>}
-                </View>
-                <Text style={styles.rememberText}>Remember me</Text>
-              </TouchableOpacity>
-              <TouchableOpacity>
-                <Text style={styles.forgotText}>Forgot Password?</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => navigation.navigate('Chats')}
-              activeOpacity={0.85}
-            >
-              <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                <Text style={styles.primaryBtnText}>Sign In</Text>
-              </LinearGradient>
+          {/* Password input */}
+          <View style={styles.inputWrap}>
+            <Ionicons name="lock-closed-outline" size={18} color={COLORS.sub} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor={COLORS.textFaint}
+              secureTextEntry={!showPass}
+              value={password}
+              onChangeText={setPassword}
+            />
+            <TouchableOpacity onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
+              <Ionicons name={showPass ? 'eye-off-outline' : 'eye-outline'} size={18} color={COLORS.sub} />
             </TouchableOpacity>
+          </View>
 
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or continue with</Text>
-              <View style={styles.dividerLine} />
-            </View>
+          <View style={styles.row}>
+            <TouchableOpacity style={styles.checkRow} onPress={() => setRemember(!remember)} activeOpacity={0.7}>
+              <View style={[styles.checkbox, remember && styles.checkboxActive]}>
+                {remember && <Ionicons name="checkmark" size={12} color="#fff" />}
+              </View>
+              <Text style={styles.rememberText}>Remember me</Text>
+            </TouchableOpacity>
+            <TouchableOpacity>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </TouchableOpacity>
+          </View>
 
-            <View style={styles.socialRow}>
-              {[
-                { label: 'G', color: '#ea4335' },
-                { label: '🍎', color: '#fff' },
-                { label: '⊞', color: '#00a4ef' },
-              ].map((p, i) => (
-                <TouchableOpacity key={i} style={styles.socialBtn}>
-                  <Text style={[styles.socialIcon, { color: p.color }]}>{p.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <TouchableOpacity onPress={() => navigation.replace('Chats')} activeOpacity={0.85}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+              <Text style={styles.primaryBtnText}>Sign In</Text>
+            </LinearGradient>
+          </TouchableOpacity>
 
-            <View style={styles.signUpRow}>
-              <Text style={styles.signUpText}>Don't have an account? </Text>
-              <TouchableOpacity>
-                <Text style={styles.signUpLink}>Sign Up</Text>
-              </TouchableOpacity>
-            </View>
-          </GlassCard>
+          <Text style={styles.orText}>or continue with</Text>
 
-          {/* ── Sign Out card ─────────────────────────────────────── */}
-          <GlassCard style={styles.card}>
-            <Text style={styles.cardTitle}>Sign Out</Text>
-            <Text style={styles.signOutSub}>Are you sure you want to sign out?</Text>
-            <View style={styles.row}>
-              <TouchableOpacity style={styles.cancelBtn}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.signOutBtn}>
-                <Text style={styles.signOutText}>Sign Out</Text>
-              </TouchableOpacity>
-            </View>
-          </GlassCard>
+          {/* Google button */}
+          <TouchableOpacity style={styles.socialBtnFull} activeOpacity={0.85}>
+            <Ionicons name="logo-google" size={20} color="#EA4335" />
+            <Text style={styles.socialBtnText}>Continue with Google</Text>
+          </TouchableOpacity>
 
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </LinearGradient>
+          {/* Apple button */}
+          <TouchableOpacity style={[styles.socialBtnFull, styles.socialBtnApple]} activeOpacity={0.85}>
+            <Ionicons name="logo-apple" size={22} color={COLORS.text} />
+            <Text style={styles.socialBtnText}>Continue with Apple</Text>
+          </TouchableOpacity>
+
+          <View style={styles.signUpRow}>
+            <Text style={styles.signUpText}>Don't have an account? </Text>
+            <TouchableOpacity><Text style={styles.signUpLink}>Sign Up</Text></TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Sign Out card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Sign Out</Text>
+          <Text style={styles.signOutSub}>Are you sure you want to sign out?</Text>
+          <View style={styles.row}>
+            <TouchableOpacity style={styles.cancelBtn}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.signOutBtn}>
+              <Ionicons name="log-out-outline" size={16} color={COLORS.missed} style={{ marginRight: 4 }} />
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  // Blobs
-  blob: {
-    position: 'absolute',
-    borderRadius: 999,
-    backgroundColor: '#fff',
-    zIndex: 0,
+  hero: {
+    paddingTop: 60, paddingBottom: 36, paddingHorizontal: 28,
+    overflow: 'hidden',
   },
-
-  scroll: { padding: 24, paddingTop: 60, gap: 16, paddingBottom: 50, zIndex: 1 },
-
-  // Hero
-  hero: { alignItems: 'flex-start', marginBottom: 8 },
+  heroOrb: {
+    position: 'absolute', width: 200, height: 200, borderRadius: 100,
+    backgroundColor: 'rgba(255,255,255,0.10)', top: -60, right: -60,
+  },
   logoBox: {
     width: 64, height: 64, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.20)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.40)',
     alignItems: 'center', justifyContent: 'center',
-    marginBottom: 16, overflow: 'hidden',
+    marginBottom: 16, ...SHADOW.glow,
   },
-  logoIcon: { fontSize: 30 },
-  appName: { fontSize: 32, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  tagline: { fontSize: 14, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
-  subTagline: { fontSize: 12, color: 'rgba(255,255,255,0.55)', marginTop: 8, lineHeight: 20 },
+  appName:    { fontSize: 30, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  tagline:    { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
+  subTagline: { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 8, lineHeight: 20 },
 
-  // Glass card
-  glassWeb: {
-    backgroundColor: 'rgba(255,255,255,0.13)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    borderRadius: RADIUS.xl,
-    padding: 22,
-    ...SHADOW.card,
-  },
-  glassNative: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    borderRadius: RADIUS.xl,
-    overflow: 'hidden',
-    padding: 22,
-    ...SHADOW.card,
-  },
-  card: { marginBottom: 0 },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 18 },
+  scroll: { padding: 20, gap: 16, paddingBottom: 48 },
+  card: { ...GLASS.elevated, borderRadius: RADIUS.xl, padding: 22, ...SHADOW.card },
+  cardTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 18 },
 
-  // Inputs
   inputWrap: {
+    ...GLASS.input, borderRadius: RADIUS.md, marginBottom: 12,
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderRadius: RADIUS.md,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
-    paddingHorizontal: 12, paddingVertical: 11,
-    marginBottom: 12, gap: 10,
   },
-  inputIcon: { fontSize: 16 },
-  input: { flex: 1, fontSize: 14, color: '#fff' },
+  inputIcon: { paddingLeft: 14 },
+  input:     { flex: 1, paddingHorizontal: 10, paddingVertical: 13, fontSize: 14, color: COLORS.text },
+  eyeBtn:    { paddingRight: 12 },
 
-  // Helpers
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  checkbox: { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)', alignItems: 'center', justifyContent: 'center' },
-  checkboxActive: { backgroundColor: COLORS.blue, borderColor: COLORS.blue },
-  checkmark: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  rememberText: { fontSize: 13, color: COLORS.textSub },
-  forgotText: { fontSize: 13, color: '#7dd3fc', fontWeight: '600' },
+  row:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
+  checkRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  checkbox:       { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: COLORS.blue, alignItems: 'center', justifyContent: 'center' },
+  checkboxActive: { backgroundColor: COLORS.blue },
+  rememberText:   { fontSize: 13, color: COLORS.sub },
+  forgotText:     { fontSize: 13, color: COLORS.blue, fontWeight: '600' },
 
-  // Primary button
-  primaryBtn: {
-    borderRadius: RADIUS.md, paddingVertical: 15,
-    alignItems: 'center',
-    ...SHADOW.button,
+  primaryBtn:     { borderRadius: RADIUS.md, paddingVertical: 15, alignItems: 'center', ...SHADOW.button },
+  primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
+  orText: { textAlign: 'center', fontSize: 13, color: COLORS.sub, marginVertical: 16 },
+
+  // Full-width labelled social buttons
+  socialBtnFull: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
+    paddingVertical: 13, marginBottom: 10,
+    ...GLASS.input, borderRadius: RADIUS.md,
+    ...SHADOW.card,
   },
-  primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
-
-  // Divider
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.18)' },
-  dividerText: { fontSize: 12, color: COLORS.textSub },
-
-  // Social
-  socialRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  socialBtn: {
-    flex: 1, paddingVertical: 11,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderRadius: RADIUS.sm,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
-    alignItems: 'center',
+  socialBtnApple: {
+    marginBottom: 16,
   },
-  socialIcon: { fontSize: 16, fontWeight: '700' },
+  socialBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
-  // Sign up
-  signUpRow: { flexDirection: 'row', justifyContent: 'center' },
-  signUpText: { fontSize: 13, color: COLORS.textSub },
-  signUpLink: { fontSize: 13, color: '#7dd3fc', fontWeight: '700' },
+  // Legacy — unused
+  socialRow: {},
+  socialBtn: {},
 
-  // Sign out card
-  signOutSub: { fontSize: 13, color: COLORS.textSub, marginBottom: 16 },
+  signUpRow:  { flexDirection: 'row', justifyContent: 'center' },
+  signUpText: { fontSize: 13, color: COLORS.sub },
+  signUpLink: { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
+
+  signOutSub: { fontSize: 13, color: COLORS.sub, marginBottom: 16 },
   cancelBtn: {
-    flex: 1, paddingVertical: 12,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderRadius: RADIUS.sm,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
-    alignItems: 'center', marginRight: 10,
+    flex: 1, paddingVertical: 12, marginRight: 8,
+    ...GLASS.input, borderRadius: RADIUS.sm, alignItems: 'center',
   },
-  cancelText: { fontSize: 14, fontWeight: '600', color: '#fff' },
-  signOutBtn: { flex: 1, paddingVertical: 12, backgroundColor: COLORS.missed, borderRadius: RADIUS.sm, alignItems: 'center' },
-  signOutText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  cancelText:  { fontSize: 14, fontWeight: '600', color: COLORS.blue },
+  signOutBtn:  {
+    flex: 1, paddingVertical: 12,
+    flexDirection: 'row',
+    backgroundColor: 'rgba(232,67,67,0.10)',
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5, borderColor: 'rgba(232,67,67,0.30)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  signOutText: { fontSize: 14, fontWeight: '600', color: COLORS.missed },
 });

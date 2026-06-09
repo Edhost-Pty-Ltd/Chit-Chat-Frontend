@@ -1,355 +1,313 @@
-// ─── Screen 3: Chat Conversation — Firebase Real-time ────────────────────────
-import React, { useState, useRef, useEffect } from 'react';
+// ─── Screen: Chat ────────────────────────────────────────────────────────────
+import React, { useState, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, TextInput, KeyboardAvoidingView,
-  Platform, ActivityIndicator,
+  StyleSheet, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import {
-  collection, query, orderBy, onSnapshot,
-  Timestamp,
-} from 'firebase/firestore';
-import authModule, { FirebaseAuthTypes } from '@react-native-firebase/auth';
-import { db } from '../config/firebase';
-import { sendMessage, markChatAsRead } from '../hooks/useChatActions';
+import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../components';
-import { COLORS, GRADIENTS, RADIUS, SHADOW } from '../types/theme';
-import { RootStackParamList } from '../types';
+import { MESSAGES } from '../data/mockData';
+import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
+import { Message, RootStackParamList } from '../types';
 
-// ── Extend nav params to include chatId ──────────────────────────────────────
-type ExtendedParams = {
-  Chat: {
-    chatId:      string;
-    displayName: string;
-    isGroup:     boolean;
-  };
-};
-
-type NavProp   = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
-type RouteType = RouteProp<ExtendedParams, 'Chat'>;
-
-interface FireMessage {
-  messageId: string;
-  senderId:  string;
-  text:      string | null;
-  type:      'text' | 'image' | 'voice';
-  timestamp: Date | null;
-  readBy:    string[];
-}
-
-function GlassBar({ children, style }: { children: React.ReactNode; style?: any }) {
-  if (Platform.OS === 'web') {
-    return <View style={[styles.glassBarWeb, style]}>{children}</View>;
-  }
-  return (
-    <BlurView intensity={70} tint="dark" style={[styles.glassBarNative, style]}>
-      {children}
-    </BlurView>
-  );
-}
-
-function formatTime(date: Date | null): string {
-  if (!date) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+type NavProp       = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
+type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
 
 export default function ChatScreen() {
   const navigation  = useNavigation<NavProp>();
-  const route       = useRoute<RouteType>();
-  const { chatId, displayName, isGroup } = route.params;
+  const route       = useRoute<RoutePropType>();
+  const { contact } = route.params;
 
-  const [currentUser, setCurrentUser] = useState<FirebaseAuthTypes.User | null>(null);
-  const [messages,    setMessages]    = useState<FireMessage[]>([]);
-  const [input,       setInput]       = useState('');
-  const [loading,     setLoading]     = useState(true);
-  const [sending,     setSending]     = useState(false);
+  const [input,    setInput]    = useState('');
+  const [messages, setMessages] = useState<Message[]>(MESSAGES);
   const listRef = useRef<FlatList>(null);
 
-  // ── Auth state ────────────────────────────────────────────────
-  useEffect(() => {
-    const unsub = authModule().onAuthStateChanged(setCurrentUser);
-    return unsub;
-  }, []);
-
-  // ── Real-time messages listener ───────────────────────────────
-  useEffect(() => {
-    if (!chatId) return;
-
-    const q = query(
-      collection(db, 'chats', chatId, 'messages'),
-      orderBy('timestamp', 'asc'),
-    );
-
-    const unsub = onSnapshot(q, (snap) => {
-      const msgs: FireMessage[] = snap.docs.map((doc) => {
-        const d = doc.data();
-        return {
-          messageId: doc.id,
-          senderId:  d.senderId,
-          text:      d.text ?? null,
-          type:      d.type ?? 'text',
-          timestamp: d.timestamp
-            ? (d.timestamp as Timestamp).toDate()
-            : null,
-          readBy: d.readBy ?? [],
-        };
-      });
-      setMessages(msgs);
-      setLoading(false);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 100);
-    });
-
-    return () => unsub();
-  }, [chatId]);
-
-  // ── Mark as read when screen opens ───────────────────────────
-  useEffect(() => {
-    if (chatId && currentUser) {
-      markChatAsRead(chatId, currentUser.uid);
-    }
-  }, [chatId, currentUser]);
-
-  // ── Send message ──────────────────────────────────────────────
-  async function handleSend() {
-    if (!input.trim() || !currentUser || sending) return;
-    setSending(true);
-    const text = input.trim();
+  const sendMessage = () => {
+    if (!input.trim()) return;
+    setMessages((prev) => [...prev, {
+      id: prev.length + 1, from: 'me', text: input.trim(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'out',
+    }]);
     setInput('');
-    await sendMessage(chatId, currentUser.uid, text);
-    setSending(false);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }
+  };
 
-  // ── Render bubble ─────────────────────────────────────────────
-  const renderMessage = ({ item, index }: { item: FireMessage; index: number }) => {
-    const isOut    = item.senderId === currentUser?.uid;
-    const initials = displayName.slice(0, 2).toUpperCase();
-
-    // Show timestamp if gap > 5 min from previous message
-    const prev = messages[index - 1];
-    const showTime = !prev || (
-      item.timestamp && prev.timestamp &&
-      item.timestamp.getTime() - prev.timestamp.getTime() > 5 * 60 * 1000
-    );
-
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isOut = item.type === 'out';
     return (
-      <View>
-        {showTime && item.timestamp && (
-          <View style={styles.timeSeparator}>
-            <Text style={styles.timeSeparatorText}>
-              {formatTime(item.timestamp)}
-            </Text>
+      <View style={[styles.msgRow, isOut ? styles.msgRowOut : styles.msgRowIn]}>
+
+        {/* Received bubble — vivid blue gradient */}
+        {!isOut && (
+          <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+            {item.image && (
+              <View style={styles.imagePlaceholder}>
+                <Ionicons name="image-outline" size={32} color="rgba(255,255,255,0.70)" />
+              </View>
+            )}
+            {item.voice && (
+              <View style={styles.voiceRow}>
+                <TouchableOpacity style={styles.playBtn}>
+                  <Ionicons name="play" size={14} color="#fff" />
+                </TouchableOpacity>
+                <View style={styles.waveform}>
+                  {Array.from({ length: 20 }).map((_, i) => (
+                    <View key={i} style={[styles.waveBar, { height: 4 + Math.abs(Math.sin(i * 0.7) * 12) }]} />
+                  ))}
+                </View>
+                <Text style={styles.waveDurationIn}>0:12</Text>
+              </View>
+            )}
+            {item.text && <Text style={styles.bubbleTextIn}>{item.text}</Text>}
+            <Text style={styles.timeIn}>{item.time}</Text>
+          </LinearGradient>
+        )}
+
+        {/* Sent bubble — white frosted glass */}
+        {isOut && (
+          <View style={[styles.bubble, styles.bubbleOut]}>
+            {item.text && <Text style={styles.bubbleTextOut}>{item.text}</Text>}
+            <View style={styles.timeOutRow}>
+              <Text style={styles.timeOut}>{item.time}</Text>
+              <Ionicons name="checkmark-done" size={13} color={COLORS.blue} />
+            </View>
           </View>
         )}
-        <View style={[styles.msgRow, isOut && styles.msgRowOut]}>
-          {!isOut && (
-            <Avatar
-              initials={initials}
-              color="#1a7fe8"
-              size={28}
-              style={{ marginRight: 6, alignSelf: 'flex-end' }}
-            />
-          )}
-          {isOut ? (
-            <LinearGradient colors={GRADIENTS.primary} style={[styles.bubble, styles.bubbleOut]}>
-              <Text style={styles.bubbleTextOut}>{item.text}</Text>
-              <View style={styles.msgFooter}>
-                <Text style={styles.timeOut}>{formatTime(item.timestamp)}</Text>
-                <Text style={styles.readTick}>
-                  {item.readBy.length > 1 ? '✓✓' : '✓'}
-                </Text>
-              </View>
-            </LinearGradient>
-          ) : (
-            <View style={[styles.bubble, styles.bubbleIn]}>
-              {isGroup && (
-                <Text style={styles.senderName}>{item.senderId.slice(0, 8)}</Text>
-              )}
-              <Text style={styles.bubbleTextIn}>{item.text}</Text>
-              <Text style={styles.timeIn}>{formatTime(item.timestamp)}</Text>
-            </View>
-          )}
-        </View>
       </View>
     );
   };
 
   return (
-    <LinearGradient colors={GRADIENTS.bg} style={styles.root}>
-      <View style={[styles.blob, { width: 260, height: 260, top: -60, right: -80 }]} />
-      <View style={[styles.blob, { width: 180, height: 180, bottom: 80, left: -50 }]} />
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        {/* ── Top bar ────────────────────────────────────────── */}
-        <GlassBar style={styles.topBar}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backIcon}>‹</Text>
-          </TouchableOpacity>
-          <Avatar
-            initials={displayName.slice(0, 2).toUpperCase()}
-            color="#1a7fe8" size={40} status="online"
+      {/* ── Top bar ── */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={COLORS.blue} />
+        </TouchableOpacity>
+
+        <Avatar initials={contact.avatar} color={contact.color} size={40} status="online" />
+
+        <View style={styles.contactInfo}>
+          <Text style={styles.contactName}>{contact.name}</Text>
+          <Text style={[
+            styles.onlineText,
+            contact.status === 'online' && styles.onlineGreen,
+          ]}>
+            {contact.status === 'online' ? 'Online' :
+             contact.status === 'away'   ? 'Last seen recently' :
+                                           `Last seen ${contact.time}`}
+          </Text>
+        </View>
+
+        <TouchableOpacity style={styles.iconBtn}>
+          <Ionicons name="call-outline" size={20} color={COLORS.blue} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.iconBtn}>
+          <Ionicons name="videocam-outline" size={20} color={COLORS.blue} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.iconBtn}>
+          <Ionicons name="ellipsis-vertical" size={20} color={COLORS.blue} />
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Messages ── */}
+      <FlatList
+        ref={listRef}
+        data={messages}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderMessage}
+        contentContainerStyle={styles.messageList}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={styles.datePillWrap}>
+            <View style={styles.datePill}>
+              <Text style={styles.datePillText}>Today</Text>
+            </View>
+          </View>
+        }
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+      />
+
+      {/* ── Input bar — single flat row like the reference ── */}
+      <View style={styles.inputBar}>
+
+        {/* + button far left */}
+        <TouchableOpacity style={styles.inputSideBtn}>
+          <Ionicons name="add" size={26} color={COLORS.sub} />
+        </TouchableOpacity>
+
+        {/* Glass text field — flex fills the space */}
+        <View style={styles.inputFieldWrap}>
+          <TextInput
+            style={styles.inputField}
+            placeholder="Message"
+            placeholderTextColor={COLORS.sub}
+            value={input}
+            onChangeText={setInput}
+            multiline
+            maxLength={500}
           />
-          <View style={styles.contactInfo}>
-            <Text style={styles.contactName}>{displayName}</Text>
-            <Text style={styles.onlineText}>
-              {isGroup ? 'Group chat' : '● Online'}
-            </Text>
-          </View>
-          <View style={styles.actionIcons}>
-            {['📞', '📹', '⋯'].map((icon, i) => (
-              <TouchableOpacity key={i} style={styles.iconBtn}>
-                <Text style={{ fontSize: 18 }}>{icon}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </GlassBar>
+        </View>
 
-        {/* ── Messages ───────────────────────────────────────── */}
-        {loading ? (
-          <View style={styles.centerWrap}>
-            <ActivityIndicator color="#fff" size="large" />
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={(item) => item.messageId}
-            renderItem={renderMessage}
-            contentContainerStyle={styles.messageList}
-            showsVerticalScrollIndicator={false}
-            ListEmptyComponent={
-              <View style={styles.emptyWrap}>
-                <Text style={styles.emptyIcon}>👋</Text>
-                <Text style={styles.emptyText}>
-                  Say hello to {displayName}!
-                </Text>
-              </View>
-            }
-            onContentSizeChange={() =>
-              listRef.current?.scrollToEnd({ animated: false })
-            }
-          />
-        )}
+        {/* Emoji icon */}
+        <TouchableOpacity style={styles.inputSideBtn}>
+          <Ionicons name="happy-outline" size={22} color={COLORS.sub} />
+        </TouchableOpacity>
 
-        {/* ── Input bar ──────────────────────────────────────── */}
-        <GlassBar style={styles.inputBar}>
-          <TouchableOpacity style={styles.attachBtn}>
-            <Text style={{ fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>+</Text>
-          </TouchableOpacity>
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.input}
-              placeholder="Type a message..."
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              value={input}
-              onChangeText={setInput}
-              multiline
-              maxLength={1000}
-              onSubmitEditing={handleSend}
-              blurOnSubmit={false}
-            />
-            <TouchableOpacity>
-              <Text style={{ fontSize: 18 }}>😊</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            onPress={handleSend}
-            activeOpacity={0.8}
-            disabled={sending || !input.trim()}
+        {/* Camera icon */}
+        <TouchableOpacity style={styles.inputSideBtn}>
+          <Ionicons name="camera-outline" size={22} color={COLORS.sub} />
+        </TouchableOpacity>
+
+        {/* Light blue mic / blue send circle — switches on typing */}
+        <TouchableOpacity onPress={sendMessage} activeOpacity={0.85} style={styles.sendBtn}>
+          <LinearGradient
+            colors={input.trim() ? GRADIENTS.primary : ['#7dd3fc', '#38bdf8']}
+            style={styles.sendBtnInner}
           >
-            <LinearGradient
-              colors={input.trim() ? GRADIENTS.primary : ['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
-              style={styles.sendBtn}
-            >
-              {sending
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={styles.sendIcon}>{input.trim() ? '➤' : '🎤'}</Text>
-              }
-            </LinearGradient>
-          </TouchableOpacity>
-        </GlassBar>
-      </KeyboardAvoidingView>
-    </LinearGradient>
+            <Ionicons
+              name={input.trim() ? 'send' : 'mic'}
+              size={19}
+              color="#fff"
+            />
+          </LinearGradient>
+        </TouchableOpacity>
+
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  blob: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)', zIndex: 0 },
+  root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  glassBarWeb:    { backgroundColor: 'rgba(10,36,99,0.75)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.15)' },
-  glassBarNative: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.15)' },
-
+  // ── Top bar ───────────────────────────────────────────────────────────────
   topBar: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingTop: 56, paddingBottom: 12, paddingHorizontal: 12, gap: 10, zIndex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 52,
+    paddingBottom: 12,
+    paddingHorizontal: 14,
+    gap: 8,
+    ...GLASS.header,
   },
-  backBtn:     { paddingHorizontal: 4 },
-  backIcon:    { fontSize: 32, color: '#fff', fontWeight: '300', lineHeight: 36 },
+  backBtn:     { padding: 2 },
   contactInfo: { flex: 1 },
-  contactName: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  onlineText:  { fontSize: 11, color: COLORS.green, marginTop: 1 },
-  actionIcons: { flexDirection: 'row', gap: 14 },
+  contactName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  onlineText:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
+  onlineGreen: { color: COLORS.green },
   iconBtn:     { padding: 4 },
 
-  messageList: { padding: 16, paddingBottom: 8 },
+  // ── Messages ──────────────────────────────────────────────────────────────
+  messageList:  { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
+  datePillWrap: { alignItems: 'center', marginBottom: 10 },
+  datePill: {
+    ...GLASS.card,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 16, paddingVertical: 5,
+  },
+  datePillText: { fontSize: 11, color: COLORS.sub },
 
-  // Time separator
-  timeSeparator:     { alignItems: 'center', marginVertical: 8 },
-  timeSeparatorText: {
-    fontSize: 11, color: 'rgba(255,255,255,0.45)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20,
+  msgRow:    { flexDirection: 'row', marginBottom: 4 },
+  msgRowIn:  { justifyContent: 'flex-start' },
+  msgRowOut: { justifyContent: 'flex-end' },
+
+  bubble: {
+    maxWidth: '75%',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
 
-  // Bubbles
-  msgRow:    { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 6 },
-  msgRowOut: { justifyContent: 'flex-end' },
-  bubble:    { maxWidth: '72%', borderRadius: 18, padding: 10 },
-  bubbleOut: { borderBottomRightRadius: 4, ...SHADOW.button },
-  bubbleIn:  {
+  // Received — vivid blue gradient
+  bubbleIn: {
     borderBottomLeftRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
     ...SHADOW.card,
   },
-  bubbleTextOut: { fontSize: 14, color: '#fff', lineHeight: 20 },
   bubbleTextIn:  { fontSize: 14, color: '#fff', lineHeight: 20 },
-  senderName:    { fontSize: 11, color: '#7dd3fc', fontWeight: '700', marginBottom: 3 },
-  msgFooter:     { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 4 },
-  timeOut:       { fontSize: 10, color: 'rgba(255,255,255,0.65)' },
-  readTick:      { fontSize: 10, color: 'rgba(255,255,255,0.65)' },
-  timeIn:        { fontSize: 10, color: 'rgba(255,255,255,0.50)', textAlign: 'right', marginTop: 4 },
+  timeIn:        { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
 
-  // Empty / loading
-  centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyWrap:  { alignItems: 'center', paddingTop: 80 },
-  emptyIcon:  { fontSize: 40, marginBottom: 12 },
-  emptyText:  { fontSize: 14, color: 'rgba(255,255,255,0.55)' },
+  // Sent — clear glass, sky blue shows through
+  bubbleOut: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.50)',
+    borderBottomRightRadius: 4,
+    ...SHADOW.card,
+  },
+  bubbleTextOut: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
+  timeOutRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
+  timeOut:       { fontSize: 10, color: COLORS.sub },
 
-  // Input bar
+  // Voice / image
+  imagePlaceholder: {
+    width: 160, height: 100, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  voiceRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
+  playBtn:       { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
+  waveform:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2, height: 24 },
+  waveBar:       { width: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.60)' },
+  waveDurationIn:{ fontSize: 11, color: 'rgba(255,255,255,0.80)' },
+
+  // ── Input bar ─────────────────────────────────────────────────────────────
   inputBar: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 10,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 12,
-    gap: 8, zIndex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+    gap: 4,
+    ...GLASS.header,
   },
-  attachBtn: { padding: 4 },
-  inputWrap: {
-    flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderRadius: RADIUS.full,
-    paddingHorizontal: 14, paddingVertical: 9,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)', gap: 8,
+
+  // Side icon buttons (+, emoji, camera)
+  inputSideBtn: {
+    width: 38, height: 42,
+    alignItems: 'center', justifyContent: 'center',
   },
-  input:    { flex: 1, fontSize: 14, color: '#fff', maxHeight: 90 },
-  sendBtn:  { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
-  sendIcon: { fontSize: 16, color: '#fff' },
+
+  // Glass text field
+  inputFieldWrap: {
+    flex: 1,
+    ...GLASS.card,
+    borderRadius: RADIUS.xl,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 42,
+    maxHeight: 110,
+    justifyContent: 'center',
+  },
+  inputField: {
+    fontSize: 14,
+    color: COLORS.text,
+    padding: 0,
+    maxHeight: 90,
+  },
+
+  // Green circle send / mic button
+  sendBtn: {
+    width: 42, height: 42,
+    borderRadius: 21,
+    ...SHADOW.button,
+  },
+  sendBtnInner: {
+    flex: 1,
+    borderRadius: 21,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Kept for legacy — unused now
+  inputCard:    {},
+  inputActions: {},
+  attachBtn:    {},
+  searchPill:   {},
+  searchPillText: {},
 });
