@@ -37,11 +37,13 @@ export function useAuth() {
       setStep('sending');
       setError(null);
 
+      console.log('[useAuth] Sending OTP to:', phone);
       const confirmation = await auth().signInWithPhoneNumber(phone);
       setConfirm(confirmation);
       setStep('verifying');
       return true;
     } catch (err: any) {
+      console.error('[useAuth] sendOTP error:', err.code, err.message);
       setError(getAuthErrorMessage(err.code));
       setStep('error');
       return false;

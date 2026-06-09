@@ -37,7 +37,9 @@ export default function SignInScreen() {
     if (isBusy) return;
     if (!validatePhone(phone)) return;
 
-    const digits = phone.replace(/\D/g, '');
+    // Strip non-digits, then remove leading zero (user might type 065... instead of 65...)
+    let digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('0')) digits = digits.slice(1);
     await sendOTP(`+27${digits}`);
   }
 
@@ -57,7 +59,8 @@ export default function SignInScreen() {
     if (isBusy) return;
     setOtp('');
     setValidationError(null);
-    const digits = phone.replace(/\D/g, '');
+    let digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('0')) digits = digits.slice(1);
     await sendOTP(`+27${digits}`);
   }
 
