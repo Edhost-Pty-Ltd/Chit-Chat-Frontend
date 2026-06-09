@@ -25,7 +25,8 @@
         }
       ],
       "@react-native-firebase/app",
-      "expo-contacts"
+      "expo-contacts",
+      "expo-font"
     ],
     "android": {
       "adaptiveIcon": {

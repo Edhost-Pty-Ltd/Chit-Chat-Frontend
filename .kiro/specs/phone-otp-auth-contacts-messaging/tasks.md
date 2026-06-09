@@ -90,7 +90,7 @@ Wire the existing ChitChat React Native app from mock/static data to the live Fi
     - Both hooks already return cleanup functions in useEffect — confirm they're invoked
     - _Requirements: 4.4, 5.6_
 
-- [-] 8. Final checkpoint
+- [x] 8. Final checkpoint
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ]* 9. Property-based tests
