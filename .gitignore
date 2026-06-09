@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase config files (contain project keys — add to .gitignore if private)
+# Uncomment the lines below if you don't want to commit these:
+# google-services.json
+# GoogleService-Info.plist
