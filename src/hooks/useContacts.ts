@@ -9,6 +9,7 @@ import {
   collection, query, where, getDocs,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { normalizePhone, chunkArray } from '../utils/phoneUtils';
 
 export interface AppContact {
   userId:      string;       // Firestore user ID
@@ -16,23 +17,6 @@ export interface AppContact {
   displayName: string;       // contact name from phone book, or phone number if not saved
   isSaved:     boolean;      // true = found in phone contacts
   photoUri?:   string;       // contact photo from phone book
-}
-
-// Normalize any phone number to E.164 format (+27XXXXXXXXX for SA)
-function normalizePhone(raw: string, defaultCountryCode = '27'): string {
-  // Strip everything except digits and leading +
-  let digits = raw.replace(/[^\d+]/g, '');
-
-  if (digits.startsWith('+')) {
-    return digits; // already E.164
-  }
-  if (digits.startsWith('0')) {
-    return `+${defaultCountryCode}${digits.slice(1)}`; // 083... → +2783...
-  }
-  if (digits.length === 9) {
-    return `+${defaultCountryCode}${digits}`; // 83... → +2783...
-  }
-  return `+${digits}`;
 }
 
 export function useContacts() {
@@ -135,11 +119,3 @@ export function useContacts() {
   return { contacts, loading, error, hasPermission, reload: loadContacts };
 }
 
-// Split array into chunks of size n
-function chunkArray<T>(arr: T[], n: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < arr.length; i += n) {
-    chunks.push(arr.slice(i, i + n));
-  }
-  return chunks;
-}

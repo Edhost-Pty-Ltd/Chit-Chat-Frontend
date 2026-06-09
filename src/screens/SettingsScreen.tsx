@@ -6,6 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar, BottomNav } from '../components';
+import { useAuth } from '../hooks/useAuth';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
@@ -52,9 +53,13 @@ const SETTINGS_SECTIONS: {
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavProp>();
+  const { signOut, user } = useAuth();
 
-  const handleItem = (id: string) => {
-    if (id === 'signout')  navigation.replace('SignIn');
+  const handleItem = async (id: string) => {
+    if (id === 'signout') {
+      await signOut();
+      // Navigation guard auto-redirects to SignIn
+    }
     if (id === 'backup')   navigation.navigate('CloudBackup');
     if (id === 'calendar') navigation.navigate('Calendar');
     if (id === 'notes')    navigation.navigate('Notes');
@@ -72,9 +77,9 @@ export default function SettingsScreen() {
 
         {/* Profile — glass card */}
         <TouchableOpacity style={styles.profileCard} activeOpacity={0.8}>
-          <Avatar initials="JD" color={COLORS.blue} size={54} status="online" />
+          <Avatar initials={user?.phoneNumber?.slice(-2) ?? 'ME'} color={COLORS.blue} size={54} status="online" />
           <View style={styles.profileText}>
-            <Text style={styles.profileName}>John Doe</Text>
+            <Text style={styles.profileName}>{user?.phoneNumber ?? 'User'}</Text>
             <Text style={styles.profileSub}>Available to help</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={COLORS.sub} />

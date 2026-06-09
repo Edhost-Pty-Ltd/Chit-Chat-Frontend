@@ -1,42 +1,61 @@
 // ─── Screen: Chats ───────────────────────────────────────────────────────────
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, Modal, Pressable, ScrollView, Animated, Dimensions,
+  TextInput, Modal, Pressable, ScrollView, Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Avatar, BottomNav } from '../components';
-import { CONTACTS, STATUSES } from '../data/mockData';
+import { BottomNav } from '../components';
+import { useAuth } from '../hooks/useAuth';
+import { useChats, ChatPreview } from '../hooks/useChats';
+import { useContacts, AppContact } from '../hooks/useContacts';
+import { getOrCreateDirectChat } from '../hooks/useChatActions';
+import { resolveDisplayName } from '../utils/resolveDisplayName';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
-import { Contact, RootStackParamList } from '../types';
+import { RootStackParamList } from '../types';
 
 type NavProp   = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
 type TabType   = 'Chats' | 'Groups';
 type SheetMode = 'select' | 'newContact' | 'newGroup';
 
-// Search bubble fills from left edge to right (minus padding and search icon)
-const SCREEN_W = Dimensions.get('window').width;
-const BUBBLE_W = SCREEN_W - 14 - 14 - 10 - 40; // screen - leftPad - rightPad - gap - icon
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const CHATS  = CONTACTS.filter((c) => !['Team Office', 'Family Group', 'Design Team'].includes(c.name));
-const GROUPS = CONTACTS.filter((c) =>  ['Team Office', 'Family Group', 'Design Team'].includes(c.name));
-const STATUS_NAMES = new Set(STATUSES.map((s) => s.name));
+function formatTime(date: Date | null): string {
+  if (!date) return '';
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return date.toLocaleDateString([], { weekday: 'long' });
+  return date.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+}
 
-// ─── Avatar with status ring ──────────────────────────────────────────────────
-function ChatAvatar({ contact }: { contact: Contact }) {
-  if (!STATUS_NAMES.has(contact.name)) {
-    return <Avatar initials={contact.avatar} color={contact.color} size={50} status={contact.status} />;
-  }
+function stringToColor(str: string): string {
+  const colors = ['#f97316','#8b5cf6','#ec4899','#06b6d4','#10b981','#f59e0b','#6366f1','#e11d48'];
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+// ─── Chat Avatar ──────────────────────────────────────────────────────────────
+function ChatAvatar({ displayName }: { displayName: string }) {
+  const color = stringToColor(displayName);
+  const initials = getInitials(displayName);
   return (
-    <LinearGradient colors={[contact.color, COLORS.blue]} style={styles.ring}
-      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-      <View style={styles.ringInner}>
-        <Avatar initials={contact.avatar} color={contact.color} size={42} status={contact.status} />
-      </View>
-    </LinearGradient>
+    <View style={[styles.avatarCircle, { backgroundColor: color }]}>
+      <Text style={styles.avatarText}>{initials}</Text>
+    </View>
   );
 }
 
@@ -113,12 +132,20 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
 }
 
 // ─── New Group sheet ──────────────────────────────────────────────────────────
-function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
-  const [selected,  setSelected]  = useState<number[]>([]);
+function NewGroupSheet({
+  onBack,
+  onDone,
+  contacts,
+}: {
+  onBack: () => void;
+  onDone: () => void;
+  contacts: AppContact[];
+}) {
+  const [selected,  setSelected]  = useState<string[]>([]);
   const [groupName, setGroupName] = useState('');
 
-  const toggle = (id: number) =>
-    setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const toggle = (userId: string) =>
+    setSelected((prev) => prev.includes(userId) ? prev.filter((x) => x !== userId) : [...prev, userId]);
 
   return (
     <>
@@ -148,14 +175,16 @@ function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => v
       {selected.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipsRow}>
-          {selected.map((id) => {
-            const c = CONTACTS.find((x) => x.id === id)!;
+          {selected.map((userId) => {
+            const c = contacts.find((x) => x.userId === userId);
+            if (!c) return null;
+            const color = stringToColor(c.displayName);
             return (
-              <TouchableOpacity key={id} style={styles.chip} onPress={() => toggle(id)}>
-                <View style={[styles.chipDot, { backgroundColor: c.color }]}>
-                  <Text style={styles.chipInit}>{c.avatar}</Text>
+              <TouchableOpacity key={userId} style={styles.chip} onPress={() => toggle(userId)}>
+                <View style={[styles.chipDot, { backgroundColor: color }]}>
+                  <Text style={styles.chipInit}>{getInitials(c.displayName)}</Text>
                 </View>
-                <Text style={styles.chipName}>{c.name.split(' ')[0]}</Text>
+                <Text style={styles.chipName}>{c.displayName.split(' ')[0]}</Text>
                 <Ionicons name="close" size={13} color={COLORS.sub} />
               </TouchableOpacity>
             );
@@ -163,18 +192,19 @@ function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => v
         </ScrollView>
       )}
 
-      <Text style={styles.sectionHint}>{selected.length} / {CONTACTS.length} selected</Text>
+      <Text style={styles.sectionHint}>{selected.length} / {contacts.length} selected</Text>
 
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-        {CONTACTS.map((c) => {
-          const sel = selected.includes(c.id);
+        {contacts.map((c) => {
+          const sel = selected.includes(c.userId);
+          const color = stringToColor(c.displayName);
           return (
-            <TouchableOpacity key={c.id} style={styles.contactRow} activeOpacity={0.75}
-              onPress={() => toggle(c.id)}>
-              <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
+            <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
+              onPress={() => toggle(c.userId)}>
+              <ChatAvatar displayName={c.displayName} />
               <View style={styles.contactMeta}>
-                <Text style={styles.contactName}>{c.name}</Text>
-                <Text style={styles.contactSub} numberOfLines={1}>{c.lastMsg}</Text>
+                <Text style={styles.contactName}>{c.displayName}</Text>
+                <Text style={styles.contactSub} numberOfLines={1}>{c.phone}</Text>
               </View>
               <View style={[styles.checkbox, sel && styles.checkboxOn]}>
                 {sel && <Ionicons name="checkmark" size={14} color="#fff" />}
@@ -191,9 +221,13 @@ function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => v
 function SelectContactSheet({
   onClose,
   onNavigate,
+  contacts,
+  contactsLoading,
 }: {
   onClose: () => void;
-  onNavigate: (c: Contact) => void;
+  onNavigate: (contact: AppContact) => void;
+  contacts: AppContact[];
+  contactsLoading: boolean;
 }) {
   const [mode, setMode] = useState<SheetMode>('select');
 
@@ -201,7 +235,7 @@ function SelectContactSheet({
     return <NewContactSheet onBack={() => setMode('select')} onDone={onClose} />;
   }
   if (mode === 'newGroup') {
-    return <NewGroupSheet onBack={() => setMode('select')} onDone={onClose} />;
+    return <NewGroupSheet onBack={() => setMode('select')} onDone={onClose} contacts={contacts} />;
   }
 
   return (
@@ -213,7 +247,7 @@ function SelectContactSheet({
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.sheetTitle}>Select contact</Text>
-          <Text style={styles.sheetSub}>{CONTACTS.length} contacts</Text>
+          <Text style={styles.sheetSub}>{contacts.length} contacts</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 14 }}>
           <Ionicons name="search-outline" size={22} color={COLORS.sub} />
@@ -243,18 +277,30 @@ function SelectContactSheet({
       <Text style={styles.sectionHint}>Contacts</Text>
 
       {/* Contact list — tapping navigates to that contact's chat */}
-      <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-        {CONTACTS.map((c) => (
-          <TouchableOpacity key={c.id} style={styles.contactRow} activeOpacity={0.75}
-            onPress={() => onNavigate(c)}>
-            <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
-            <View style={styles.contactMeta}>
-              <Text style={styles.contactName}>{c.name}</Text>
-              <Text style={styles.contactSub} numberOfLines={1}>{c.lastMsg}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {contactsLoading ? (
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator size="large" color={COLORS.blue} />
+          <Text style={styles.emptyText}>Loading contacts…</Text>
+        </View>
+      ) : contacts.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <Ionicons name="people-outline" size={52} color={COLORS.sub} />
+          <Text style={styles.emptyText}>No registered contacts found</Text>
+        </View>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+          {contacts.map((c) => (
+            <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
+              onPress={() => onNavigate(c)}>
+              <ChatAvatar displayName={c.displayName} />
+              <View style={styles.contactMeta}>
+                <Text style={styles.contactName}>{c.displayName}</Text>
+                <Text style={styles.contactSub} numberOfLines={1}>{c.phone}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
     </>
   );
 }
@@ -262,6 +308,12 @@ function SelectContactSheet({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ChatsScreen() {
   const navigation  = useNavigation<NavProp>();
+  const { user }    = useAuth();
+  const userId      = user?.uid ?? null;
+
+  const { chats, loading: chatsLoading } = useChats(userId);
+  const { contacts, loading: contactsLoading } = useContacts();
+
   const [tab,        setTab]        = useState<TabType>('Chats');
   const [query,      setQuery]      = useState('');
   const [sheetOpen,  setSheetOpen]  = useState(false);
@@ -270,6 +322,40 @@ export default function ChatsScreen() {
   // Animated width: 0 → 1 (multiplied by max width in style)
   const searchAnim = useRef(new Animated.Value(0)).current;
   const searchRef  = useRef<TextInput>(null);
+
+  // Build contacts map: userId → displayName (for resolveDisplayName)
+  const contactsMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      map.set(c.phone, c.displayName);
+    }
+    return map;
+  }, [contacts]);
+
+  // Build firestoreUsers map: userId → { displayName, phone }
+  // We use contacts data as our source since useContacts already queried Firestore users
+  const firestoreUsersMap = useMemo(() => {
+    const map = new Map<string, { displayName: string; phone: string }>();
+    for (const c of contacts) {
+      map.set(c.userId, { displayName: c.displayName, phone: c.phone });
+    }
+    return map;
+  }, [contacts]);
+
+  // Resolve display name for a chat
+  const getDisplayName = (chat: ChatPreview): string => {
+    if (!userId) return 'Unknown';
+    return resolveDisplayName(chat, userId, contactsMap, firestoreUsersMap);
+  };
+
+  // Filter chats by tab
+  const directChats = useMemo(() => chats.filter((c) => c.type === 'direct'), [chats]);
+  const groupChats  = useMemo(() => chats.filter((c) => c.type === 'group'), [chats]);
+
+  const base = tab === 'Chats' ? directChats : groupChats;
+  const data = query.trim()
+    ? base.filter((c) => getDisplayName(c).toLowerCase().includes(query.toLowerCase()))
+    : base;
 
   const openSearch = () => {
     setSearchOpen(true);
@@ -287,33 +373,41 @@ export default function ChatsScreen() {
     }).start(() => setSearchOpen(false));
   };
 
-  const base = tab === 'Chats' ? CHATS : GROUPS;
-  const data = query.trim()
-    ? base.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
-    : base;
-
   // Called when a contact is tapped in the sheet
-  const handleSelectContact = (contact: Contact) => {
+  const handleSelectContact = async (contact: AppContact) => {
+    if (!userId) return;
     setSheetOpen(false);
-    navigation.navigate('Chat', { contact });
+    try {
+      const chatId = await getOrCreateDirectChat(userId, contact.userId);
+      navigation.navigate('Chat', { chatId, displayName: contact.displayName, isGroup: false });
+    } catch (err) {
+      // If chat creation fails, still navigate with a temporary ID
+      console.error('Failed to create/get chat:', err);
+    }
   };
 
-  const renderChat = ({ item }: { item: Contact }) => (
-    <TouchableOpacity style={styles.chatCard} activeOpacity={0.75}
-      onPress={() => navigation.navigate('Chat', { contact: item })}>
-      <ChatAvatar contact={item} />
-      <View style={styles.chatMeta}>
-        <Text style={styles.chatName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMsg}</Text>
-      </View>
-      <View style={styles.chatRight}>
-        <Text style={styles.chatTime}>{item.time}</Text>
-        {item.unread > 0
-          ? <View style={styles.badge}><Text style={styles.badgeText}>{item.unread}</Text></View>
-          : item.pinned ? <Ionicons name="pin" size={12} color={COLORS.sub} /> : null}
-      </View>
-    </TouchableOpacity>
-  );
+  const renderChat = ({ item }: { item: ChatPreview }) => {
+    const displayName = getDisplayName(item);
+    const isGroup = item.type === 'group';
+    return (
+      <TouchableOpacity style={styles.chatCard} activeOpacity={0.75}
+        onPress={() => navigation.navigate('Chat', { chatId: item.chatId, displayName, isGroup })}>
+        <ChatAvatar displayName={displayName} />
+        <View style={styles.chatMeta}>
+          <Text style={styles.chatName} numberOfLines={1}>{displayName}</Text>
+          <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMessage}</Text>
+        </View>
+        <View style={styles.chatRight}>
+          <Text style={styles.chatTime}>{formatTime(item.timestamp)}</Text>
+          {item.unreadCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{item.unreadCount}</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.root}>
@@ -332,6 +426,8 @@ export default function ChatsScreen() {
           <SelectContactSheet
             onClose={() => setSheetOpen(false)}
             onNavigate={handleSelectContact}
+            contacts={contacts}
+            contactsLoading={contactsLoading}
           />
         </View>
       </Modal>
@@ -401,20 +497,27 @@ export default function ChatsScreen() {
       </View>
 
       {/* ── Chat list ── */}
-      <FlatList
-        data={data}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderChat}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <Ionicons name="chatbubbles-outline" size={52} color={COLORS.sub} />
-            <Text style={styles.emptyText}>No {tab.toLowerCase()} yet</Text>
-          </View>
-        }
-      />
+      {chatsLoading ? (
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator size="large" color={COLORS.blue} />
+          <Text style={styles.emptyText}>Loading chats…</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={data}
+          keyExtractor={(item) => item.chatId}
+          renderItem={renderChat}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Ionicons name="chatbubbles-outline" size={52} color={COLORS.sub} />
+              <Text style={styles.emptyText}>No {tab.toLowerCase()} yet</Text>
+            </View>
+          }
+        />
+      )}
 
       {/* ── FAB ── */}
       <TouchableOpacity style={styles.fab} activeOpacity={0.85}
@@ -433,9 +536,13 @@ export default function ChatsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  // Status ring
-  ring:      { borderRadius: 999, padding: 2.5 },
-  ringInner: { backgroundColor: COLORS.sky1, borderRadius: 999, padding: 2 },
+  // ── Avatar ───────────────────────────────────────────────────────────────
+  avatarCircle: {
+    width: 50, height: 50, borderRadius: 25,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)',
+  },
+  avatarText: { color: '#fff', fontWeight: '700', fontSize: 18 },
 
   // ── Header ───────────────────────────────────────────────────────────────
   header: {
@@ -604,7 +711,6 @@ const styles = StyleSheet.create({
     flex: 1, textAlign: 'center',
     fontSize: 34, fontWeight: '200', color: COLORS.text, letterSpacing: 5,
   },
-  deleteBtn: { padding: 8 },
 
   // Keypad grid
   keyGrid: { marginHorizontal: 14, gap: 10, marginBottom: 16 },

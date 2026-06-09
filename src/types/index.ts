@@ -69,7 +69,7 @@ export interface Note {
 export type RootStackParamList = {
   SignIn: undefined;
   Chats: undefined;
-  Chat: { contact: Contact };
+  Chat: { chatId: string; displayName: string; isGroup: boolean };
   Calls: undefined;
   Status: undefined;
   Contacts: undefined;

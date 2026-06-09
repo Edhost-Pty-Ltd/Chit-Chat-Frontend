@@ -1,55 +1,86 @@
 // ─── Screen: Chat ────────────────────────────────────────────────────────────
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
   StyleSheet, TextInput, KeyboardAvoidingView, Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../components';
-import { MESSAGES } from '../data/mockData';
+import { useAuth } from '../hooks/useAuth';
+import { useMessages, FireMessage } from '../hooks/useMessages';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
-import { Message, RootStackParamList } from '../types';
+import { RootStackParamList } from '../types';
 
 type NavProp       = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
 type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
 
-export default function ChatScreen() {
-  const navigation  = useNavigation<NavProp>();
-  const route       = useRoute<RoutePropType>();
-  const { contact } = route.params;
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-  const [input,    setInput]    = useState('');
-  const [messages, setMessages] = useState<Message[]>(MESSAGES);
+/** Extract up to 2-char initials from a display name */
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+/** Format a Date to a short time string like "14:32" */
+function formatTime(date: Date | null): string {
+  if (!date) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+export default function ChatScreen() {
+  const navigation = useNavigation<NavProp>();
+  const route      = useRoute<RoutePropType>();
+  const { chatId, displayName, isGroup } = route.params;
+
+  // ── Auth — get current user ID ──────────────────────────────────
+  const { user } = useAuth();
+  const userId = user?.uid ?? null;
+
+  // ── Messages — real-time Firestore stream ───────────────────────
+  const { messages, loading, sendMessage } = useMessages(chatId, userId);
+
+  const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
-    setMessages((prev) => [...prev, {
-      id: prev.length + 1, from: 'me', text: input.trim(),
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'out',
-    }]);
-    setInput('');
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+  // ── Auto-scroll when new messages arrive ────────────────────────
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [messages.length]);
+
+  // ── Send handler ────────────────────────────────────────────────
+  const handleSend = async () => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    const success = await sendMessage(trimmed);
+    if (success) {
+      setInput('');
+    }
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isOut = item.type === 'out';
+  // ── Render a single message bubble ──────────────────────────────
+  const renderMessage = ({ item }: { item: FireMessage }) => {
+    const isOut = item.senderId === userId;
     return (
       <View style={[styles.msgRow, isOut ? styles.msgRowOut : styles.msgRowIn]}>
 
         {/* Received bubble — vivid blue gradient */}
         {!isOut && (
           <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
-            {item.image && (
+            {item.type === 'image' && (
               <View style={styles.imagePlaceholder}>
                 <Ionicons name="image-outline" size={32} color="rgba(255,255,255,0.70)" />
               </View>
             )}
-            {item.voice && (
+            {item.type === 'voice' && (
               <View style={styles.voiceRow}>
                 <TouchableOpacity style={styles.playBtn}>
                   <Ionicons name="play" size={14} color="#fff" />
@@ -63,7 +94,7 @@ export default function ChatScreen() {
               </View>
             )}
             {item.text && <Text style={styles.bubbleTextIn}>{item.text}</Text>}
-            <Text style={styles.timeIn}>{item.time}</Text>
+            <Text style={styles.timeIn}>{formatTime(item.timestamp)}</Text>
           </LinearGradient>
         )}
 
@@ -72,14 +103,33 @@ export default function ChatScreen() {
           <View style={[styles.bubble, styles.bubbleOut]}>
             {item.text && <Text style={styles.bubbleTextOut}>{item.text}</Text>}
             <View style={styles.timeOutRow}>
-              <Text style={styles.timeOut}>{item.time}</Text>
-              <Ionicons name="checkmark-done" size={13} color={COLORS.blue} />
+              <Text style={styles.timeOut}>{formatTime(item.timestamp)}</Text>
+              <Ionicons
+                name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
+                size={13}
+                color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
+              />
             </View>
           </View>
         )}
       </View>
     );
   };
+
+  // ── Loading state ───────────────────────────────────────────────
+  const renderLoading = () => (
+    <View style={styles.centerState}>
+      <ActivityIndicator size="large" color={COLORS.blue} />
+    </View>
+  );
+
+  // ── Empty state ─────────────────────────────────────────────────
+  const renderEmpty = () => (
+    <View style={styles.centerState}>
+      <Text style={styles.emptyEmoji}>👋</Text>
+      <Text style={styles.emptyText}>Say hello!</Text>
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -91,17 +141,12 @@ export default function ChatScreen() {
           <Ionicons name="chevron-back" size={24} color={COLORS.blue} />
         </TouchableOpacity>
 
-        <Avatar initials={contact.avatar} color={contact.color} size={40} status="online" />
+        <Avatar initials={getInitials(displayName)} color={COLORS.blue} size={40} />
 
         <View style={styles.contactInfo}>
-          <Text style={styles.contactName}>{contact.name}</Text>
-          <Text style={[
-            styles.onlineText,
-            contact.status === 'online' && styles.onlineGreen,
-          ]}>
-            {contact.status === 'online' ? 'Online' :
-             contact.status === 'away'   ? 'Last seen recently' :
-                                           `Last seen ${contact.time}`}
+          <Text style={styles.contactName}>{displayName}</Text>
+          <Text style={styles.onlineText}>
+            {isGroup ? 'Group chat' : 'Tap here for info'}
           </Text>
         </View>
 
@@ -117,22 +162,24 @@ export default function ChatScreen() {
       </View>
 
       {/* ── Messages ── */}
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.messageList}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <View style={styles.datePillWrap}>
-            <View style={styles.datePill}>
-              <Text style={styles.datePillText}>Today</Text>
+      {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.messageId}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.messageList}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View style={styles.datePillWrap}>
+              <View style={styles.datePill}>
+                <Text style={styles.datePillText}>Today</Text>
+              </View>
             </View>
-          </View>
-        }
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-      />
+          }
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        />
+      )}
 
       {/* ── Input bar — single flat row like the reference ── */}
       <View style={styles.inputBar}>
@@ -166,7 +213,7 @@ export default function ChatScreen() {
         </TouchableOpacity>
 
         {/* Light blue mic / blue send circle — switches on typing */}
-        <TouchableOpacity onPress={sendMessage} activeOpacity={0.85} style={styles.sendBtn}>
+        <TouchableOpacity onPress={handleSend} activeOpacity={0.85} style={styles.sendBtn}>
           <LinearGradient
             colors={input.trim() ? GRADIENTS.primary : ['#7dd3fc', '#38bdf8']}
             style={styles.sendBtnInner}
@@ -201,8 +248,12 @@ const styles = StyleSheet.create({
   contactInfo: { flex: 1 },
   contactName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   onlineText:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
-  onlineGreen: { color: COLORS.green },
   iconBtn:     { padding: 4 },
+
+  // ── Center states (loading / empty) ───────────────────────────────────────
+  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  emptyEmoji:  { fontSize: 48, marginBottom: 8 },
+  emptyText:   { fontSize: 16, color: COLORS.sub, fontWeight: '500' },
 
   // ── Messages ──────────────────────────────────────────────────────────────
   messageList:  { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
@@ -303,11 +354,4 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center', justifyContent: 'center',
   },
-
-  // Kept for legacy — unused now
-  inputCard:    {},
-  inputActions: {},
-  attachBtn:    {},
-  searchPill:   {},
-  searchPillText: {},
 });
