@@ -1,5 +1,5 @@
 // ─── Screen: Chats ───────────────────────────────────────────────────────────
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   TextInput, Modal, Pressable, ScrollView, Animated,
@@ -15,6 +15,7 @@ import { useChats, ChatPreview } from '../hooks/useChats';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
+import { db } from '../config/firebase';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
@@ -319,11 +320,14 @@ export default function ChatsScreen() {
   const [sheetOpen,  setSheetOpen]  = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // Extra member info fetched from Firestore for users not in device contacts
+  const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string }>>(new Map());
+
   // Animated width: 0 → 1 (multiplied by max width in style)
   const searchAnim = useRef(new Animated.Value(0)).current;
   const searchRef  = useRef<TextInput>(null);
 
-  // Build contacts map: userId → displayName (for resolveDisplayName)
+  // Build contacts map: phone → displayName (for resolveDisplayName)
   const contactsMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const c of contacts) {
@@ -333,14 +337,57 @@ export default function ChatsScreen() {
   }, [contacts]);
 
   // Build firestoreUsers map: userId → { displayName, phone }
-  // We use contacts data as our source since useContacts already queried Firestore users
+  // Combine contacts data + any extra member info we fetched
   const firestoreUsersMap = useMemo(() => {
     const map = new Map<string, { displayName: string; phone: string }>();
     for (const c of contacts) {
       map.set(c.userId, { displayName: c.displayName, phone: c.phone });
     }
+    // Merge in any extra member info from chats
+    for (const [uid, info] of memberInfo) {
+      if (!map.has(uid)) map.set(uid, info);
+    }
     return map;
-  }, [contacts]);
+  }, [contacts, memberInfo]);
+
+  // Fetch Firestore user info for chat members not in contacts
+  useEffect(() => {
+    if (!chats.length || !userId) return;
+
+    const knownIds = new Set(contacts.map((c) => c.userId));
+    const unknownIds = new Set<string>();
+
+    for (const chat of chats) {
+      for (const memberId of chat.members) {
+        if (memberId !== userId && !knownIds.has(memberId) && !memberInfo.has(memberId)) {
+          unknownIds.add(memberId);
+        }
+      }
+    }
+
+    if (unknownIds.size === 0) return;
+
+    // Fetch user docs for unknown members
+    (async () => {
+      const { doc, getDoc } = await import('firebase/firestore');
+      const newInfo = new Map(memberInfo);
+
+      for (const uid of unknownIds) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            newInfo.set(uid, {
+              displayName: data.displayName ?? data.phone ?? uid,
+              phone: data.phone ?? '',
+            });
+          }
+        } catch (_) {}
+      }
+
+      setMemberInfo(newInfo);
+    })();
+  }, [chats, userId, contacts]);
 
   // Resolve display name for a chat
   const getDisplayName = (chat: ChatPreview): string => {

@@ -1,12 +1,22 @@
 // ─── Firebase Configuration (Hybrid) ──────────────────────────────────────────
 // Auth:      @react-native-firebase/auth (native module, supports phone OTP)
-// Firestore: firebase/firestore (JS SDK, works fine cross-platform)
+// Firestore: firebase/firestore (JS SDK)
 //
-// This hybrid approach uses RNFirebase only for auth (which needs native phone
-// verification) and keeps the lighter JS SDK for Firestore queries.
+// IMPORTANT: The JS SDK Firestore and @react-native-firebase/auth are separate
+// Firebase instances. The JS Firestore won't see the native auth state.
+// For this to work, Firestore rules must allow access without auth checks,
+// OR we need to bridge the auth. We use signInWithCustomToken approach below.
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import {
+  initializeAuth,
+  getReactNativePersistence,
+  signInWithCredential,
+  PhoneAuthProvider,
+} from 'firebase/auth';
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+import rnAuth from '@react-native-firebase/auth';
 
 // Re-export RNFirebase auth for use in useAuth hook
 export { default as rnAuth } from '@react-native-firebase/auth';

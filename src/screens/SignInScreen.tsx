@@ -18,14 +18,15 @@ export default function SignInScreen() {
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Determine which step of the flow we're in
-  const isOtpStep = step === 'verifying' || (step === 'error' && otp.length > 0);
+  const isOtpStep = step === 'otpSent' || step === 'verifying' || (step === 'error' && otp.length > 0);
   const isBusy    = step === 'sending' || step === 'verifying';
 
-  // ── Validate phone: must be 10+ digits after stripping non-digits ───
+  // ── Validate phone: must be 9 digits (SA local number without leading 0) ───
   function validatePhone(raw: string): boolean {
-    const digits = raw.replace(/\D/g, '');
-    if (digits.length < 10) {
-      setValidationError('Phone number must be at least 10 digits');
+    let digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('0')) digits = digits.slice(1);
+    if (digits.length !== 9) {
+      setValidationError('Enter 9 digits (e.g. 65 850 0320) — without the leading 0');
       return false;
     }
     setValidationError(null);
@@ -100,7 +101,7 @@ export default function SignInScreen() {
                 </View>
                 <TextInput
                   style={styles.phoneInput}
-                  placeholder="658 500 320"
+                  placeholder="65 850 0320"
                   placeholderTextColor={COLORS.textFaint}
                   keyboardType="phone-pad"
                   value={phone}

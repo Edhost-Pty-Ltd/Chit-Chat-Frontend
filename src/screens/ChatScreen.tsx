@@ -9,6 +9,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../components';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages, FireMessage } from '../hooks/useMessages';
@@ -37,6 +38,7 @@ export default function ChatScreen() {
   const navigation = useNavigation<NavProp>();
   const route      = useRoute<RoutePropType>();
   const { chatId, displayName, isGroup } = route.params;
+  const insets     = useSafeAreaInsets();
 
   // ── Auth — get current user ID ──────────────────────────────────
   const { user } = useAuth();
@@ -182,7 +184,7 @@ export default function ChatScreen() {
       )}
 
       {/* ── Input bar — single flat row like the reference ── */}
-      <View style={styles.inputBar}>
+      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
 
         {/* + button far left */}
         <TouchableOpacity style={styles.inputSideBtn}>
@@ -314,7 +316,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 8,
     paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 10,
     gap: 4,
     ...GLASS.header,
   },

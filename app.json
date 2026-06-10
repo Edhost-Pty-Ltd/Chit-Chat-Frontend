@@ -21,6 +21,10 @@
               "RNFBApp",
               "RNFBAuth"
             ]
+          },
+          "android": {
+            "enableProguardInReleaseBuilds": false,
+            "ndkVersion": "27.1.12297006"
           }
         }
       ],

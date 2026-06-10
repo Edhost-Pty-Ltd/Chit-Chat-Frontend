@@ -10,7 +10,7 @@ import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-export type AuthStep = 'idle' | 'sending' | 'verifying' | 'done' | 'error';
+export type AuthStep = 'idle' | 'sending' | 'otpSent' | 'verifying' | 'done' | 'error';
 
 export function useAuth() {
   const [user,    setUser]    = useState<FirebaseAuthTypes.User | null>(null);
@@ -40,7 +40,7 @@ export function useAuth() {
       console.log('[useAuth] Sending OTP to:', phone);
       const confirmation = await auth().signInWithPhoneNumber(phone);
       setConfirm(confirmation);
-      setStep('verifying');
+      setStep('otpSent');
       return true;
     } catch (err: any) {
       console.error('[useAuth] sendOTP error:', err.code, err.message);

@@ -34,16 +34,18 @@ export function useChats(userId: string | null) {
 
     setLoading(true);
 
-    // Real-time listener — fires every time any chat updates
+    // Real-time listener — simplified query (no orderBy) for debugging
     const q = query(
       collection(db, 'chats'),
       where('members', 'array-contains', userId),
-      orderBy('lastMessage.timestamp', 'desc'),
     );
+
+    console.log('[useChats] Subscribing for userId:', userId);
 
     const unsub = onSnapshot(
       q,
       (snap) => {
+        console.log('[useChats] Snapshot received, docs:', snap.docs.length);
         const result: ChatPreview[] = snap.docs.map((doc) => {
           const d = doc.data();
           const lm = d.lastMessage;
@@ -64,6 +66,7 @@ export function useChats(userId: string | null) {
         setLoading(false);
       },
       (err) => {
+        console.error('[useChats] Error:', err.code, err.message);
         setError(err.message);
         setLoading(false);
       },
