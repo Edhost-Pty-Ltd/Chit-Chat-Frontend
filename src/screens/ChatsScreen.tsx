@@ -436,13 +436,40 @@ export default function ChatsScreen() {
   const renderChat = ({ item }: { item: ChatPreview }) => {
     const displayName = getDisplayName(item);
     const isGroup = item.type === 'group';
+    const isVoiceNote = item.lastMessage === '[Voice Note]';
+
+    // Determine sender prefix for the last message preview
+    const getSenderPrefix = (): string => {
+      if (!item.lastSenderId) return '';
+      if (item.lastSenderId === userId) return 'You: ';
+      if (isGroup) {
+        const senderInfo = firestoreUsersMap.get(item.lastSenderId);
+        if (senderInfo) return `${senderInfo.displayName.split(' ')[0]}: `;
+      }
+      return '';
+    };
+
+    const renderLastMessagePreview = () => {
+      if (isVoiceNote) {
+        const prefix = getSenderPrefix();
+        return (
+          <View style={styles.voiceNotePreview}>
+            {prefix ? <Text style={styles.chatPreview}>{prefix}</Text> : null}
+            <Ionicons name="mic" size={14} color={COLORS.sub} style={{ marginRight: 3 }} />
+            <Text style={styles.chatPreview}>Voice Note</Text>
+          </View>
+        );
+      }
+      return <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMessage}</Text>;
+    };
+
     return (
       <TouchableOpacity style={styles.chatCard} activeOpacity={0.75}
         onPress={() => navigation.navigate('Chat', { chatId: item.chatId, displayName, isGroup })}>
         <ChatAvatar displayName={displayName} />
         <View style={styles.chatMeta}>
           <Text style={styles.chatName} numberOfLines={1}>{displayName}</Text>
-          <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMessage}</Text>
+          {renderLastMessagePreview()}
         </View>
         <View style={styles.chatRight}>
           <Text style={styles.chatTime}>{formatTime(item.timestamp)}</Text>
@@ -652,6 +679,7 @@ const styles = StyleSheet.create({
   chatMeta:    { flex: 1, gap: 4 },
   chatName:    { fontSize: 14, fontWeight: '700', color: COLORS.text },
   chatPreview: { fontSize: 12, color: COLORS.sub, lineHeight: 18 },
+  voiceNotePreview: { flexDirection: 'row', alignItems: 'center' },
   chatRight:   { alignItems: 'flex-end', gap: 6, minWidth: 50 },
   chatTime:    { fontSize: 11, color: COLORS.sub },
   badge:       { width: 20, height: 20, borderRadius: 10, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center' },

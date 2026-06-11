@@ -9,6 +9,7 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import {
   initializeAuth,
   getReactNativePersistence,
@@ -35,5 +36,8 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Firestore — real-time database (JS SDK)
 export const db = getFirestore(app);
+
+// Firebase Storage — voice note audio file hosting
+export const storage = getStorage(app);
 
 export default app;

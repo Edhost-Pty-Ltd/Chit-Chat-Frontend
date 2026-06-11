@@ -19,6 +19,7 @@ export interface FireMessage {
   type:       'text' | 'image' | 'voice';
   timestamp:  Date | null;
   readBy:     string[];
+  duration:   number | null;
 }
 
 export function useMessages(chatId: string | null, currentUserId: string | null) {
@@ -53,6 +54,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
               ? (d.timestamp as Timestamp).toDate()
               : null,
             readBy: d.readBy ?? [],
+            duration: d.duration ?? null,
           };
         });
         setMessages(msgs);

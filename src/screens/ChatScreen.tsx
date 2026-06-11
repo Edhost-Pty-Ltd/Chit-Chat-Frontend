@@ -1,23 +1,37 @@
 // ─── Screen: Chat ────────────────────────────────────────────────────────────
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
   StyleSheet, TextInput, KeyboardAvoidingView, Platform,
-  ActivityIndicator,
+  ActivityIndicator, PanResponder, Linking,
+  GestureResponderEvent, PanResponderGestureState,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { collection, doc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { Avatar } from '../components';
+import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
+import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages, FireMessage } from '../hooks/useMessages';
+import { useVoicePlayer } from '../hooks/useVoicePlayer';
+import { useVoiceRecorder, RecordingResult } from '../hooks/useVoiceRecorder';
+import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
+import { sendVoiceMessage } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
 type NavProp       = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
 type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
+
+// ── Constants ────────────────────────────────────────────────────────────────
+const CANCEL_THRESHOLD_DP = 50;
+const MAX_UPLOAD_RETRIES = 3;
+const PERMISSION_MESSAGE_DURATION_MS = 3000;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,8 +61,37 @@ export default function ChatScreen() {
   // ── Messages — real-time Firestore stream ───────────────────────
   const { messages, loading, sendMessage } = useMessages(chatId, userId);
 
+  // ── Voice player — single-active-player management ─────────────
+  const player = useVoicePlayer();
+
+  // ── Voice recorder ─────────────────────────────────────────────
+  const recorder = useVoiceRecorder();
+
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
+
+  // ── Upload & retry state ────────────────────────────────────────
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const pendingRecordingRef = useRef<RecordingResult | null>(null);
+
+  // ── Permission message state ────────────────────────────────────
+  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
+  const [showSettingsButton, setShowSettingsButton] = useState(false);
+  const permissionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Track if recording was cancelled via gesture ─────────────────
+  const isCancelledRef = useRef(false);
+
+  // ── Stop playback on unmount / navigation away ──────────────────
+  useEffect(() => {
+    return () => {
+      player.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Auto-scroll when new messages arrive ────────────────────────
   useEffect(() => {
@@ -56,6 +99,87 @@ export default function ChatScreen() {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [messages.length]);
+
+  // ── Handle permission denied states ─────────────────────────────
+  useEffect(() => {
+    if (recorder.state.permissionDenied) {
+      if (recorder.state.permissionDeniedPermanently) {
+        // Show button to open device settings
+        setShowSettingsButton(true);
+        setPermissionMessage('Microphone access is required for voice notes. Please enable it in Settings.');
+      } else {
+        // Show informational message for 3 seconds
+        setShowSettingsButton(false);
+        setPermissionMessage('Microphone access is required for voice notes.');
+        if (permissionTimerRef.current) clearTimeout(permissionTimerRef.current);
+        permissionTimerRef.current = setTimeout(() => {
+          setPermissionMessage(null);
+        }, PERMISSION_MESSAGE_DURATION_MS);
+      }
+    }
+
+    return () => {
+      if (permissionTimerRef.current) clearTimeout(permissionTimerRef.current);
+    };
+  }, [recorder.state.permissionDenied, recorder.state.permissionDeniedPermanently]);
+
+  // ── Upload and send voice note ──────────────────────────────────
+  const handleVoiceUploadAndSend = useCallback(async (result: RecordingResult) => {
+    if (!userId) return;
+
+    // Generate a unique messageId
+    const messageId = doc(collection(db, 'chats', chatId, 'messages')).id;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+    pendingRecordingRef.current = result;
+
+    try {
+      const uploadResult = await uploadVoiceNote(
+        result.uri,
+        chatId,
+        messageId,
+        (progress: UploadProgress) => {
+          setUploadProgress(progress.percentage);
+        },
+      );
+
+      // Upload succeeded — send the voice message
+      await sendVoiceMessage(chatId, userId, uploadResult.downloadUrl, result.durationMs);
+
+      // Clear upload state
+      setIsUploading(false);
+      setUploadProgress(0);
+      setRetryCount(0);
+      pendingRecordingRef.current = null;
+    } catch (error: any) {
+      console.error('[ChatScreen] Voice upload failed:', error);
+      setIsUploading(false);
+
+      // Determine if retry is available
+      const isNetworkError = error.message === 'UPLOAD_TIMEOUT' ||
+        error.code === 'storage/retry-limit-exceeded' ||
+        error.code === 'storage/canceled';
+
+      if (isNetworkError && retryCount < MAX_UPLOAD_RETRIES - 1) {
+        setUploadError('Upload failed. Tap to retry.');
+      } else {
+        setUploadError('Upload could not be completed.');
+        pendingRecordingRef.current = null;
+      }
+    }
+  }, [userId, chatId, retryCount]);
+
+  // ── Retry upload handler ────────────────────────────────────────
+  const handleRetryUpload = useCallback(() => {
+    const pendingResult = pendingRecordingRef.current;
+    if (!pendingResult || retryCount >= MAX_UPLOAD_RETRIES) return;
+
+    setRetryCount((prev) => prev + 1);
+    setUploadError(null);
+    handleVoiceUploadAndSend(pendingResult);
+  }, [retryCount, handleVoiceUploadAndSend]);
 
   // ── Send handler ────────────────────────────────────────────────
   const handleSend = async () => {
@@ -68,6 +192,63 @@ export default function ChatScreen() {
     }
   };
 
+  // ── PanResponder for mic button ─────────────────────────────────
+  const micPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+
+    onPanResponderGrant: (_evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
+      // Long-press start: begin recording
+      isCancelledRef.current = false;
+      recorder.startRecording();
+    },
+
+    onPanResponderMove: (_evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
+      // Check if finger moved ≥50dp from start position
+      const distance = Math.sqrt(gestureState.dx * gestureState.dx + gestureState.dy * gestureState.dy);
+      if (distance >= CANCEL_THRESHOLD_DP && !isCancelledRef.current) {
+        isCancelledRef.current = true;
+        recorder.cancelRecording();
+      }
+    },
+
+    onPanResponderRelease: async (_evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
+      // If already cancelled via gesture, nothing to do
+      if (isCancelledRef.current) return;
+
+      // Stop recording and get result
+      const result = await recorder.stopRecording();
+      if (result) {
+        // Successful recording — upload and send
+        handleVoiceUploadAndSend(result);
+      }
+      // If result is null, recording was too short — hook already reset state
+    },
+
+    onPanResponderTerminate: () => {
+      // Another component took over — cancel recording
+      if (!isCancelledRef.current) {
+        isCancelledRef.current = true;
+        recorder.cancelRecording();
+      }
+    },
+  }), [recorder, handleVoiceUploadAndSend]);
+
+  // ── Dismiss permission message ──────────────────────────────────
+  const dismissPermissionMessage = useCallback(() => {
+    setPermissionMessage(null);
+    setShowSettingsButton(false);
+  }, []);
+
+  // ── Open device settings ────────────────────────────────────────
+  const handleOpenSettings = useCallback(() => {
+    Linking.openSettings();
+    dismissPermissionMessage();
+  }, [dismissPermissionMessage]);
+
+  // ── Check if recording is active ────────────────────────────────
+  const isRecording = recorder.state.status === 'recording';
+
   // ── Render a single message bubble ──────────────────────────────
   const renderMessage = ({ item }: { item: FireMessage }) => {
     const isOut = item.senderId === userId;
@@ -76,43 +257,66 @@ export default function ChatScreen() {
 
         {/* Received bubble — vivid blue gradient */}
         {!isOut && (
-          <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
-            {item.type === 'image' && (
-              <View style={styles.imagePlaceholder}>
-                <Ionicons name="image-outline" size={32} color="rgba(255,255,255,0.70)" />
-              </View>
-            )}
-            {item.type === 'voice' && (
-              <View style={styles.voiceRow}>
-                <TouchableOpacity style={styles.playBtn}>
-                  <Ionicons name="play" size={14} color="#fff" />
-                </TouchableOpacity>
-                <View style={styles.waveform}>
-                  {Array.from({ length: 20 }).map((_, i) => (
-                    <View key={i} style={[styles.waveBar, { height: 4 + Math.abs(Math.sin(i * 0.7) * 12) }]} />
-                  ))}
+          item.type === 'voice' && item.voiceUrl && item.duration ? (
+            <VoiceMessageBubble
+              messageId={item.messageId}
+              voiceUrl={item.voiceUrl}
+              durationMs={item.duration}
+              isOutgoing={false}
+              playerState={player.state}
+              onPlay={() => {
+                if (player.state.activeMessageId === item.messageId && player.state.status === 'paused') {
+                  player.resume();
+                } else {
+                  player.play(item.voiceUrl!, item.messageId, item.duration!);
+                }
+              }}
+              onPause={() => player.pause()}
+            />
+          ) : (
+            <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+              {item.type === 'image' && (
+                <View style={styles.imagePlaceholder}>
+                  <Ionicons name="image-outline" size={32} color="rgba(255,255,255,0.70)" />
                 </View>
-                <Text style={styles.waveDurationIn}>0:12</Text>
-              </View>
-            )}
-            {item.text && <Text style={styles.bubbleTextIn}>{item.text}</Text>}
-            <Text style={styles.timeIn}>{formatTime(item.timestamp)}</Text>
-          </LinearGradient>
+              )}
+              {item.text && <Text style={styles.bubbleTextIn}>{item.text}</Text>}
+              <Text style={styles.timeIn}>{formatTime(item.timestamp)}</Text>
+            </LinearGradient>
+          )
         )}
 
         {/* Sent bubble — white frosted glass */}
         {isOut && (
-          <View style={[styles.bubble, styles.bubbleOut]}>
-            {item.text && <Text style={styles.bubbleTextOut}>{item.text}</Text>}
-            <View style={styles.timeOutRow}>
-              <Text style={styles.timeOut}>{formatTime(item.timestamp)}</Text>
-              <Ionicons
-                name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
-                size={13}
-                color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
-              />
+          item.type === 'voice' && item.voiceUrl && item.duration ? (
+            <VoiceMessageBubble
+              messageId={item.messageId}
+              voiceUrl={item.voiceUrl}
+              durationMs={item.duration}
+              isOutgoing={true}
+              playerState={player.state}
+              onPlay={() => {
+                if (player.state.activeMessageId === item.messageId && player.state.status === 'paused') {
+                  player.resume();
+                } else {
+                  player.play(item.voiceUrl!, item.messageId, item.duration!);
+                }
+              }}
+              onPause={() => player.pause()}
+            />
+          ) : (
+            <View style={[styles.bubble, styles.bubbleOut]}>
+              {item.text && <Text style={styles.bubbleTextOut}>{item.text}</Text>}
+              <View style={styles.timeOutRow}>
+                <Text style={styles.timeOut}>{formatTime(item.timestamp)}</Text>
+                <Ionicons
+                  name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
+                  size={13}
+                  color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
+                />
+              </View>
             </View>
-          </View>
+          )
         )}
       </View>
     );
@@ -183,52 +387,121 @@ export default function ChatScreen() {
         />
       )}
 
+      {/* ── Permission denied message ── */}
+      {permissionMessage && (
+        <View style={styles.permissionBanner}>
+          <Text style={styles.permissionText}>{permissionMessage}</Text>
+          {showSettingsButton ? (
+            <View style={styles.permissionActions}>
+              <TouchableOpacity onPress={handleOpenSettings} style={styles.permissionBtn}>
+                <Text style={styles.permissionBtnText}>Open Settings</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
+                <Ionicons name="close" size={18} color={COLORS.sub} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
+              <Ionicons name="close" size={18} color={COLORS.sub} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* ── Upload error / retry banner ── */}
+      {uploadError && (
+        <View style={styles.uploadErrorBanner}>
+          <Ionicons name="alert-circle-outline" size={16} color={COLORS.missed} />
+          <Text style={styles.uploadErrorText}>{uploadError}</Text>
+          {pendingRecordingRef.current && retryCount < MAX_UPLOAD_RETRIES && (
+            <TouchableOpacity onPress={handleRetryUpload} style={styles.retryBtn}>
+              <Text style={styles.retryBtnText}>Retry</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => { setUploadError(null); pendingRecordingRef.current = null; }} style={styles.permissionDismissBtn}>
+            <Ionicons name="close" size={18} color={COLORS.sub} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ── Input bar — single flat row like the reference ── */}
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
 
-        {/* + button far left */}
-        <TouchableOpacity style={styles.inputSideBtn}>
-          <Ionicons name="add" size={26} color={COLORS.sub} />
-        </TouchableOpacity>
+        {isRecording ? (
+          /* ── Recording overlay replaces input bar content ── */
+          <>
+            <View style={styles.recordingOverlayContainer}>
+              <VoiceRecordingOverlay
+                durationMs={recorder.state.durationMs}
+                isWarning={recorder.state.isWarning}
+                onCancel={() => recorder.cancelRecording()}
+              />
+            </View>
+          </>
+        ) : (
+          /* ── Normal input bar content ── */
+          <>
+            {/* + button far left */}
+            <TouchableOpacity style={styles.inputSideBtn}>
+              <Ionicons name="add" size={26} color={COLORS.sub} />
+            </TouchableOpacity>
 
-        {/* Glass text field — flex fills the space */}
-        <View style={styles.inputFieldWrap}>
-          <TextInput
-            style={styles.inputField}
-            placeholder="Message"
-            placeholderTextColor={COLORS.sub}
-            value={input}
-            onChangeText={setInput}
-            multiline
-            maxLength={500}
-          />
-        </View>
+            {/* Glass text field — flex fills the space */}
+            <View style={styles.inputFieldWrap}>
+              <TextInput
+                style={styles.inputField}
+                placeholder="Message"
+                placeholderTextColor={COLORS.sub}
+                value={input}
+                onChangeText={setInput}
+                multiline
+                maxLength={500}
+              />
+            </View>
 
-        {/* Emoji icon */}
-        <TouchableOpacity style={styles.inputSideBtn}>
-          <Ionicons name="happy-outline" size={22} color={COLORS.sub} />
-        </TouchableOpacity>
+            {/* Emoji icon */}
+            <TouchableOpacity style={styles.inputSideBtn}>
+              <Ionicons name="happy-outline" size={22} color={COLORS.sub} />
+            </TouchableOpacity>
 
-        {/* Camera icon */}
-        <TouchableOpacity style={styles.inputSideBtn}>
-          <Ionicons name="camera-outline" size={22} color={COLORS.sub} />
-        </TouchableOpacity>
+            {/* Camera icon */}
+            <TouchableOpacity style={styles.inputSideBtn}>
+              <Ionicons name="camera-outline" size={22} color={COLORS.sub} />
+            </TouchableOpacity>
+          </>
+        )}
 
-        {/* Light blue mic / blue send circle — switches on typing */}
-        <TouchableOpacity onPress={handleSend} activeOpacity={0.85} style={styles.sendBtn}>
-          <LinearGradient
-            colors={input.trim() ? GRADIENTS.primary : ['#7dd3fc', '#38bdf8']}
-            style={styles.sendBtnInner}
-          >
-            <Ionicons
-              name={input.trim() ? 'send' : 'mic'}
-              size={19}
-              color="#fff"
-            />
-          </LinearGradient>
-        </TouchableOpacity>
+        {/* Mic / Send button — always visible at the end */}
+        {input.trim() ? (
+          /* Send button when typing */
+          <TouchableOpacity onPress={handleSend} activeOpacity={0.85} style={styles.sendBtn}>
+            <LinearGradient
+              colors={GRADIENTS.primary}
+              style={styles.sendBtnInner}
+            >
+              <Ionicons name="send" size={19} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : (
+          /* Mic button with PanResponder when not typing */
+          <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
+            <LinearGradient
+              colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
+              style={styles.sendBtnInner}
+            >
+              <Ionicons name="mic" size={19} color="#fff" />
+            </LinearGradient>
+          </View>
+        )}
 
       </View>
+
+      {/* ── Upload progress indicator ── */}
+      {isUploading && (
+        <View style={styles.uploadProgressBar}>
+          <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` }]} />
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -304,11 +577,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center', marginBottom: 4,
   },
-  voiceRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
-  playBtn:       { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
-  waveform:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2, height: 24 },
-  waveBar:       { width: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.60)' },
-  waveDurationIn:{ fontSize: 11, color: 'rgba(255,255,255,0.80)' },
 
   // ── Input bar ─────────────────────────────────────────────────────────────
   inputBar: {
@@ -354,5 +622,84 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 21,
     alignItems: 'center', justifyContent: 'center',
+  },
+
+  // ── Recording overlay ─────────────────────────────────────────────────────
+  recordingOverlayContainer: {
+    flex: 1,
+  },
+
+  // ── Permission banner ─────────────────────────────────────────────────────
+  permissionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  permissionText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.text,
+  },
+  permissionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  permissionBtn: {
+    backgroundColor: COLORS.blue,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  permissionBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  permissionDismissBtn: {
+    padding: 4,
+  },
+
+  // ── Upload error banner ───────────────────────────────────────────────────
+  uploadErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239,68,68,0.10)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  uploadErrorText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.text,
+  },
+  retryBtn: {
+    backgroundColor: COLORS.blue,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  retryBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // ── Upload progress ───────────────────────────────────────────────────────
+  uploadProgressBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  uploadProgressFill: {
+    height: 3,
+    backgroundColor: COLORS.blue,
   },
 });

@@ -142,3 +142,56 @@ export async function markChatAsRead(
     // Non-critical
   }
 }
+
+// ── Send a voice message with unread increments ───────────────────────────────
+export async function sendVoiceMessage(
+  chatId: string,
+  senderId: string,
+  voiceUrl: string,
+  durationMs: number,
+): Promise<{ success: boolean; messageId: string }> {
+  try {
+    // Fetch chat to get member list
+    const chatRef  = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return { success: false, messageId: '' };
+
+    const members: string[] = chatSnap.data().members ?? [];
+    const otherMembers = members.filter((id) => id !== senderId);
+
+    // Use a batch write for atomicity
+    const batch = writeBatch(db);
+
+    // 1. Create message document
+    const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+    batch.set(msgRef, {
+      messageId: msgRef.id,
+      senderId,
+      text:      null,
+      imageUrl:  null,
+      voiceUrl,
+      type:      'voice',
+      duration:  durationMs,
+      timestamp: serverTimestamp(),
+      readBy:    [senderId],
+    });
+
+    // 2. Update chat lastMessage + increment unread for other members
+    const unreadUpdates = Object.fromEntries(
+      otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
+    );
+
+    batch.update(chatRef, {
+      'lastMessage.text':      '[Voice Note]',
+      'lastMessage.senderId':  senderId,
+      'lastMessage.timestamp': serverTimestamp(),
+      ...unreadUpdates,
+    });
+
+    await batch.commit();
+    return { success: true, messageId: msgRef.id };
+  } catch (err) {
+    console.error('sendVoiceMessage error:', err);
+    return { success: false, messageId: '' };
+  }
+}
