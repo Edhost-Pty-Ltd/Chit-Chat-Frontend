@@ -44,3 +44,9 @@ yarn-error.*
 # Uncomment the lines below if you don't want to commit these:
 # google-services.json
 # GoogleService-Info.plist
+
+# AI tool configs (local/personal)
+.agents/
+.claude/
+.kiro/skills/
+skills-lock.json
