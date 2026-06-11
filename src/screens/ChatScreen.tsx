@@ -1,16 +1,17 @@
 // ─── Screen: Chat ────────────────────────────────────────────────────────────
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity,
+  View, FlatList, TouchableOpacity, ScrollView,
   StyleSheet, TextInput, KeyboardAvoidingView, Platform,
-  ActivityIndicator, PanResponder, Linking,
+  ActivityIndicator, PanResponder, Linking, Modal, Alert,
   GestureResponderEvent, PanResponderGestureState,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { collection, doc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Avatar } from '../components';
@@ -24,6 +25,7 @@ import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
+import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 
 type NavProp       = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
 type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
@@ -32,6 +34,13 @@ type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
 const CANCEL_THRESHOLD_DP = 50;
 const MAX_UPLOAD_RETRIES = 3;
 const PERMISSION_MESSAGE_DURATION_MS = 3000;
+
+// Common emoji picks
+const EMOJI_LIST = [
+  '😀','😂','😍','🥰','😎','😢','😡','👍','👎','❤️',
+  '🔥','🎉','🙏','💯','✅','🤣','😅','🤔','👀','💪',
+  '🥳','😭','🫡','💀','🤯','🫶','😴','🤩','😏','🙈',
+];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +61,10 @@ export default function ChatScreen() {
   const navigation = useNavigation<NavProp>();
   const route      = useRoute<RoutePropType>();
   const { chatId, displayName, isGroup } = route.params;
-  const insets     = useSafeAreaInsets();
+  const { FG }     = useForeground();
+  const { fontFamily, textColor } = useTypography();
+
+  const [permission, requestPermission] = useCameraPermissions();
 
   // ── Auth — get current user ID ──────────────────────────────────
   const { user } = useAuth();
@@ -69,6 +81,9 @@ export default function ChatScreen() {
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   // ── Upload & retry state ────────────────────────────────────────
   const [uploadProgress, setUploadProgress] = useState<number>(0);
@@ -104,11 +119,9 @@ export default function ChatScreen() {
   useEffect(() => {
     if (recorder.state.permissionDenied) {
       if (recorder.state.permissionDeniedPermanently) {
-        // Show button to open device settings
         setShowSettingsButton(true);
         setPermissionMessage('Microphone access is required for voice notes. Please enable it in Settings.');
       } else {
-        // Show informational message for 3 seconds
         setShowSettingsButton(false);
         setPermissionMessage('Microphone access is required for voice notes.');
         if (permissionTimerRef.current) clearTimeout(permissionTimerRef.current);
@@ -127,7 +140,6 @@ export default function ChatScreen() {
   const handleVoiceUploadAndSend = useCallback(async (result: RecordingResult) => {
     if (!userId) return;
 
-    // Generate a unique messageId
     const messageId = doc(collection(db, 'chats', chatId, 'messages')).id;
 
     setIsUploading(true);
@@ -145,10 +157,8 @@ export default function ChatScreen() {
         },
       );
 
-      // Upload succeeded — send the voice message
       await sendVoiceMessage(chatId, userId, uploadResult.downloadUrl, result.durationMs);
 
-      // Clear upload state
       setIsUploading(false);
       setUploadProgress(0);
       setRetryCount(0);
@@ -157,7 +167,6 @@ export default function ChatScreen() {
       console.error('[ChatScreen] Voice upload failed:', error);
       setIsUploading(false);
 
-      // Determine if retry is available
       const isNetworkError = error.message === 'UPLOAD_TIMEOUT' ||
         error.code === 'storage/retry-limit-exceeded' ||
         error.code === 'storage/canceled';
@@ -182,13 +191,14 @@ export default function ChatScreen() {
   }, [retryCount, handleVoiceUploadAndSend]);
 
   // ── Send handler ────────────────────────────────────────────────
-  const handleSend = async () => {
-    const trimmed = input.trim();
+  const handleSend = async (text?: string) => {
+    const trimmed = (text ?? input).trim();
     if (!trimmed) return;
 
     const success = await sendMessage(trimmed);
     if (success) {
       setInput('');
+      setShowEmoji(false);
     }
   };
 
@@ -198,13 +208,11 @@ export default function ChatScreen() {
     onMoveShouldSetPanResponder: () => true,
 
     onPanResponderGrant: (_evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-      // Long-press start: begin recording
       isCancelledRef.current = false;
       recorder.startRecording();
     },
 
     onPanResponderMove: (_evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
-      // Check if finger moved ≥50dp from start position
       const distance = Math.sqrt(gestureState.dx * gestureState.dx + gestureState.dy * gestureState.dy);
       if (distance >= CANCEL_THRESHOLD_DP && !isCancelledRef.current) {
         isCancelledRef.current = true;
@@ -213,20 +221,15 @@ export default function ChatScreen() {
     },
 
     onPanResponderRelease: async (_evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-      // If already cancelled via gesture, nothing to do
       if (isCancelledRef.current) return;
 
-      // Stop recording and get result
       const result = await recorder.stopRecording();
       if (result) {
-        // Successful recording — upload and send
         handleVoiceUploadAndSend(result);
       }
-      // If result is null, recording was too short — hook already reset state
     },
 
     onPanResponderTerminate: () => {
-      // Another component took over — cancel recording
       if (!isCancelledRef.current) {
         isCancelledRef.current = true;
         recorder.cancelRecording();
@@ -246,6 +249,37 @@ export default function ChatScreen() {
     dismissPermissionMessage();
   }, [dismissPermissionMessage]);
 
+  // ── Camera / gallery / documents ────────────────────────────────
+  const openCamera = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Camera', 'Camera is not available on web.');
+      return;
+    }
+    const { granted } = permission ?? await requestPermission();
+    if (!granted) { Alert.alert('Permission needed', 'Allow camera access to take photos.'); return; }
+    setCameraOpen(true);
+  };
+
+  const openGallery = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      allowsMultipleSelection: true,
+      quality: 0.85,
+    });
+    if (!result.canceled) {
+      setShowAttach(false);
+      Alert.alert('Photos selected', `${result.assets.length} item(s) selected.\n(Would be sent as messages)`);
+    }
+  };
+
+  const openDocuments = async () => {
+    const result = await DocumentPicker.getDocumentAsync({ multiple: true });
+    if (!result.canceled) {
+      setShowAttach(false);
+      Alert.alert('Files selected', `${result.assets.length} file(s) selected.\n(Would be sent as messages)`);
+    }
+  };
+
   // ── Check if recording is active ────────────────────────────────
   const isRecording = recorder.state.status === 'recording';
 
@@ -254,8 +288,6 @@ export default function ChatScreen() {
     const isOut = item.senderId === userId;
     return (
       <View style={[styles.msgRow, isOut ? styles.msgRowOut : styles.msgRowIn]}>
-
-        {/* Received bubble — vivid blue gradient */}
         {!isOut && (
           item.type === 'voice' && item.voiceUrl && item.duration ? (
             <VoiceMessageBubble
@@ -277,16 +309,14 @@ export default function ChatScreen() {
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
               {item.type === 'image' && (
                 <View style={styles.imagePlaceholder}>
-                  <Ionicons name="image-outline" size={32} color="rgba(255,255,255,0.70)" />
+                  <AppIcon name="image-outline" size={32} color="rgba(255,255,255,0.70)" fixedColor />
                 </View>
               )}
-              {item.text && <Text style={styles.bubbleTextIn}>{item.text}</Text>}
-              <Text style={styles.timeIn}>{formatTime(item.timestamp)}</Text>
+              {item.text && <AppText fixedColor style={styles.bubbleTextIn}>{item.text}</AppText>}
+              <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
             </LinearGradient>
           )
         )}
-
-        {/* Sent bubble — white frosted glass */}
         {isOut && (
           item.type === 'voice' && item.voiceUrl && item.duration ? (
             <VoiceMessageBubble
@@ -306,13 +336,14 @@ export default function ChatScreen() {
             />
           ) : (
             <View style={[styles.bubble, styles.bubbleOut]}>
-              {item.text && <Text style={styles.bubbleTextOut}>{item.text}</Text>}
+              {item.text && <AppText style={[styles.bubbleTextOut, { color: textColor, fontFamily }]}>{item.text}</AppText>}
               <View style={styles.timeOutRow}>
-                <Text style={styles.timeOut}>{formatTime(item.timestamp)}</Text>
-                <Ionicons
+                <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
+                <AppIcon
                   name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
                   size={13}
                   color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
+                  fixedColor
                 />
               </View>
             </View>
@@ -332,104 +363,117 @@ export default function ChatScreen() {
   // ── Empty state ─────────────────────────────────────────────────
   const renderEmpty = () => (
     <View style={styles.centerState}>
-      <Text style={styles.emptyEmoji}>👋</Text>
-      <Text style={styles.emptyText}>Say hello!</Text>
+      <AppText style={styles.emptyEmoji}>👋</AppText>
+      <AppText style={styles.emptyText}>Say hello!</AppText>
     </View>
   );
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+    <>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <AppBg />
 
-      {/* ── Top bar ── */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={COLORS.blue} />
-        </TouchableOpacity>
+        {/* ── Top bar ── */}
+        <View style={styles.topBar}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <AppIcon name="chevron-back" size={24} color={COLORS.blue} fixedColor />
+          </TouchableOpacity>
 
-        <Avatar initials={getInitials(displayName)} color={COLORS.blue} size={40} />
+          <Avatar initials={getInitials(displayName)} color={COLORS.blue} size={40} />
 
-        <View style={styles.contactInfo}>
-          <Text style={styles.contactName}>{displayName}</Text>
-          <Text style={styles.onlineText}>
-            {isGroup ? 'Group chat' : 'Tap here for info'}
-          </Text>
-        </View>
+          <View style={styles.contactInfo}>
+            <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
+            <AppText style={styles.onlineText}>
+              {isGroup ? 'Group chat' : 'Tap here for info'}
+            </AppText>
+          </View>
 
-        <TouchableOpacity style={styles.iconBtn}>
-          <Ionicons name="call-outline" size={20} color={COLORS.blue} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn}>
-          <Ionicons name="videocam-outline" size={20} color={COLORS.blue} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn}>
-          <Ionicons name="ellipsis-vertical" size={20} color={COLORS.blue} />
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Messages ── */}
-      {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(item) => item.messageId}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.messageList}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <View style={styles.datePillWrap}>
-              <View style={styles.datePill}>
-                <Text style={styles.datePillText}>Today</Text>
-              </View>
-            </View>
-          }
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-        />
-      )}
-
-      {/* ── Permission denied message ── */}
-      {permissionMessage && (
-        <View style={styles.permissionBanner}>
-          <Text style={styles.permissionText}>{permissionMessage}</Text>
-          {showSettingsButton ? (
-            <View style={styles.permissionActions}>
-              <TouchableOpacity onPress={handleOpenSettings} style={styles.permissionBtn}>
-                <Text style={styles.permissionBtnText}>Open Settings</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
-                <Ionicons name="close" size={18} color={COLORS.sub} />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
-              <Ionicons name="close" size={18} color={COLORS.sub} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {/* ── Upload error / retry banner ── */}
-      {uploadError && (
-        <View style={styles.uploadErrorBanner}>
-          <Ionicons name="alert-circle-outline" size={16} color={COLORS.missed} />
-          <Text style={styles.uploadErrorText}>{uploadError}</Text>
-          {pendingRecordingRef.current && retryCount < MAX_UPLOAD_RETRIES && (
-            <TouchableOpacity onPress={handleRetryUpload} style={styles.retryBtn}>
-              <Text style={styles.retryBtnText}>Retry</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity onPress={() => { setUploadError(null); pendingRecordingRef.current = null; }} style={styles.permissionDismissBtn}>
-            <Ionicons name="close" size={18} color={COLORS.sub} />
+          <TouchableOpacity style={styles.iconBtn}>
+            <AppIcon name="call-outline" size={20} color={COLORS.blue} fixedColor />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn}>
+            <AppIcon name="videocam-outline" size={20} color={COLORS.blue} fixedColor />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn}>
+            <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} />
           </TouchableOpacity>
         </View>
-      )}
 
-      {/* ── Input bar — single flat row like the reference ── */}
-      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        {/* ── Messages ── */}
+        {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={(item) => item.messageId}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.messageList}
+            showsVerticalScrollIndicator={false}
+            ListHeaderComponent={
+              <View style={styles.datePillWrap}>
+                <View style={styles.datePill}>
+                  <AppText style={styles.datePillText}>Today</AppText>
+                </View>
+              </View>
+            }
+            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          />
+        )}
 
-        {isRecording ? (
-          /* ── Recording overlay replaces input bar content ── */
-          <>
+        {/* ── Permission denied message ── */}
+        {permissionMessage && (
+          <View style={styles.permissionBanner}>
+            <AppText style={styles.permissionText}>{permissionMessage}</AppText>
+            {showSettingsButton ? (
+              <View style={styles.permissionActions}>
+                <TouchableOpacity onPress={handleOpenSettings} style={styles.permissionBtn}>
+                  <AppText fixedColor style={styles.permissionBtnText}>Open Settings</AppText>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
+                  <AppIcon name="close" size={18} color={COLORS.sub} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
+                <AppIcon name="close" size={18} color={COLORS.sub} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* ── Upload error / retry banner ── */}
+        {uploadError && (
+          <View style={styles.uploadErrorBanner}>
+            <AppIcon name="alert-circle-outline" size={16} color={COLORS.missed} fixedColor />
+            <AppText style={styles.uploadErrorText}>{uploadError}</AppText>
+            {pendingRecordingRef.current && retryCount < MAX_UPLOAD_RETRIES && (
+              <TouchableOpacity onPress={handleRetryUpload} style={styles.retryBtn}>
+                <AppText fixedColor style={styles.retryBtnText}>Retry</AppText>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => { setUploadError(null); pendingRecordingRef.current = null; }} style={styles.permissionDismissBtn}>
+              <AppIcon name="close" size={18} color={COLORS.sub} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── Emoji panel ── */}
+        {showEmoji && (
+          <View style={[styles.emojiPanel, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
+            <ScrollView horizontal={false} showsVerticalScrollIndicator={false}>
+              <View style={styles.emojiGrid}>
+                {EMOJI_LIST.map((e) => (
+                  <TouchableOpacity key={e} style={styles.emojiItem} onPress={() => handleSend(e)}>
+                    <AppText fixedColor style={styles.emojiChar}>{e}</AppText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        )}
+
+        {/* ── Input bar ── */}
+        <View style={styles.inputBar}>
+          {isRecording ? (
             <View style={styles.recordingOverlayContainer}>
               <VoiceRecordingOverlay
                 durationMs={recorder.state.durationMs}
@@ -437,87 +481,121 @@ export default function ChatScreen() {
                 onCancel={() => recorder.cancelRecording()}
               />
             </View>
-          </>
-        ) : (
-          /* ── Normal input bar content ── */
-          <>
-            {/* + button far left */}
-            <TouchableOpacity style={styles.inputSideBtn}>
-              <Ionicons name="add" size={26} color={COLORS.sub} />
-            </TouchableOpacity>
+          ) : (
+            <>
+              {/* Attachments */}
+              <TouchableOpacity style={styles.inputSideBtn} onPress={() => { setShowEmoji(false); setShowAttach(true); }}>
+                <AppIcon name="add" size={26} color={COLORS.sub} />
+              </TouchableOpacity>
 
-            {/* Glass text field — flex fills the space */}
-            <View style={styles.inputFieldWrap}>
-              <TextInput
-                style={styles.inputField}
-                placeholder="Message"
-                placeholderTextColor={COLORS.sub}
-                value={input}
-                onChangeText={setInput}
-                multiline
-                maxLength={500}
-              />
+              {/* Text field + emoji */}
+              <View style={styles.inputFieldWrap}>
+                <TextInput
+                  style={[styles.inputField, { color: FG.primary }]}
+                  placeholder="Message"
+                  placeholderTextColor={FG.faint}
+                  value={input}
+                  onChangeText={setInput}
+                  multiline
+                  maxLength={500}
+                  onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
+                />
+                <TouchableOpacity style={styles.emojiBtn} onPress={() => { setShowAttach(false); setShowEmoji((e) => !e); }}>
+                  <AppIcon name={showEmoji ? 'keypad-outline' : 'happy-outline'} size={22} color={COLORS.sub} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Camera */}
+              <TouchableOpacity style={styles.inputSideBtn} onPress={openCamera}>
+                <AppIcon name="camera-outline" size={22} color={COLORS.sub} />
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* Mic / Send button */}
+          {input.trim() ? (
+            <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
+              <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
+                <AppIcon name="send" size={19} color="#fff" fixedColor />
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : (
+            <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
+              <LinearGradient
+                colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
+                style={styles.sendBtnInner}
+              >
+                <AppIcon name="mic" size={19} color="#fff" fixedColor />
+              </LinearGradient>
             </View>
+          )}
+        </View>
 
-            {/* Emoji icon */}
-            <TouchableOpacity style={styles.inputSideBtn}>
-              <Ionicons name="happy-outline" size={22} color={COLORS.sub} />
-            </TouchableOpacity>
-
-            {/* Camera icon */}
-            <TouchableOpacity style={styles.inputSideBtn}>
-              <Ionicons name="camera-outline" size={22} color={COLORS.sub} />
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* Mic / Send button — always visible at the end */}
-        {input.trim() ? (
-          /* Send button when typing */
-          <TouchableOpacity onPress={handleSend} activeOpacity={0.85} style={styles.sendBtn}>
-            <LinearGradient
-              colors={GRADIENTS.primary}
-              style={styles.sendBtnInner}
-            >
-              <Ionicons name="send" size={19} color="#fff" />
-            </LinearGradient>
-          </TouchableOpacity>
-        ) : (
-          /* Mic button with PanResponder when not typing */
-          <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
-            <LinearGradient
-              colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
-              style={styles.sendBtnInner}
-            >
-              <Ionicons name="mic" size={19} color="#fff" />
-            </LinearGradient>
+        {/* ── Upload progress indicator ── */}
+        {isUploading && (
+          <View style={styles.uploadProgressBar}>
+            <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` }]} />
           </View>
         )}
+      </KeyboardAvoidingView>
 
-      </View>
-
-      {/* ── Upload progress indicator ── */}
-      {isUploading && (
-        <View style={styles.uploadProgressBar}>
-          <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` }]} />
+      {/* ── Attachments sheet ── */}
+      <Modal visible={showAttach} transparent animationType="slide" onRequestClose={() => setShowAttach(false)}>
+        <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setShowAttach(false)} />
+        <View style={[styles.attachSheet, { backgroundColor: FG.glassBg }]}>
+          <View style={styles.attachHandle} />
+          <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share</AppText>
+          <View style={styles.attachGrid}>
+            {[
+              { icon: 'images-outline'   as const, label: 'Photos',   action: openGallery },
+              { icon: 'document-outline' as const, label: 'Files',    action: openDocuments },
+              { icon: 'camera-outline'   as const, label: 'Camera',   action: () => { setShowAttach(false); openCamera(); } },
+              { icon: 'mic-outline'      as const, label: 'Audio',    action: () => Alert.alert('Audio', 'Record audio message') },
+              { icon: 'location-outline' as const, label: 'Location', action: () => Alert.alert('Location', 'Share location') },
+              { icon: 'person-outline'   as const, label: 'Contact',  action: () => Alert.alert('Contact', 'Share contact') },
+            ].map((item) => (
+              <TouchableOpacity key={item.label} style={[styles.attachItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                onPress={item.action} activeOpacity={0.8}>
+                <View style={styles.attachIconWrap}>
+                  <AppIcon name={item.icon} size={26} color={COLORS.blue} fixedColor />
+                </View>
+                <AppText style={[styles.attachLabel, { color: textColor, fontFamily }]}>{item.label}</AppText>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
+      </Modal>
+
+      {/* ── In-app camera ── */}
+      {cameraOpen && Platform.OS !== 'web' && (
+        <Modal visible animationType="slide" onRequestClose={() => setCameraOpen(false)}>
+          <View style={{ flex: 1, backgroundColor: '#000' }}>
+            <CameraView style={{ flex: 1 }} facing="back">
+              <View style={styles.cameraControls}>
+                <TouchableOpacity onPress={() => setCameraOpen(false)} style={styles.cameraCloseBtn}>
+                  <AppIcon name="close" size={28} color="#fff" fixedColor />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cameraShutterBtn} onPress={() => setCameraOpen(false)}>
+                  <View style={styles.cameraShutter} />
+                </TouchableOpacity>
+                <View style={{ width: 52 }} />
+              </View>
+            </CameraView>
+          </View>
+        </Modal>
       )}
-    </KeyboardAvoidingView>
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  // ── Top bar ───────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+
   topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 52,
-    paddingBottom: 12,
-    paddingHorizontal: 14,
-    gap: 8,
-    ...GLASS.header,
+    flexDirection: 'row', alignItems: 'center',
+    paddingTop: 52, paddingBottom: 12, paddingHorizontal: 14,
+    gap: 8, ...GLASS.header,
   },
   backBtn:     { padding: 2 },
   contactInfo: { flex: 1 },
@@ -533,40 +611,19 @@ const styles = StyleSheet.create({
   // ── Messages ──────────────────────────────────────────────────────────────
   messageList:  { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
   datePillWrap: { alignItems: 'center', marginBottom: 10 },
-  datePill: {
-    ...GLASS.card,
-    borderRadius: RADIUS.full,
-    paddingHorizontal: 16, paddingVertical: 5,
-  },
+  datePill:     { ...GLASS.card, borderRadius: RADIUS.full, paddingHorizontal: 16, paddingVertical: 5 },
   datePillText: { fontSize: 11, color: COLORS.sub },
 
   msgRow:    { flexDirection: 'row', marginBottom: 4 },
   msgRowIn:  { justifyContent: 'flex-start' },
   msgRowOut: { justifyContent: 'flex-end' },
 
-  bubble: {
-    maxWidth: '75%',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
+  bubble:       { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleIn:     { borderBottomLeftRadius: 4, ...SHADOW.card },
+  bubbleTextIn: { fontSize: 14, color: '#fff', lineHeight: 20 },
+  timeIn:       { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
 
-  // Received — vivid blue gradient
-  bubbleIn: {
-    borderBottomLeftRadius: 4,
-    ...SHADOW.card,
-  },
-  bubbleTextIn:  { fontSize: 14, color: '#fff', lineHeight: 20 },
-  timeIn:        { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
-
-  // Sent — clear glass, sky blue shows through
-  bubbleOut: {
-    backgroundColor: 'rgba(255,255,255,0.28)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.50)',
-    borderBottomRightRadius: 4,
-    ...SHADOW.card,
-  },
+  bubbleOut:     { backgroundColor: 'rgba(255,255,255,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.50)', borderBottomRightRadius: 4, ...SHADOW.card },
   bubbleTextOut: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
   timeOutRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
   timeOut:       { fontSize: 10, color: COLORS.sub },
@@ -578,51 +635,54 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginBottom: 4,
   },
 
-  // ── Input bar ─────────────────────────────────────────────────────────────
   inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 8,
+    flexDirection: 'row', alignItems: 'flex-end',
+    paddingHorizontal: 8, paddingVertical: 8,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+    gap: 4, ...GLASS.header,
+  },
+  inputSideBtn:   { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
+  inputFieldWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', ...GLASS.card, borderRadius: RADIUS.xl, paddingHorizontal: 14, height: 42 },
+  inputField:     { flex: 1, fontSize: 14, color: COLORS.text, padding: 0, margin: 0, height: 42 },
+  emojiBtn:       { paddingLeft: 8, alignSelf: 'center' },
+  sendBtn:        { width: 42, height: 42, borderRadius: 21, ...SHADOW.button },
+  sendBtnInner:   { flex: 1, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+
+  // Emoji panel
+  emojiPanel: {
+    maxHeight: 160, borderTopWidth: 1,
     paddingVertical: 8,
-    gap: 4,
-    ...GLASS.header,
   },
+  emojiGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 2 },
+  emojiItem: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  emojiChar: { fontSize: 26 },
 
-  // Side icon buttons (+, emoji, camera)
-  inputSideBtn: {
-    width: 38, height: 42,
-    alignItems: 'center', justifyContent: 'center',
+  // Attachment sheet
+  attachOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.30)' },
+  attachSheet: {
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    paddingHorizontal: 20, paddingTop: 12,
+    ...SHADOW.glow,
   },
+  attachHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(30,156,240,0.30)', alignSelf: 'center', marginBottom: 14 },
+  attachTitle:  { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 16 },
+  attachGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  attachItem: {
+    width: 90, paddingVertical: 14, alignItems: 'center', gap: 8,
+    borderRadius: RADIUS.lg, borderWidth: 1, ...SHADOW.card,
+  },
+  attachIconWrap: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(30,156,240,0.10)', alignItems: 'center', justifyContent: 'center' },
+  attachLabel:    { fontSize: 11, fontWeight: '600', color: COLORS.sub, textAlign: 'center' },
 
-  // Glass text field
-  inputFieldWrap: {
-    flex: 1,
-    ...GLASS.card,
-    borderRadius: RADIUS.xl,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    minHeight: 42,
-    maxHeight: 110,
-    justifyContent: 'center',
+  // Camera UI
+  cameraControls: {
+    position: 'absolute', bottom: 40, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center',
   },
-  inputField: {
-    fontSize: 14,
-    color: COLORS.text,
-    padding: 0,
-    maxHeight: 90,
-  },
-
-  // Green circle send / mic button
-  sendBtn: {
-    width: 42, height: 42,
-    borderRadius: 21,
-    ...SHADOW.button,
-  },
-  sendBtnInner: {
-    flex: 1,
-    borderRadius: 21,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  cameraCloseBtn:  { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  cameraShutterBtn:{ alignItems: 'center', justifyContent: 'center' },
+  cameraShutter:   { width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
 
   // ── Recording overlay ─────────────────────────────────────────────────────
   recordingOverlayContainer: {

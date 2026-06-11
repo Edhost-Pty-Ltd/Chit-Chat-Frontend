@@ -1,15 +1,15 @@
-// ─── Screen: Calls ───────────────────────────────────────────────────────────
+﻿// ─── Screen: Calls ───────────────────────────────────────────────────────────
 import React, { useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  View, FlatList, TouchableOpacity, StyleSheet,
   Modal, Pressable, ScrollView, Linking, Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { Avatar, BottomNav } from '../components';
 import { CALLS, CONTACTS } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { Call, Contact } from '../types';
+import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
 
 type CallTab = 'All' | 'Missed' | 'Voicemail';
 
@@ -25,9 +25,9 @@ const PHONE_NUMBERS: Record<string, string> = {
 };
 
 function CallDirectionIcon({ type, missed }: { type: string; missed?: boolean }) {
-  if (missed)              return <Ionicons name="call"             size={14} color={COLORS.missed} />;
-  if (type === 'Outgoing') return <Ionicons name="arrow-up-outline" size={14} color={COLORS.green}  />;
-  return                          <Ionicons name="arrow-down-outline" size={14} color={COLORS.blue}  />;
+  if (missed)              return <AppIcon name="call"              size={14} color={COLORS.missed} fixedColor />;
+  if (type === 'Outgoing') return <AppIcon name="arrow-up-outline"  size={14} color={COLORS.green}  fixedColor />;
+  return                          <AppIcon name="arrow-down-outline" size={14} color={COLORS.blue}   fixedColor />;
 }
 
 // ─── Contact Picker Sheet ────────────────────────────────────────────────────
@@ -45,23 +45,22 @@ function ContactPickerSheet({
       onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose} />
       <View style={styles.sheet}>
-        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill}
-          start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
+        <AppBg />
         <View style={styles.handle} />
 
         {/* Sheet header */}
         <View style={styles.sheetHeader}>
           <TouchableOpacity onPress={onClose} style={styles.iconPad}>
-            <Ionicons name="close" size={22} color={COLORS.sub} />
+            <AppIcon name="close" size={22} color={COLORS.sub} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={styles.sheetTitle}>Call a contact</Text>
-            <Text style={styles.sheetSub}>{CONTACTS.length} contacts</Text>
+            <AppText style={styles.sheetTitle}>Call a contact</AppText>
+            <AppText style={styles.sheetSub}>{CONTACTS.length} contacts</AppText>
           </View>
-          <Ionicons name="search-outline" size={22} color={COLORS.sub} style={styles.iconPad} />
+          <AppIcon name="search-outline" size={22} color={COLORS.sub} style={styles.iconPad} />
         </View>
 
-        <Text style={styles.sectionHint}>SELECT CONTACT TO CALL</Text>
+        <AppText style={styles.sectionHint}>SELECT CONTACT TO CALL</AppText>
 
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
           {CONTACTS.map((c) => (
@@ -69,16 +68,14 @@ function ContactPickerSheet({
               activeOpacity={0.75} onPress={() => onSelect(c)}>
               <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
               <View style={styles.contactMeta}>
-                <Text style={styles.contactName}>{c.name}</Text>
-                <Text style={styles.contactNum}>
+                <AppText style={styles.contactName}>{c.name}</AppText>
+                <AppText style={styles.contactNum}>
                   {PHONE_NUMBERS[c.name] ?? 'No number'}
-                </Text>
+                </AppText>
               </View>
               {/* Light blue call button */}
               <TouchableOpacity onPress={() => onSelect(c)} activeOpacity={0.8}>
-                <View style={styles.callBtn}>
-                  <Ionicons name="call" size={17} color={COLORS.blue} />
-                </View>
+                <AppIcon glass tileSize={38} name="call" size={17} color={COLORS.blue} />
               </TouchableOpacity>
             </TouchableOpacity>
           ))}
@@ -92,6 +89,7 @@ function ContactPickerSheet({
 export default function CallsScreen() {
   const [tab,         setTab]         = useState<CallTab>('All');
   const [pickerOpen,  setPickerOpen]  = useState(false);
+  const { FG } = useForeground();
 
   const filtered = tab === 'Missed' ? CALLS.filter((c) => c.missed) : CALLS;
 
@@ -113,19 +111,19 @@ export default function CallsScreen() {
   };
 
   const renderCall = ({ item }: { item: Call }) => (
-    <View style={styles.callCard}>
+    <View style={[styles.callCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
       <Avatar initials={item.avatar} color={item.color} size={48} />
       <View style={styles.callMeta}>
-        <Text style={styles.callName}>{item.name}</Text>
+        <AppText style={[styles.callName, { color: FG.primary }]}>{item.name}</AppText>
         <View style={styles.callSubRow}>
           <CallDirectionIcon type={item.type} missed={item.missed} />
-          <Text style={[styles.callType, item.missed && styles.callTypeMissed]}>{item.type}</Text>
+          <AppText fixedColor={item.missed} style={[styles.callType, item.missed && styles.callTypeMissed, { color: FG.secondary }]}>{item.type}</AppText>
         </View>
       </View>
       <View style={styles.callRight}>
-        <Text style={styles.callTime}>{item.time}</Text>
+        <AppText style={[styles.callTime, { color: FG.secondary }]}>{item.time}</AppText>
         <TouchableOpacity style={styles.infoBtn}>
-          <Ionicons name="information-circle-outline" size={20} color={COLORS.blue} />
+          <AppIcon name="information-circle-outline" size={20} color={COLORS.blue} />
         </TouchableOpacity>
       </View>
     </View>
@@ -133,7 +131,7 @@ export default function CallsScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
 
       <ContactPickerSheet
         visible={pickerOpen}
@@ -142,12 +140,12 @@ export default function CallsScreen() {
       />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Calls</Text>
+        <AppText style={[styles.title, { color: FG.primary }]}>Calls</AppText>
         {/* New call button — phone icon + "+" as a clean pill */}
         <TouchableOpacity activeOpacity={0.85} onPress={() => setPickerOpen(true)}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.newCallBtn}>
-            <Ionicons name="call" size={16} color="#fff" />
-            <Text style={styles.newCallPlus}>+</Text>
+            <AppIcon name="call" size={16} color="#fff" fixedColor />
+            <AppText style={styles.newCallPlus}>+</AppText>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -159,13 +157,13 @@ export default function CallsScreen() {
           return isActive ? (
             <TouchableOpacity key={t} onPress={() => setTab(t)} activeOpacity={0.85}>
               <LinearGradient colors={GRADIENTS.primary} style={styles.tabPill}>
-                <Text style={styles.tabTextActive}>{t}</Text>
+                <AppText style={styles.tabTextActive}>{t}</AppText>
               </LinearGradient>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity key={t} onPress={() => setTab(t)}
               style={styles.tabPillInactive} activeOpacity={0.7}>
-              <Text style={styles.tabTextInactive}>{t}</Text>
+              <AppText style={styles.tabTextInactive}>{t}</AppText>
             </TouchableOpacity>
           );
         })}
@@ -180,8 +178,8 @@ export default function CallsScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Ionicons name="call-outline" size={48} color={COLORS.sub} />
-            <Text style={styles.emptyText}>No missed calls</Text>
+            <AppIcon name="call-outline" size={48} color={COLORS.sub} />
+            <AppText style={styles.emptyText}>No missed calls</AppText>
           </View>
         }
       />

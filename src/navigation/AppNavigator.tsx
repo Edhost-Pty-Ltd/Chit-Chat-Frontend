@@ -1,12 +1,13 @@
 // ─── Navigation ──────────────────────────────────────────────────────────────
 import React from 'react';
-import { ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../types';
-import { GRADIENTS, COLORS } from '../types/theme';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../context/AuthContext';
+import { COLORS } from '../types/theme';
+import { AppBg } from '../context/ThemeContext';
 
+import SplashScreen      from '../screens/SplashScreen';
 import SignInScreen       from '../screens/SignInScreen';
 import ChatsScreen        from '../screens/ChatsScreen';
 import ChatScreen         from '../screens/ChatScreen';
@@ -17,25 +18,34 @@ import CalendarScreen     from '../screens/CalendarScreen';
 import NotesScreen        from '../screens/NotesScreen';
 import CloudBackupScreen  from '../screens/CloudBackupScreen';
 import SettingsScreen     from '../screens/SettingsScreen';
+import AppearanceScreen  from '../screens/AppearanceScreen';
+import ProfileScreen     from '../screens/ProfileScreen';
+import CreateAccountScreen from '../screens/CreateAccountScreen';
+import VideoCallScreen    from '../screens/VideoCallScreen';
+import AudioCallScreen    from '../screens/AudioCallScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
-  const { user, loading } = useAuth();
+  const { isSignedIn, loading } = useAuth();
 
-  // Show loading spinner while auth state is being determined
+  // While hydrating from AsyncStorage show a branded splash
   if (loading) {
     return (
-      <LinearGradient colors={GRADIENTS.bg} style={styles.loading}>
+      <View style={styles.splash}>
+        <AppBg />
         <ActivityIndicator size="large" color={COLORS.blue} />
-      </LinearGradient>
+      </View>
     );
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {user ? (
-        // Authenticated stack
+    <Stack.Navigator
+      initialRouteName={isSignedIn ? 'Chats' : 'Splash'}
+      screenOptions={{ headerShown: false }}
+    >
+      {isSignedIn ? (
+        // ── Authenticated screens ────────────────────────────────────────
         <>
           <Stack.Screen name="Chats"       component={ChatsScreen}       />
           <Stack.Screen name="Chat"        component={ChatScreen}        />
@@ -46,19 +56,23 @@ export default function AppNavigator() {
           <Stack.Screen name="Notes"       component={NotesScreen}       />
           <Stack.Screen name="CloudBackup" component={CloudBackupScreen} />
           <Stack.Screen name="Settings"    component={SettingsScreen}    />
+          <Stack.Screen name="Appearance"      component={AppearanceScreen}      />
+          <Stack.Screen name="Profile"         component={ProfileScreen}         />
+          <Stack.Screen name="VideoCall"       component={VideoCallScreen}       />
+          <Stack.Screen name="AudioCall"       component={AudioCallScreen}       />
         </>
       ) : (
-        // Unauthenticated stack
-        <Stack.Screen name="SignIn" component={SignInScreen} />
+        // ── Unauthenticated screens ──────────────────────────────────────
+        <>
+          <Stack.Screen name="Splash"         component={SplashScreen}         />
+          <Stack.Screen name="SignIn"         component={SignInScreen}          />
+          <Stack.Screen name="CreateAccount"  component={CreateAccountScreen}   />
+        </>
       )}
     </Stack.Navigator>
   );
 }
 
 const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  splash: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
