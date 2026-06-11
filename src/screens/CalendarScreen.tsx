@@ -1,11 +1,13 @@
-// ─── Screen: Calendar ────────────────────────────────────────────────────────
+﻿// ─── Screen: Calendar ────────────────────────────────────────────────────────
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons'; // kept for IoniconName type
 import { AppHeader } from '../components';
 import { CALENDAR_EVENTS } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
+
+import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
 
 const DAYS   = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTHS = ['January','February','March','April','May','June','July',
@@ -21,6 +23,7 @@ function buildGrid(year: number, month: number) {
 }
 
 export default function CalendarScreen() {
+  const { FG } = useForeground();
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -36,7 +39,7 @@ export default function CalendarScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
       <AppHeader title="Calendar" showBack rightIcon="+" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -44,18 +47,18 @@ export default function CalendarScreen() {
         {/* Month nav */}
         <View style={styles.monthNav}>
           <TouchableOpacity onPress={prevMonth} style={styles.navArrow}>
-            <Ionicons name="chevron-back" size={22} color={COLORS.blue} />
+            <AppIcon name="chevron-back" size={22} color={COLORS.blue} />
           </TouchableOpacity>
-          <Text style={styles.monthLabel}>{MONTHS[month]} {year}</Text>
+          <AppText style={[styles.monthLabel, { color: FG.primary }]}>{MONTHS[month]} {year}</AppText>
           <TouchableOpacity onPress={nextMonth} style={styles.navArrow}>
-            <Ionicons name="chevron-forward" size={22} color={COLORS.blue} />
+            <AppIcon name="chevron-forward" size={22} color={COLORS.blue} />
           </TouchableOpacity>
         </View>
 
         {/* Calendar grid — glass card */}
         <View style={styles.calCard}>
           <View style={styles.daysHeader}>
-            {DAYS.map((d, i) => <Text key={i} style={styles.dayLabel}>{d}</Text>)}
+            {DAYS.map((d, i) => <AppText key={i} style={styles.dayLabel}>{d}</AppText>)}
           </View>
           <View style={styles.grid}>
             {cells.map((day, i) => {
@@ -66,11 +69,11 @@ export default function CalendarScreen() {
                 <TouchableOpacity key={i} style={styles.cell} onPress={() => setSel(day)} activeOpacity={0.7}>
                   {isSelected ? (
                     <LinearGradient colors={GRADIENTS.primary} style={styles.dayCircle}>
-                      <Text style={styles.dayNumSelected}>{day}</Text>
+                      <AppText style={styles.dayNumSelected}>{day}</AppText>
                     </LinearGradient>
                   ) : (
                     <View style={[styles.dayCircle, isToday && styles.todayCircle]}>
-                      <Text style={[styles.dayNum, isToday && styles.todayNum]}>{day}</Text>
+                      <AppText style={[styles.dayNum, isToday && styles.todayNum, { color: FG.primary }]}>{day}</AppText>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -80,22 +83,22 @@ export default function CalendarScreen() {
         </View>
 
         {/* Events for selected day */}
-        <Text style={styles.eventSectionLabel}>{MONTHS[month].slice(0, 3)} {sel}, {year}</Text>
+        <AppText style={styles.eventSectionLabel}>{MONTHS[month].slice(0, 3)} {sel}, {year}</AppText>
 
         {dayEvents.length === 0 ? (
           <View style={styles.noEvents}>
-            <Ionicons name="calendar-outline" size={40} color={COLORS.sub} />
-            <Text style={styles.noEventsText}>No events today</Text>
+            <AppIcon name="calendar-outline" size={40} color={COLORS.sub} />
+            <AppText style={styles.noEventsText}>No events today</AppText>
           </View>
         ) : dayEvents.map((ev) => (
           // Each event = glass card
           <View key={ev.id} style={styles.eventCard}>
             <View style={[styles.eventAccent, { backgroundColor: ev.color }]} />
             <View style={styles.eventBody}>
-              <Text style={styles.eventTitle}>{ev.title}</Text>
+              <AppText style={styles.eventTitle}>{ev.title}</AppText>
               <View style={styles.eventTimeRow}>
-                <Ionicons name="time-outline" size={13} color={COLORS.sub} />
-                <Text style={styles.eventTime}>{ev.startTime} – {ev.endTime}</Text>
+                <AppIcon name="time-outline" size={13} color={COLORS.sub} />
+                <AppText style={styles.eventTime}>{ev.startTime} – {ev.endTime}</AppText>
               </View>
             </View>
           </View>

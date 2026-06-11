@@ -1,53 +1,61 @@
-// ─── Screen: Status ──────────────────────────────────────────────────────────
+﻿// ─── Screen: Status ──────────────────────────────────────────────────────────
 import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { Avatar, BottomNav } from '../components';
+import { Avatar, BottomNav, UserAvatar } from '../components';
 import { STATUSES } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { StatusUpdate } from '../types';
 
+import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+
 export default function StatusScreen() {
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
   const renderStatus = ({ item }: { item: StatusUpdate }) => (
-    <TouchableOpacity style={styles.statusCard} activeOpacity={0.75}>
-      {/* Gradient ring */}
+    <TouchableOpacity
+      style={[styles.statusCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+      activeOpacity={0.75}
+    >
       <LinearGradient colors={[item.color, COLORS.blue]} style={styles.ring} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <View style={styles.ringInner}>
+        <View style={[styles.ringInner, { backgroundColor: 'transparent' }]}>
           <Avatar initials={item.avatar} color={item.color} size={44} />
         </View>
       </LinearGradient>
       <View style={styles.statusMeta}>
-        <Text style={styles.statusName}>{item.name}</Text>
-        <Text style={styles.statusTime}>{item.time}</Text>
+        <AppText style={[styles.statusName, { color: textColor, fontFamily }]}>{item.name}</AppText>
+        <AppText style={[styles.statusTime, { color: FG.secondary }]}>{item.time}</AppText>
       </View>
-      <Ionicons name="ellipsis-vertical" size={18} color={COLORS.sub} />
+      <AppIcon name="ellipsis-vertical" size={18} color={FG.secondary} />
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Updates</Text>
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Updates</AppText>
       </View>
 
       {/* My Status glass card */}
-      <TouchableOpacity style={styles.myCard} activeOpacity={0.8}>
+      <TouchableOpacity
+        style={[styles.myCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+        activeOpacity={0.8}
+      >
         <View style={styles.meAvatarWrap}>
-          <Avatar initials="ME" color={COLORS.blue} size={52} />
+          <UserAvatar size={52} />
           <LinearGradient colors={GRADIENTS.primary} style={styles.mePlusBadge}>
-            <Ionicons name="add" size={12} color="#fff" />
+            <AppIcon name="add" size={12} color="#fff" fixedColor />
           </LinearGradient>
         </View>
         <View style={styles.myCardText}>
-          <Text style={styles.myCardTitle}>My Status</Text>
-          <Text style={styles.myCardSub}>Tap to add status update</Text>
+          <AppText style={[styles.myCardTitle, { color: FG.primary }]}>My Status</AppText>
+          <AppText style={[styles.myCardSub, { color: FG.secondary }]}>Tap to add status update</AppText>
         </View>
       </TouchableOpacity>
 
-      <Text style={styles.sectionText}>RECENT UPDATES</Text>
+      <AppText style={[styles.sectionText, { color: FG.secondary }]}>RECENT UPDATES</AppText>
 
       <FlatList
         data={STATUSES}

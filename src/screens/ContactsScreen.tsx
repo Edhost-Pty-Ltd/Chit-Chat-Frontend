@@ -1,19 +1,22 @@
-// ─── Screen: Contacts ────────────────────────────────────────────────────────
+﻿// ─── Screen: Contacts ────────────────────────────────────────────────────────
 import React, { useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
+import { View, FlatList, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../components';
 import { CONTACTS } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { Contact, RootStackParamList } from '../types';
 
+import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Contacts'>;
 
 export default function ContactsScreen() {
   const navigation = useNavigation<NavProp>();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
   const [query, setQuery] = useState('');
 
   const data = query.trim()
@@ -28,14 +31,14 @@ export default function ContactsScreen() {
     >
       <Avatar initials={item.avatar} color={item.color} size={48} status={item.status} />
       <View style={styles.contactMeta}>
-        <Text style={styles.contactName}>{item.name}</Text>
-        <Text style={styles.contactSub} numberOfLines={1}>
+        <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{item.name}</AppText>
+        <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>
           {item.status === 'online' ? 'Online' : item.lastMsg}
-        </Text>
+        </AppText>
       </View>
       <TouchableOpacity activeOpacity={0.85}>
         <LinearGradient colors={GRADIENTS.primary} style={styles.callBtn}>
-          <Ionicons name="call" size={15} color="#fff" />
+          <AppIcon name="call" size={15} color="#fff" fixedColor />
         </LinearGradient>
       </TouchableOpacity>
     </TouchableOpacity>
@@ -43,20 +46,20 @@ export default function ContactsScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Contacts</Text>
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Contacts</AppText>
         <TouchableOpacity activeOpacity={0.85}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.addBtn}>
-            <Ionicons name="add" size={20} color="#fff" />
+            <AppIcon name="add" size={20} color="#fff" fixedColor />
           </LinearGradient>
         </TouchableOpacity>
       </View>
 
       {/* Glass search bar */}
       <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={16} color={COLORS.sub} />
+        <AppIcon name="search-outline" size={16} color={COLORS.sub} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search contacts"
@@ -75,8 +78,8 @@ export default function ContactsScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Ionicons name="people-outline" size={48} color={COLORS.sub} />
-            <Text style={styles.emptyText}>No contacts found</Text>
+            <AppIcon name="people-outline" size={48} color={COLORS.sub} />
+            <AppText style={styles.emptyText}>No contacts found</AppText>
           </View>
         }
       />

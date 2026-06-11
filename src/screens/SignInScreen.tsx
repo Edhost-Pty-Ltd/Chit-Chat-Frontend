@@ -1,211 +1,679 @@
 // ─── Screen: Sign In ─────────────────────────────────────────────────────────
-import React, { useState } from 'react';
+//
+// Design:
+//   • Full glass-effect screen — no hero gradient bar, no orb bubble
+//   • App logo (icon.png) centred at the top, no text taglines
+//   • Country-code picker + local number input → 6-digit OTP
+//
+// Stub behaviour (swap sendOtp / verifyOtp for your real backend):
+//   • Any phone number is accepted
+//   • Code "123456" always passes
+//
+import React, { useState, useRef, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
+  View, Text, TextInput, TouchableOpacity, Image,
+  StyleSheet, ScrollView, KeyboardAvoidingView,
+  Platform, ActivityIndicator, Modal, FlatList,
+  SafeAreaView,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 
-type NavProp = NativeStackNavigationProp<RootStackParamList, 'SignIn'>;
+// ─── Stub API helpers ─────────────────────────────────────────────────────────
 
-export default function SignInScreen() {
-  const navigation = useNavigation<NavProp>();
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(false);
-  const [showPass, setShowPass] = useState(false);
+async function sendOtp(_phone: string): Promise<void> {
+  // TODO: call your backend / Firebase / Twilio
+  await new Promise<void>((r) => setTimeout(r, 800));
+}
+
+async function verifyOtp(_phone: string, code: string): Promise<boolean> {
+  // TODO: verify with your backend
+  await new Promise<void>((r) => setTimeout(r, 600));
+  return code === '123456';
+}
+
+// ─── Country Picker Modal ─────────────────────────────────────────────────────
+
+interface CountryPickerProps {
+  visible: boolean;
+  selected: Country;
+  onSelect: (c: Country) => void;
+  onClose: () => void;
+}
+
+function CountryPicker({ visible, selected, onSelect, onClose }: CountryPickerProps) {
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return COUNTRIES;
+    return COUNTRIES.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.dial.includes(q) ||
+        c.code.toLowerCase().includes(q),
+    );
+  }, [query]);
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
-
-      {/* Hero */}
-      <LinearGradient colors={GRADIENTS.sky} style={styles.hero}>
-        <View style={styles.heroOrb} />
-        <View style={styles.logoBox}>
-          <Ionicons name="chatbubbles" size={30} color="#fff" />
-        </View>
-        <Text style={styles.appName}>ChitChat</Text>
-        <Text style={styles.tagline}>Connect. Share. Anywhere.</Text>
-        <Text style={styles.subTagline}>Messages, calls and more.{'\n'}Simple. Secure. Powerful.</Text>
-      </LinearGradient>
-
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {/* Sign In card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign In</Text>
-
-          {/* Email input */}
-          <View style={styles.inputWrap}>
-            <Ionicons name="mail-outline" size={18} color={COLORS.sub} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email or Phone"
-              placeholderTextColor={COLORS.textFaint}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-            />
-          </View>
-
-          {/* Password input */}
-          <View style={styles.inputWrap}>
-            <Ionicons name="lock-closed-outline" size={18} color={COLORS.sub} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={COLORS.textFaint}
-              secureTextEntry={!showPass}
-              value={password}
-              onChangeText={setPassword}
-            />
-            <TouchableOpacity onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
-              <Ionicons name={showPass ? 'eye-off-outline' : 'eye-outline'} size={18} color={COLORS.sub} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.checkRow} onPress={() => setRemember(!remember)} activeOpacity={0.7}>
-              <View style={[styles.checkbox, remember && styles.checkboxActive]}>
-                {remember && <Ionicons name="checkmark" size={12} color="#fff" />}
-              </View>
-              <Text style={styles.rememberText}>Remember me</Text>
-            </TouchableOpacity>
-            <TouchableOpacity>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity onPress={() => navigation.replace('Chats')} activeOpacity={0.85}>
-            <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-              <Text style={styles.primaryBtnText}>Sign In</Text>
-            </LinearGradient>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={picker.root}>
+        {/* Header */}
+        <View style={picker.header}>
+          <Text style={picker.title}>Select Country</Text>
+          <TouchableOpacity onPress={onClose} style={picker.closeBtn}>
+            <Ionicons name="close" size={22} color={COLORS.text} />
           </TouchableOpacity>
-
-          <Text style={styles.orText}>or continue with</Text>
-
-          {/* Google button */}
-          <TouchableOpacity style={styles.socialBtnFull} activeOpacity={0.85}>
-            <Ionicons name="logo-google" size={20} color="#EA4335" />
-            <Text style={styles.socialBtnText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          {/* Apple button */}
-          <TouchableOpacity style={[styles.socialBtnFull, styles.socialBtnApple]} activeOpacity={0.85}>
-            <Ionicons name="logo-apple" size={22} color={COLORS.text} />
-            <Text style={styles.socialBtnText}>Continue with Apple</Text>
-          </TouchableOpacity>
-
-          <View style={styles.signUpRow}>
-            <Text style={styles.signUpText}>Don't have an account? </Text>
-            <TouchableOpacity><Text style={styles.signUpLink}>Sign Up</Text></TouchableOpacity>
-          </View>
         </View>
 
-        {/* Sign Out card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign Out</Text>
-          <Text style={styles.signOutSub}>Are you sure you want to sign out?</Text>
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.cancelBtn}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.signOutBtn}>
-              <Ionicons name="log-out-outline" size={16} color={COLORS.missed} style={{ marginRight: 4 }} />
-              <Text style={styles.signOutText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
+        {/* Search */}
+        <View style={picker.searchWrap}>
+          <Ionicons name="search-outline" size={16} color={COLORS.sub} style={picker.searchIcon} />
+          <TextInput
+            style={picker.searchInput}
+            placeholder="Search country or code…"
+            placeholderTextColor={COLORS.textFaint}
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
+            clearButtonMode="while-editing"
+          />
         </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+
+        {/* List */}
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.code}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const isSelected = item.code === selected.code;
+            return (
+              <TouchableOpacity
+                style={[picker.item, isSelected && picker.itemSelected]}
+                onPress={() => { onSelect(item); onClose(); setQuery(''); }}
+                activeOpacity={0.7}
+              >
+                <Text style={picker.flag}>{item.flag}</Text>
+                <Text style={picker.countryName}>{item.name}</Text>
+                <Text style={picker.dialCode}>+{item.dial}</Text>
+                {isSelected && (
+                  <Ionicons name="checkmark" size={16} color={COLORS.blue} style={picker.check} />
+                )}
+              </TouchableOpacity>
+            );
+          }}
+          ItemSeparatorComponent={() => <View style={picker.sep} />}
+          ListEmptyComponent={
+            <Text style={picker.empty}>No countries found.</Text>
+          }
+        />
+      </SafeAreaView>
+    </Modal>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+// ─── Main Component ───────────────────────────────────────────────────────────
 
-  hero: {
-    paddingTop: 60, paddingBottom: 36, paddingHorizontal: 28,
+type Step = 'phone' | 'otp';
+
+export default function SignInScreen() {
+  const { signIn } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'SignIn'>>();
+
+  const [step,        setStep]        = useState<Step>('phone');
+  const [country,     setCountry]     = useState<Country>(DEFAULT_COUNTRY);
+  const [localNumber, setLocalNumber] = useState('');
+  const [pickerOpen,  setPickerOpen]  = useState(false);
+  const [otp,         setOtp]         = useState(['', '', '', '', '', '']);
+  const [loading,     setLoading]     = useState(false);
+  const [errorMsg,    setErrorMsg]    = useState('');
+  const [resendTimer, setResendTimer] = useState(0);
+
+  const otpRefs  = useRef<Array<TextInput | null>>([null, null, null, null, null, null]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const rawDigits   = localNumber.replace(/\D/g, '');
+  const formatted   = formatPhoneNumber(rawDigits, country.groups);
+  const fullNumber  = `+${country.dial}${rawDigits}`;
+
+  // ── Resend countdown ──────────────────────────────────────────────────────
+
+  const startResendTimer = () => {
+    setResendTimer(60);
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setResendTimer((t) => {
+        if (t <= 1) { clearInterval(timerRef.current!); return 0; }
+        return t - 1;
+      });
+    }, 1000);
+  };
+
+  // ── Step 1: Send OTP ──────────────────────────────────────────────────────
+
+  const handleSendOtp = async () => {
+    const digits = localNumber.replace(/\D/g, '');
+    if (digits.length < country.digits) {
+      setErrorMsg(`Enter a ${country.digits}-digit number for ${country.name}.`);
+      return;
+    }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      await sendOtp(fullNumber);
+      setStep('otp');
+      startResendTimer();
+    } catch {
+      setErrorMsg('Failed to send code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Step 2: Verify OTP ────────────────────────────────────────────────────
+
+  const handleVerifyOtp = async () => {
+    const code = otp.join('');
+    if (code.length < 6) { setErrorMsg('Enter all 6 digits.'); return; }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      const ok = await verifyOtp(fullNumber, code);
+      if (ok) {
+        await signIn(fullNumber);
+      } else {
+        setErrorMsg('Incorrect code. Please try again.');
+        setOtp(['', '', '', '', '', '']);
+        otpRefs.current[0]?.focus();
+      }
+    } catch {
+      setErrorMsg('Verification failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── OTP input helpers ─────────────────────────────────────────────────────
+
+  const handleOtpChange = (text: string, index: number) => {
+    const digit = text.replace(/\D/g, '').slice(-1);
+    const next  = [...otp];
+    next[index] = digit;
+    setOtp(next);
+    if (digit && index < 5) otpRefs.current[index + 1]?.focus();
+    if (!digit && index > 0 && text === '') otpRefs.current[index - 1]?.focus();
+  };
+
+  const handleOtpKeyPress = (key: string, index: number) => {
+    if (key === 'Backspace' && !otp[index] && index > 0) {
+      const next = [...otp];
+      next[index - 1] = '';
+      setOtp(next);
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendTimer > 0) return;
+    setOtp(['', '', '', '', '', '']);
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      await sendOtp(fullNumber);
+      startResendTimer();
+    } catch {
+      setErrorMsg('Failed to resend. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <>
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        {/* Fixed default sky-blue background — sign in always uses the brand colours */}
+        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+
+
+
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Logo block ── */}
+          <View style={styles.logoSection}>
+            <Image
+              source={require('../../assets/chitchat-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
+
+          {/* ── Sign-in card ── */}
+          <View style={styles.card}>
+
+            {step === 'phone' ? (
+              <>
+                <Text style={styles.cardTitle}>Sign In</Text>
+                <Text style={styles.cardSub}>
+                  Enter your phone number to receive a verification code.
+                </Text>
+
+                {/* Phone row: [country picker] [local number] */}
+                <View style={styles.phoneRow}>
+                  <TouchableOpacity
+                    style={styles.dialBtn}
+                    onPress={() => setPickerOpen(true)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={styles.dialFlag}>{country.flag}</Text>
+                    <Text style={styles.dialCode}>+{country.dial}</Text>
+                    <View style={styles.iconTile}>
+                      <Ionicons name="chevron-down" size={13} color={COLORS.blue} />
+                    </View>
+                  </TouchableOpacity>
+
+                  <View style={[styles.inputWrap, styles.inputFlex]}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder={Array(country.digits + 1).join('0').replace(/(\d{3})(\d{3})(\d+)/, '$1 $2 $3')}
+                      placeholderTextColor={COLORS.textFaint}
+                      keyboardType="phone-pad"
+                      autoComplete="tel"
+                      textContentType="telephoneNumber"
+                      value={formatted}
+                      onChangeText={(t) => {
+                        // Strip non-digits, limit to country digit count
+                        const digits = t.replace(/\D/g, '').slice(0, country.digits);
+                        setLocalNumber(digits);
+                        setErrorMsg('');
+                      }}
+                      returnKeyType="done"
+                      onSubmitEditing={handleSendOtp}
+                    />
+                  </View>
+                </View>
+
+                {rawDigits.length > 0 && (
+                  <Text style={styles.previewText}>Will send to: {fullNumber}</Text>
+                )}
+
+                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+
+                <TouchableOpacity
+                  onPress={handleSendOtp}
+                  activeOpacity={0.85}
+                  disabled={loading}
+                >
+                  <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                    {loading
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={styles.primaryBtnText}>Send Code</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.backRow}
+                  onPress={() => {
+                    setStep('phone');
+                    setErrorMsg('');
+                    setOtp(['', '', '', '', '', '']);
+                  }}
+                >
+                  <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
+                  <Text style={styles.backText}>Change number</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.cardTitle}>Verify Code</Text>
+                <Text style={styles.cardSub}>
+                  We sent a 6-digit code to{'\n'}
+                  <Text style={styles.phoneHighlight}>{fullNumber}</Text>
+                </Text>
+
+                <View style={styles.otpRow}>
+                  {otp.map((digit, i) => (
+                    <TextInput
+                      key={i}
+                      ref={(el) => { otpRefs.current[i] = el; }}
+                      style={[styles.otpBox, digit ? styles.otpBoxFilled : null]}
+                      value={digit}
+                      onChangeText={(t) => handleOtpChange(t, i)}
+                      onKeyPress={({ nativeEvent }) => handleOtpKeyPress(nativeEvent.key, i)}
+                      keyboardType="number-pad"
+                      maxLength={1}
+                      textAlign="center"
+                      selectTextOnFocus
+                    />
+                  ))}
+                </View>
+
+                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+
+                <TouchableOpacity
+                  onPress={handleVerifyOtp}
+                  activeOpacity={0.85}
+                  disabled={loading}
+                >
+                  <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                    {loading
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={styles.primaryBtnText}>Verify</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <View style={styles.resendRow}>
+                  <Text style={styles.resendLabel}>Didn't receive a code? </Text>
+                  <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0}>
+                    <Text style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
+                      {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.hintBox}>
+                  <Ionicons name="information-circle-outline" size={15} color={COLORS.sub} />
+                  <Text style={styles.hintText}>
+                    Demo: use code <Text style={styles.hintCode}>123456</Text>
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* ── Create account link — mobile only, below the card ── */}
+      {step === 'phone' && Platform.OS !== 'web' && (
+        <View style={styles.createAccountRow}>
+          <Text style={styles.createAccountText}>Don't have an account? </Text>
+          <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
+            <Text style={styles.createAccountLink}>Create one</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <CountryPicker
+        visible={pickerOpen}
+        selected={country}
+        onSelect={setCountry}
+        onClose={() => setPickerOpen(false)}
+      />
+    </>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 48,
+  },
+
+  // ── Logo ──────────────────────────────────────────────────────────────────
+  logoSection: {
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  logoImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 40,
+    // Clip the dark JPEG corners
     overflow: 'hidden',
   },
-  heroOrb: {
-    position: 'absolute', width: 200, height: 200, borderRadius: 100,
-    backgroundColor: 'rgba(255,255,255,0.10)', top: -60, right: -60,
-  },
-  logoBox: {
-    width: 64, height: 64, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.20)',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.40)',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 16, ...SHADOW.glow,
-  },
-  appName:    { fontSize: 30, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  tagline:    { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
-  subTagline: { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 8, lineHeight: 20 },
 
-  scroll: { padding: 20, gap: 16, paddingBottom: 48 },
-  card: { ...GLASS.elevated, borderRadius: RADIUS.xl, padding: 22, ...SHADOW.card },
-  cardTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 18 },
+  // ── Card ──────────────────────────────────────────────────────────────────
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderRadius: RADIUS.xl,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+    borderTopColor: 'rgba(255,255,255,0.80)',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.20,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 6,
+  },
+  cardSub: {
+    fontSize: 13,
+    color: COLORS.sub,
+    marginBottom: 20,
+    lineHeight: 19,
+  },
+
+  // ── Phone input row ───────────────────────────────────────────────────────
+  phoneRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+
+  dialBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+    borderTopColor: 'rgba(255,255,255,0.75)',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  dialFlag: { fontSize: 20 },
+  dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
   inputWrap: {
-    ...GLASS.input, borderRadius: RADIUS.md, marginBottom: 12,
-    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderRadius: RADIUS.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.55)',
+    borderTopColor: 'rgba(255,255,255,0.75)',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  inputIcon: { paddingLeft: 14 },
-  input:     { flex: 1, paddingHorizontal: 10, paddingVertical: 13, fontSize: 14, color: COLORS.text },
-  eyeBtn:    { paddingRight: 12 },
+  inputFlex: { flex: 1 },
+  input: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: COLORS.text,
+  },
 
-  row:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
-  checkRow:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  checkbox:       { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: COLORS.blue, alignItems: 'center', justifyContent: 'center' },
-  checkboxActive: { backgroundColor: COLORS.blue },
-  rememberText:   { fontSize: 13, color: COLORS.sub },
-  forgotText:     { fontSize: 13, color: COLORS.blue, fontWeight: '600' },
+  previewText: {
+    fontSize: 11,
+    color: COLORS.sub,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
 
-  primaryBtn:     { borderRadius: RADIUS.md, paddingVertical: 15, alignItems: 'center', ...SHADOW.button },
+  error: {
+    fontSize: 13,
+    color: COLORS.missed,
+    marginBottom: 10,
+    marginTop: 2,
+  },
+
+  primaryBtn: {
+    borderRadius: RADIUS.md,
+    paddingVertical: 15,
+    alignItems: 'center',
+    ...SHADOW.button,
+    marginTop: 4,
+  },
   primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
-  orText: { textAlign: 'center', fontSize: 13, color: COLORS.sub, marginVertical: 16 },
+  // ── OTP step ──────────────────────────────────────────────────────────────
+  backRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  backText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
-  // Full-width labelled social buttons
-  socialBtnFull: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
-    paddingVertical: 13, marginBottom: 10,
-    ...GLASS.input, borderRadius: RADIUS.md,
-    ...SHADOW.card,
-  },
-  socialBtnApple: {
+  phoneHighlight: { fontWeight: '700', color: COLORS.text },
+
+  otpRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 16,
   },
-  socialBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-
-  // Legacy — unused
-  socialRow: {},
-  socialBtn: {},
-
-  signUpRow:  { flexDirection: 'row', justifyContent: 'center' },
-  signUpText: { fontSize: 13, color: COLORS.sub },
-  signUpLink: { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
-
-  signOutSub: { fontSize: 13, color: COLORS.sub, marginBottom: 16 },
-  cancelBtn: {
-    flex: 1, paddingVertical: 12, marginRight: 8,
-    ...GLASS.input, borderRadius: RADIUS.sm, alignItems: 'center',
+  otpBox: {
+    width: 48,
+    height: 58,
+    borderRadius: RADIUS.md,
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    lineHeight: 58,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    backgroundColor: 'rgba(255,255,255,0.30)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.55)',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  cancelText:  { fontSize: 14, fontWeight: '600', color: COLORS.blue },
-  signOutBtn:  {
-    flex: 1, paddingVertical: 12,
+  otpBoxFilled: {
+    borderColor: COLORS.blue,
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    shadowColor: COLORS.blue,
+    shadowOpacity: 0.30,
+  },
+
+  resendRow:          { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
+  resendLabel:        { fontSize: 13, color: COLORS.sub },
+  resendLink:         { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
+  resendLinkDisabled: { color: COLORS.textFaint },
+
+  hintBox: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(232,67,67,0.10)',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+    padding: 10,
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderRadius: RADIUS.sm,
-    borderWidth: 1.5, borderColor: 'rgba(232,67,67,0.30)',
-    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.15)',
   },
-  signOutText: { fontSize: 14, fontWeight: '600', color: COLORS.missed },
+  hintText: { fontSize: 12, color: COLORS.sub },
+  hintCode: { fontWeight: '700', color: COLORS.blue },
+
+  createAccountRow: {
+    position: 'absolute',
+    bottom: 28,
+    left: 0, right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  createAccountText: { fontSize: 14, color: COLORS.sub },
+  createAccountLink: { fontSize: 14, color: COLORS.blue, fontWeight: '700' },
+
+  iconTile: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.50)',
+    borderTopColor: 'rgba(255,255,255,0.75)',
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+});
+
+// ─── Picker Styles ────────────────────────────────────────────────────────────
+
+const picker = StyleSheet.create({
+  root: { flex: 1, backgroundColor: COLORS.bg2 },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  title:    { flex: 1, fontSize: 17, fontWeight: '700', color: COLORS.text },
+  closeBtn: { padding: 4 },
+
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 12,
+    marginBottom: 6,
+    ...GLASS.input,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 10,
+  },
+  searchIcon:  { marginRight: 6 },
+  searchInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: COLORS.text },
+
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    gap: 12,
+  },
+  itemSelected: { backgroundColor: 'rgba(30,156,240,0.08)' },
+
+  flag:        { fontSize: 24, width: 32, textAlign: 'center' },
+  countryName: { flex: 1, fontSize: 15, color: COLORS.text },
+  dialCode:    { fontSize: 14, fontWeight: '600', color: COLORS.sub },
+  check:       { marginLeft: 4 },
+
+  sep:   { height: 1, backgroundColor: COLORS.border, marginLeft: 64 },
+  empty: { textAlign: 'center', color: COLORS.sub, marginTop: 40, fontSize: 14 },
 });

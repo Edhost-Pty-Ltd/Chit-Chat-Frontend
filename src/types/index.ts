@@ -67,6 +67,7 @@ export interface Note {
 
 // ─── Navigation param list ─────────────────────────────────────────────────
 export type RootStackParamList = {
+  Splash: undefined;
   SignIn: undefined;
   Chats: undefined;
   Chat: { contact: Contact };
@@ -77,4 +78,9 @@ export type RootStackParamList = {
   Notes: undefined;
   CloudBackup: undefined;
   Settings: undefined;
+  Appearance: undefined;
+  Profile: undefined;
+  CreateAccount: undefined;
+  VideoCall: { contact: Contact };
+  AudioCall: { contact: Contact };
 };

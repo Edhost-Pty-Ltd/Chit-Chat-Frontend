@@ -1,14 +1,16 @@
-// ─── Screen: Notes ───────────────────────────────────────────────────────────
+﻿// ─── Screen: Notes ───────────────────────────────────────────────────────────
 import React, { useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
+import { View, FlatList, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../components';
 import { NOTES } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { Note } from '../types';
 
+import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
+
 export default function NotesScreen() {
+  const { FG } = useForeground();
   const [notes, setNotes] = useState<Note[]>(NOTES);
   const [query, setQuery] = useState('');
 
@@ -24,30 +26,30 @@ export default function NotesScreen() {
   const renderNote = ({ item }: { item: Note }) => (
     <TouchableOpacity style={styles.noteCard} activeOpacity={0.75}>
       <View style={styles.noteTop}>
-        <Text style={styles.noteTitle}>{item.title}</Text>
+        <AppText style={[styles.noteTitle, { color: FG.primary }]}>{item.title}</AppText>
         <TouchableOpacity onPress={() => toggleCheck(item.id)}>
           {item.checked ? (
             <LinearGradient colors={GRADIENTS.primary} style={styles.checkboxFilled}>
-              <Ionicons name="checkmark" size={13} color="#fff" />
+              <AppIcon name="checkmark" size={13} color="#fff" fixedColor />
             </LinearGradient>
           ) : (
             <View style={styles.checkboxEmpty} />
           )}
         </TouchableOpacity>
       </View>
-      <Text style={styles.notePreview} numberOfLines={2}>{item.preview}</Text>
-      <Text style={styles.noteDate}>{item.date}</Text>
+      <AppText style={[styles.notePreview, { color: FG.secondary }]} numberOfLines={2}>{item.preview}</AppText>
+      <AppText style={[styles.noteDate, { color: FG.faint }]}>{item.date}</AppText>
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
       <AppHeader title="Notes" showBack rightIcon="+" />
 
       {/* Glass search bar */}
       <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={16} color={COLORS.sub} />
+        <AppIcon name="search-outline" size={16} color={COLORS.sub} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search notes"
@@ -66,8 +68,8 @@ export default function NotesScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Ionicons name="document-text-outline" size={48} color={COLORS.sub} />
-            <Text style={styles.emptyText}>No notes yet</Text>
+            <AppIcon name="document-text-outline" size={48} color={COLORS.sub} />
+            <AppText style={styles.emptyText}>No notes yet</AppText>
           </View>
         }
       />

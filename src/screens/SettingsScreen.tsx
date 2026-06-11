@@ -1,15 +1,16 @@
-// ─── Screen: Settings ────────────────────────────────────────────────────────
+﻿// ─── Screen: Settings ────────────────────────────────────────────────────────
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { Avatar, BottomNav } from '../components';
+import { Ionicons } from '@expo/vector-icons'; // kept for IoniconName type
+import { Avatar, BottomNav, UserAvatar } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
+import { useAuth } from '../context/AuthContext';
 
-type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme } from '../context/ThemeContext';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const SETTINGS_SECTIONS: {
@@ -52,56 +53,65 @@ const SETTINGS_SECTIONS: {
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavProp>();
+  const { signOut, phone, displayName } = useAuth();
+  const { FG } = useForeground();
+  const { fontFamily, textColor, iconColor } = useTypography();
 
   const handleItem = (id: string) => {
-    if (id === 'signout')  navigation.replace('SignIn');
-    if (id === 'backup')   navigation.navigate('CloudBackup');
-    if (id === 'calendar') navigation.navigate('Calendar');
-    if (id === 'notes')    navigation.navigate('Notes');
+    if (id === 'signout')    { signOut(); return; }
+    if (id === 'backup')     navigation.navigate('CloudBackup');
+    if (id === 'calendar')   navigation.navigate('Calendar');
+    if (id === 'notes')      navigation.navigate('Notes');
+    if (id === 'appearance') navigation.navigate('Appearance');
   };
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Settings</Text>
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Settings</AppText>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
-        {/* Profile — glass card */}
-        <TouchableOpacity style={styles.profileCard} activeOpacity={0.8}>
-          <Avatar initials="JD" color={COLORS.blue} size={54} status="online" />
+        {/* Profile — glass card — tap to open profile */}
+        <TouchableOpacity
+          style={[styles.profileCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('Profile')}
+        >
+          <UserAvatar size={54} />
           <View style={styles.profileText}>
-            <Text style={styles.profileName}>John Doe</Text>
-            <Text style={styles.profileSub}>Available to help</Text>
+            <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>{displayName || 'John Doe'}</AppText>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={COLORS.sub} />
         </TouchableOpacity>
 
         {/* Each section: label + individual glass cards per row */}
         {SETTINGS_SECTIONS.map((section, si) => (
           <View key={si} style={styles.section}>
-            {section.label && <Text style={styles.sectionLabel}>{section.label}</Text>}
+            {section.label && <AppText style={[styles.sectionLabel, { color: FG.secondary }]}>{section.label}</AppText>}
             {section.items.map((item) => (
               <TouchableOpacity
                 key={item.id}
-                style={styles.settingsCard}
+                style={[styles.settingsCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
                 activeOpacity={0.75}
                 onPress={() => handleItem(item.id)}
               >
-                <View style={[styles.iconBox, item.danger && styles.iconBoxDanger]}>
-                  <Ionicons
-                    name={item.icon}
-                    size={18}
-                    color={item.danger ? COLORS.missed : COLORS.blue}
-                  />
-                </View>
-                <Text style={[styles.itemLabel, item.danger && styles.itemLabelDanger]}>
+                <AppIcon
+                  glass
+                  tileSize={38}
+                  name={item.icon}
+                  size={18}
+                  color={item.danger ? COLORS.missed : iconColor}
+                  fixedColor={item.danger}
+                />
+                <AppText style={[styles.itemLabel, { color: textColor, fontFamily }, item.danger && styles.itemLabelDanger]}
+                  fixedColor={item.danger}
+                >
                   {item.label}
-                </Text>
-                {!item.danger && <Ionicons name="chevron-forward" size={16} color={COLORS.sub} />}
+                </AppText>
+                {!item.danger && null}
               </TouchableOpacity>
             ))}
           </View>
@@ -134,19 +144,13 @@ const styles = StyleSheet.create({
   section:      { gap: 8, marginBottom: 4 },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: COLORS.sub, letterSpacing: 1.2, paddingHorizontal: 4, paddingBottom: 2 },
 
-  // Each settings row = its own glass card
+  // Each settings row = same style as profile card
   settingsCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 13,
+    ...GLASS.card, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 14,
     ...SHADOW.card,
   },
-  iconBox: {
-    width: 36, height: 36, borderRadius: RADIUS.sm,
-    backgroundColor: 'rgba(30,156,240,0.12)',
-    borderWidth: 1, borderColor: 'rgba(30,156,240,0.20)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  iconBoxDanger:   { backgroundColor: 'rgba(232,67,67,0.10)', borderColor: 'rgba(232,67,67,0.20)' },
+  iconBoxDanger: {}, // kept for legacy reference — glass tile handles danger styling via fixedColor
   itemLabel:       { flex: 1, fontSize: 14, fontWeight: '500', color: COLORS.text },
   itemLabelDanger: { color: COLORS.missed, fontWeight: '600' },
 });

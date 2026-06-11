@@ -1,18 +1,18 @@
-// ─── Screen: Chats ───────────────────────────────────────────────────────────
+﻿// ─── Screen: Chats ───────────────────────────────────────────────────────────
 import React, { useState, useRef } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  View, FlatList, TouchableOpacity, StyleSheet,
   TextInput, Modal, Pressable, ScrollView, Animated, Dimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { Avatar, BottomNav } from '../components';
 import { CONTACTS, STATUSES } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { Contact, RootStackParamList } from '../types';
 
+import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 type NavProp   = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
 type TabType   = 'Chats' | 'Groups';
 type SheetMode = 'select' | 'newContact' | 'newGroup';
@@ -21,8 +21,8 @@ type SheetMode = 'select' | 'newContact' | 'newGroup';
 const SCREEN_W = Dimensions.get('window').width;
 const BUBBLE_W = SCREEN_W - 14 - 14 - 10 - 40; // screen - leftPad - rightPad - gap - icon
 
-const CHATS  = CONTACTS.filter((c) => !['Team Office', 'Family Group', 'Design Team'].includes(c.name));
-const GROUPS = CONTACTS.filter((c) =>  ['Team Office', 'Family Group', 'Design Team'].includes(c.name));
+const CHATS         = CONTACTS.filter((c) => !['Team Office', 'Family Group', 'Design Team'].includes(c.name));
+const INITIAL_GROUPS = CONTACTS.filter((c) =>  ['Team Office', 'Family Group', 'Design Team'].includes(c.name));
 const STATUS_NAMES = new Set(STATUSES.map((s) => s.name));
 
 // ─── Avatar with status ring ──────────────────────────────────────────────────
@@ -58,24 +58,24 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
     <>
       <View style={styles.sheetSubHeader}>
         <TouchableOpacity onPress={onBack} style={styles.iconPad}>
-          <Ionicons name="chevron-back" size={22} color={COLORS.blue} />
+          <AppIcon name="chevron-back" size={22} color={COLORS.blue} />
         </TouchableOpacity>
-        <Text style={styles.sheetTitle}>New Contact</Text>
+        <AppText style={styles.sheetTitle}>New Contact</AppText>
       </View>
 
       {/* Name input — glass */}
       <View style={styles.glassInput}>
-        <Ionicons name="person-outline" size={18} color={COLORS.sub} />
+        <AppIcon name="person-outline" size={18} color={COLORS.sub} />
         <TextInput style={styles.inputField} placeholder="Contact name"
           placeholderTextColor={COLORS.sub} value={name} onChangeText={setName} />
       </View>
 
       {/* Number display */}
       <View style={styles.numberRow}>
-        <Text style={styles.numberText} numberOfLines={1}>{number || ' '}</Text>
+        <AppText style={styles.numberText} numberOfLines={1}>{number || ' '}</AppText>
         {number.length > 0 && (
           <TouchableOpacity onPress={del} style={styles.iconPad}>
-            <Ionicons name="backspace-outline" size={22} color={COLORS.blue} />
+            <AppIcon name="backspace-outline" size={22} color={COLORS.blue} />
           </TouchableOpacity>
         )}
       </View>
@@ -87,8 +87,8 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
             {row.map((k) => (
               <TouchableOpacity key={k.d} style={styles.keyBtn} activeOpacity={0.65}
                 onPress={() => press(k.d)}>
-                <Text style={styles.keyDigit}>{k.d}</Text>
-                {k.s ? <Text style={styles.keySub}>{k.s}</Text> : null}
+                <AppText style={styles.keyDigit}>{k.d}</AppText>
+                {k.s ? <AppText style={styles.keySub}>{k.s}</AppText> : null}
               </TouchableOpacity>
             ))}
           </View>
@@ -97,14 +97,14 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
 
       <View style={styles.rowActions}>
         <TouchableOpacity style={styles.cancelBtn} onPress={onBack} activeOpacity={0.8}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <AppText style={styles.cancelText}>Cancel</AppText>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.confirmBtn, (!number || !name) && styles.dimmed]}
           activeOpacity={number && name ? 0.85 : 1}
           onPress={() => { if (number && name) onDone(); }}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.confirmGrad}>
-            <Ionicons name="person-add-outline" size={18} color="#fff" />
-            <Text style={styles.confirmText}>Save Contact</Text>
+            <AppIcon name="person-add-outline" size={18} color="#fff" fixedColor />
+            <AppText fixedColor style={styles.confirmText}>Save Contact</AppText>
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -113,25 +113,48 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
 }
 
 // ─── New Group sheet ──────────────────────────────────────────────────────────
-function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+function NewGroupSheet({ onBack, onDone }: {
+  onBack: () => void;
+  onDone: (group: Contact) => void;
+}) {
   const [selected,  setSelected]  = useState<number[]>([]);
   const [groupName, setGroupName] = useState('');
+  const [nameError, setNameError] = useState('');
 
   const toggle = (id: number) =>
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+
+  const handleCreate = () => {
+    if (!groupName.trim()) { setNameError('Please enter a group name.'); return; }
+    if (selected.length < 1) { setNameError('Select at least one contact.'); return; }
+    // Build a new group Contact entry
+    const members = selected.map((id) => CONTACTS.find((c) => c.id === id)!);
+    const initials = groupName.trim().split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+    const newGroup: Contact = {
+      id:      Date.now(),
+      name:    groupName.trim(),
+      avatar:  initials,
+      color:   COLORS.blue,
+      status:  'online',
+      lastMsg: `${members.length} members`,
+      time:    'Now',
+      unread:  0,
+    };
+    onDone(newGroup);
+  };
 
   return (
     <>
       <View style={styles.sheetSubHeader}>
         <TouchableOpacity onPress={onBack} style={styles.iconPad}>
-          <Ionicons name="chevron-back" size={22} color={COLORS.blue} />
+          <AppIcon name="chevron-back" size={22} color={COLORS.blue} />
         </TouchableOpacity>
-        <Text style={styles.sheetTitle}>New Group</Text>
-        {selected.length > 0 && (
-          <TouchableOpacity onPress={onDone} activeOpacity={0.85}>
+        <AppText style={styles.sheetTitle}>New Group</AppText>
+        {selected.length > 0 && groupName.trim() && (
+          <TouchableOpacity onPress={handleCreate} activeOpacity={0.85}>
             <LinearGradient colors={GRADIENTS.primary} style={styles.nextBtnGrad}>
-              <Text style={styles.nextBtnText}>Create</Text>
-              <Ionicons name="arrow-forward" size={15} color="#fff" />
+              <AppText style={styles.nextBtnText}>Create</AppText>
+              <AppIcon name="arrow-forward" size={15} color="#fff" fixedColor />
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -139,46 +162,54 @@ function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => v
 
       {/* Group name — glass */}
       <View style={styles.glassInput}>
-        <Ionicons name="people-outline" size={18} color={COLORS.sub} />
+        <AppIcon name="people-outline" size={18} color={COLORS.sub} />
         <TextInput style={styles.inputField} placeholder="Group name"
-          placeholderTextColor={COLORS.sub} value={groupName} onChangeText={setGroupName} />
+          placeholderTextColor={COLORS.sub} value={groupName}
+          onChangeText={(t) => { setGroupName(t); setNameError(''); }} />
       </View>
+      {nameError ? (
+        <AppText style={styles.nameError}>{nameError}</AppText>
+      ) : null}
 
-      {/* Selected chips */}
+      {/* Selected contacts — avatar circles only, tap to deselect */}
       {selected.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsRow}>
+        <View style={styles.selectedAvatarsRow}>
           {selected.map((id) => {
             const c = CONTACTS.find((x) => x.id === id)!;
             return (
-              <TouchableOpacity key={id} style={styles.chip} onPress={() => toggle(id)}>
-                <View style={[styles.chipDot, { backgroundColor: c.color }]}>
-                  <Text style={styles.chipInit}>{c.avatar}</Text>
+              <TouchableOpacity key={id} onPress={() => toggle(id)} style={styles.selectedAvatarWrap}>
+                <Avatar initials={c.avatar} color={c.color} size={48} />
+                {/* Remove badge */}
+                <View style={styles.removeBadge}>
+                  <AppIcon name="close" size={10} color="#fff" fixedColor />
                 </View>
-                <Text style={styles.chipName}>{c.name.split(' ')[0]}</Text>
-                <Ionicons name="close" size={13} color={COLORS.sub} />
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </View>
       )}
 
-      <Text style={styles.sectionHint}>{selected.length} / {CONTACTS.length} selected</Text>
+      <AppText style={styles.sectionHint}>
+        {selected.length} selected — tap to add or remove
+      </AppText>
 
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
         {CONTACTS.map((c) => {
           const sel = selected.includes(c.id);
           return (
-            <TouchableOpacity key={c.id} style={styles.contactRow} activeOpacity={0.75}
-              onPress={() => toggle(c.id)}>
+            <TouchableOpacity key={c.id} style={[styles.contactRow, sel && styles.contactRowSelected]}
+              activeOpacity={0.75} onPress={() => toggle(c.id)}>
               <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
               <View style={styles.contactMeta}>
-                <Text style={styles.contactName}>{c.name}</Text>
-                <Text style={styles.contactSub} numberOfLines={1}>{c.lastMsg}</Text>
+                <AppText style={styles.contactName}>{c.name}</AppText>
+                <AppText style={styles.contactSub} numberOfLines={1}>{c.lastMsg}</AppText>
               </View>
-              <View style={[styles.checkbox, sel && styles.checkboxOn]}>
-                {sel && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
+              {/* Blue ring indicator when selected — no checkbox */}
+              {sel && (
+                <View style={styles.selectedIndicator}>
+                  <AppIcon name="checkmark-circle" size={22} color={COLORS.blue} fixedColor />
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -191,9 +222,11 @@ function NewGroupSheet({ onBack, onDone }: { onBack: () => void; onDone: () => v
 function SelectContactSheet({
   onClose,
   onNavigate,
+  onGroupCreated,
 }: {
   onClose: () => void;
   onNavigate: (c: Contact) => void;
+  onGroupCreated: (group: Contact) => void;
 }) {
   const [mode, setMode] = useState<SheetMode>('select');
 
@@ -201,7 +234,12 @@ function SelectContactSheet({
     return <NewContactSheet onBack={() => setMode('select')} onDone={onClose} />;
   }
   if (mode === 'newGroup') {
-    return <NewGroupSheet onBack={() => setMode('select')} onDone={onClose} />;
+    return (
+      <NewGroupSheet
+        onBack={() => setMode('select')}
+        onDone={(group) => { onGroupCreated(group); onClose(); }}
+      />
+    );
   }
 
   return (
@@ -209,15 +247,15 @@ function SelectContactSheet({
       {/* Header */}
       <View style={styles.sheetSubHeader}>
         <TouchableOpacity onPress={onClose} style={styles.iconPad}>
-          <Ionicons name="close" size={22} color={COLORS.sub} />
+          <AppIcon name="close" size={22} color={COLORS.sub} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.sheetTitle}>Select contact</Text>
-          <Text style={styles.sheetSub}>{CONTACTS.length} contacts</Text>
+          <AppText style={styles.sheetTitle}>Select contact</AppText>
+          <AppText style={styles.sheetSub}>{CONTACTS.length} contacts</AppText>
         </View>
         <View style={{ flexDirection: 'row', gap: 14 }}>
-          <Ionicons name="search-outline" size={22} color={COLORS.sub} />
-          <Ionicons name="ellipsis-vertical" size={22} color={COLORS.sub} />
+          <AppIcon name="search-outline" size={22} color={COLORS.sub} />
+          <AppIcon name="ellipsis-vertical" size={22} color={COLORS.sub} />
         </View>
       </View>
 
@@ -231,16 +269,16 @@ function SelectContactSheet({
             {/* Glass circle icon background */}
             <View style={styles.actionIconWrap}>
               <LinearGradient colors={GRADIENTS.primary} style={styles.actionIcon}>
-                <Ionicons name={a.icon} size={20} color="#fff" />
+                <AppIcon name={a.icon} size={20} color="#fff" fixedColor />
               </LinearGradient>
             </View>
-            <Text style={styles.actionLabel}>{a.label}</Text>
-            <Ionicons name="chevron-forward" size={16} color={COLORS.sub} />
+            <AppText style={styles.actionLabel}>{a.label}</AppText>
+            <AppIcon name="chevron-forward" size={16} color={COLORS.sub} />
           </TouchableOpacity>
         ))}
       </View>
 
-      <Text style={styles.sectionHint}>Contacts</Text>
+      <AppText style={styles.sectionHint}>Contacts</AppText>
 
       {/* Contact list — tapping navigates to that contact's chat */}
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
@@ -249,8 +287,8 @@ function SelectContactSheet({
             onPress={() => onNavigate(c)}>
             <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
             <View style={styles.contactMeta}>
-              <Text style={styles.contactName}>{c.name}</Text>
-              <Text style={styles.contactSub} numberOfLines={1}>{c.lastMsg}</Text>
+              <AppText style={styles.contactName}>{c.name}</AppText>
+              <AppText style={styles.contactSub} numberOfLines={1}>{c.lastMsg}</AppText>
             </View>
           </TouchableOpacity>
         ))}
@@ -262,10 +300,13 @@ function SelectContactSheet({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ChatsScreen() {
   const navigation  = useNavigation<NavProp>();
+  const { FG } = useForeground();
+  const { fontFamily, textColor, iconColor } = useTypography();
   const [tab,        setTab]        = useState<TabType>('Chats');
   const [query,      setQuery]      = useState('');
   const [sheetOpen,  setSheetOpen]  = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [groups,     setGroups]     = useState<Contact[]>(INITIAL_GROUPS);
 
   // Animated width: 0 → 1 (multiplied by max width in style)
   const searchAnim = useRef(new Animated.Value(0)).current;
@@ -287,7 +328,7 @@ export default function ChatsScreen() {
     }).start(() => setSearchOpen(false));
   };
 
-  const base = tab === 'Chats' ? CHATS : GROUPS;
+  const base = tab === 'Chats' ? CHATS : groups;
   const data = query.trim()
     ? base.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
     : base;
@@ -299,39 +340,42 @@ export default function ChatsScreen() {
   };
 
   const renderChat = ({ item }: { item: Contact }) => (
-    <TouchableOpacity style={styles.chatCard} activeOpacity={0.75}
+    <TouchableOpacity style={[styles.chatCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} activeOpacity={0.75}
       onPress={() => navigation.navigate('Chat', { contact: item })}>
       <ChatAvatar contact={item} />
       <View style={styles.chatMeta}>
-        <Text style={styles.chatName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMsg}</Text>
+        <AppText style={[styles.chatName, { color: textColor, fontFamily }]} numberOfLines={1}>{item.name}</AppText>
+        <AppText style={[styles.chatPreview, { color: FG.secondary, fontFamily }]} numberOfLines={2}>{item.lastMsg}</AppText>
       </View>
       <View style={styles.chatRight}>
-        <Text style={styles.chatTime}>{item.time}</Text>
+        <AppText style={[styles.chatTime, { color: FG.secondary }]}>{item.time}</AppText>
         {item.unread > 0
-          ? <View style={styles.badge}><Text style={styles.badgeText}>{item.unread}</Text></View>
-          : item.pinned ? <Ionicons name="pin" size={12} color={COLORS.sub} /> : null}
+          ? <View style={styles.badge}><AppText fixedColor style={styles.badgeText}>{item.unread}</AppText></View>
+          : item.pinned ? <AppIcon name="pin" size={12} color={FG.secondary} /> : null}
       </View>
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
 
       {/* ── Bottom sheet modal ── */}
       <Modal visible={sheetOpen} transparent animationType="slide"
         onRequestClose={() => setSheetOpen(false)} statusBarTranslucent>
         <Pressable style={styles.overlay} onPress={() => setSheetOpen(false)} />
 
-        {/* Sheet has its own gradient background */}
+        {/* Sheet has its own background — uses user's chosen theme */}
         <View style={styles.sheet}>
-          <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill}
-            start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
+          <AppBg />
           <View style={styles.handle} />
           <SelectContactSheet
             onClose={() => setSheetOpen(false)}
             onNavigate={handleSelectContact}
+            onGroupCreated={(group) => {
+              setGroups((prev) => [group, ...prev]);
+              setTab('Groups');
+            }}
           />
         </View>
       </Modal>
@@ -340,12 +384,16 @@ export default function ChatsScreen() {
       <View style={styles.header}>
         {/* Row 1: always visible — app name */}
         <View style={styles.headerRow}>
-          <Text style={styles.appName}>ChitChat</Text>
+          <AppText style={[styles.appName, { color: textColor, fontFamily }]}>ChitChat</AppText>
 
           {/* Search icon — hidden when bubble is open */}
           {!searchOpen && (
-            <TouchableOpacity style={styles.searchIconBtn} onPress={openSearch} activeOpacity={0.8}>
-              <Ionicons name="search-outline" size={20} color={COLORS.blue} />
+            <TouchableOpacity
+                style={[styles.searchIconBtn, { borderColor: `${iconColor}40` }]}
+                onPress={openSearch}
+                activeOpacity={0.8}
+              >
+              <AppIcon name="search-outline" size={20} color={COLORS.blue} />
             </TouchableOpacity>
           )}
         </View>
@@ -365,7 +413,7 @@ export default function ChatsScreen() {
               },
             ]}
           >
-            <Ionicons name="search-outline" size={15} color={COLORS.sub} />
+            <AppIcon name="search-outline" size={15} color={COLORS.sub} />
             <TextInput
               ref={searchRef}
               style={styles.searchInput}
@@ -375,7 +423,7 @@ export default function ChatsScreen() {
               onChangeText={setQuery}
             />
             <TouchableOpacity onPress={closeSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close-circle" size={18} color={COLORS.sub} />
+              <AppIcon name="close-circle" size={18} color={COLORS.sub} />
             </TouchableOpacity>
           </Animated.View>
         )}
@@ -388,13 +436,13 @@ export default function ChatsScreen() {
           return active ? (
             <TouchableOpacity key={t} onPress={() => setTab(t)} activeOpacity={0.85}>
               <LinearGradient colors={GRADIENTS.primary} style={styles.tabPillActive}>
-                <Text style={styles.tabLabelActive}>{t}</Text>
+                <AppText style={styles.tabLabelActive}>{t}</AppText>
               </LinearGradient>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity key={t} style={styles.tabPillInactive}
               onPress={() => setTab(t)} activeOpacity={0.7}>
-              <Text style={styles.tabLabel}>{t}</Text>
+              <AppText style={[styles.tabLabel, { color: FG.secondary }]}>{t}</AppText>
             </TouchableOpacity>
           );
         })}
@@ -410,8 +458,8 @@ export default function ChatsScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Ionicons name="chatbubbles-outline" size={52} color={COLORS.sub} />
-            <Text style={styles.emptyText}>No {tab.toLowerCase()} yet</Text>
+            <AppIcon name="chatbubbles-outline" size={52} color={COLORS.sub} />
+            <AppText style={styles.emptyText}>No {tab.toLowerCase()} yet</AppText>
           </View>
         }
       />
@@ -420,7 +468,7 @@ export default function ChatsScreen() {
       <TouchableOpacity style={styles.fab} activeOpacity={0.85}
         onPress={() => setSheetOpen(true)}>
         <LinearGradient colors={GRADIENTS.primary} style={styles.fabInner}>
-          <Ionicons name="add" size={28} color="#fff" />
+          <AppIcon name="add" size={28} color="#fff" fixedColor />
         </LinearGradient>
       </TouchableOpacity>
 
@@ -454,8 +502,12 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 22,
     fontWeight: '800',
-    color: COLORS.text,
-    letterSpacing: -0.5,
+    color: COLORS.text, letterSpacing: -0.5,
+  },
+  headerLogo: {
+    width: 110,
+    height: 40,
+    borderRadius: 8,
   },
   // Glass bubble — full width below title when open
   searchBubble: {
@@ -563,11 +615,45 @@ const styles = StyleSheet.create({
   contactName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
   contactSub:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
 
-  // Group checkbox
+  // Group checkbox — removed, using selectedIndicator instead
   checkbox:   { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.sub, alignItems: 'center', justifyContent: 'center' },
   checkboxOn: { backgroundColor: COLORS.blue, borderColor: COLORS.blue },
 
-  // Group chips
+  // Selected contact — highlighted row
+  contactRowSelected: {
+    borderColor: `${COLORS.blue}50`,
+    backgroundColor: 'rgba(30,156,240,0.08)',
+  },
+
+  // Blue checkmark circle on selected contact
+  selectedIndicator: { paddingLeft: 4 },
+
+  // Selected avatars strip — circles only, no text
+  selectedAvatarsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 8,
+    gap: 10,
+  },
+  selectedAvatarWrap: { position: 'relative' },
+  removeBadge: {
+    position: 'absolute',
+    top: -2, right: -2,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#fff',
+  },
+
+  // Error text for group name
+  nameError: {
+    fontSize: 12, color: COLORS.missed,
+    marginHorizontal: 14, marginTop: -6, marginBottom: 8,
+  },
+
+  // Group chips (legacy — kept for reference)
   chipsRow: { paddingHorizontal: 14, paddingBottom: 10, gap: 8 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,

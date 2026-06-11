@@ -1,14 +1,15 @@
-// ─── Shared Components ───────────────────────────────────────────────────────
+﻿// ─── Shared Components ───────────────────────────────────────────────────────
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ViewStyle,
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+  View, TouchableOpacity, StyleSheet, ViewStyle, Image,
+} from 'react-native';import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList, ContactStatus } from '../types';
+import { AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -27,9 +28,9 @@ export function Avatar({ initials, color, size = 44, status: _status, style }: A
         width: size, height: size, borderRadius: size / 2,
         backgroundColor: color,
       }]}>
-        <Text style={[styles.avatarText, { fontSize: Math.round(size * 0.36) }]}>
+        <AppText style={[styles.avatarText, { fontSize: Math.round(size * 0.36) }]}>
           {initials}
-        </Text>
+        </AppText>
       </View>
     </View>
   );
@@ -53,21 +54,40 @@ const TABS: {
 interface BottomNavProps { active: TabKey; }
 export function BottomNav({ active }: BottomNavProps) {
   const navigation = useNavigation<NavProp>();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
+
   return (
-    <View style={styles.navBar}>
+    <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
       {TABS.map((t) => {
         const isActive = active === t.id;
         return (
-          <TouchableOpacity key={t.id} style={styles.navItem} activeOpacity={0.7}
-            onPress={() => navigation.navigate(t.screen as any)}>
-            {isActive && <View style={styles.navActiveGlow} />}
-            <Ionicons
-              name={isActive ? t.iconActive : t.icon}
-              size={22}
-              color={isActive ? COLORS.blue : COLORS.sub}
-            />
-            <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{t.label}</Text>
-            {isActive && <View style={styles.navDot} />}
+          <TouchableOpacity
+            key={t.id}
+            style={styles.navItem}
+            activeOpacity={0.75}
+            onPress={() => navigation.navigate(t.screen as any)}
+          >
+            {isActive ? (
+              <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
+                <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
+              </LinearGradient>
+            ) : (
+              <AppIcon
+                glass
+                tileSize={46}
+                name={t.icon}
+                size={20}
+                color={FG.icon}
+              />
+            )}
+            <AppText style={[
+              styles.navLabel,
+              { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
+              isActive && styles.navLabelActive,
+            ]}>
+              {t.label}
+            </AppText>
           </TouchableOpacity>
         );
       })}
@@ -75,7 +95,26 @@ export function BottomNav({ active }: BottomNavProps) {
   );
 }
 
-// ─── AppHeader ────────────────────────────────────────────────────────────────
+// ─── UserAvatar ───────────────────────────────────────────────────────────────
+// Renders the signed-in user's profile picture (or initials fallback).
+interface UserAvatarProps { size?: number; }
+export function UserAvatar({ size = 44 }: UserAvatarProps) {
+  const { avatarUri, displayName } = useAuth();
+  const name     = displayName || 'JD';
+  const initials = name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+  if (avatarUri) {
+    return (
+      <Image
+        source={{ uri: avatarUri }}
+        style={{
+          width: size, height: size, borderRadius: size / 2,
+          borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)',
+        }}
+      />
+    );
+  }
+  return <Avatar initials={initials} color={COLORS.blue} size={size} />;
+}
 interface AppHeaderProps {
   title: string;
   showBack?: boolean;
@@ -84,20 +123,22 @@ interface AppHeaderProps {
 }
 export function AppHeader({ title, showBack, rightIcon, onRightPress }: AppHeaderProps) {
   const navigation = useNavigation<NavProp>();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
       {showBack ? (
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-          <Ionicons name="chevron-back" size={26} color={COLORS.blue} />
+          <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
         </TouchableOpacity>
       ) : (
         <View style={styles.headerSide} />
       )}
-      <Text style={styles.headerTitle}>{title}</Text>
+      <AppText style={[styles.headerTitle, { color: textColor, fontFamily }]}>{title}</AppText>
       {rightIcon ? (
         <TouchableOpacity onPress={onRightPress} style={[styles.headerSide, { alignItems: 'flex-end' }]}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.headerRightBtn}>
-            <Text style={{ fontSize: 15, color: '#fff' }}>{rightIcon}</Text>
+            <AppText style={{ fontSize: 15, color: '#fff' }}>{rightIcon}</AppText>
           </LinearGradient>
         </TouchableOpacity>
       ) : (
@@ -116,12 +157,32 @@ const styles = StyleSheet.create({
   avatarText: { color: '#fff', fontWeight: '700' },
   statusDot:  { position: 'absolute', borderWidth: 2, borderColor: COLORS.sky1 },
 
-  navBar:       { flexDirection: 'row', ...GLASS.nav, paddingBottom: 24, paddingTop: 10 },
-  navItem:      { flex: 1, alignItems: 'center', gap: 3, position: 'relative' },
-  navActiveGlow:{ position: 'absolute', top: -6, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(30,156,240,0.12)' },
-  navLabel:       { fontSize: 10, fontWeight: '500', color: COLORS.sub },
+  navBar: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    paddingBottom: 24,
+    paddingTop: 10,
+    paddingHorizontal: 8,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+
+  // Active — blue gradient tile with glow
+  iconTileActive: {
+    width: 46,
+    height: 40,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOW.button,
+  },
+
+  navLabel:       { fontSize: 10, fontWeight: '500' },
   navLabelActive: { fontWeight: '700', color: COLORS.blue },
-  navDot:         { width: 4, height: 4, borderRadius: 2, backgroundColor: COLORS.blue, marginTop: 1 },
 
   header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12, ...GLASS.header },
   headerSide:     { width: 40 },

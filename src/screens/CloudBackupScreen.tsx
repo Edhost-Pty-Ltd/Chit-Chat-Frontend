@@ -1,10 +1,12 @@
-// ─── Screen: Cloud Backup ────────────────────────────────────────────────────
+﻿// ─── Screen: Cloud Backup ────────────────────────────────────────────────────
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons'; // kept for IoniconName type
 import { AppHeader } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
+
+import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -27,7 +29,7 @@ export default function CloudBackupScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <AppBg />
       <AppHeader title="Cloud Backup" showBack />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -36,37 +38,37 @@ export default function CloudBackupScreen() {
         <LinearGradient colors={GRADIENTS.sky} style={styles.heroCard}>
           <View style={styles.heroOrb} />
           <View style={styles.cloudIconWrap}>
-            <Ionicons name={done ? 'cloud-done' : 'cloud-upload'} size={68} color="#fff" />
+            <AppIcon name={done ? 'cloud-done' : 'cloud-upload'} size={68} color="#fff" fixedColor />
             {done && (
               <View style={styles.checkBadge}>
-                <Ionicons name="checkmark" size={13} color="#fff" />
+                <AppIcon name="checkmark" size={13} color="#fff" fixedColor />
               </View>
             )}
           </View>
-          <Text style={styles.heroTitle}>{done ? 'Backup Complete!' : 'Your data is safe.'}</Text>
-          <Text style={styles.heroSub}>
+          <AppText fixedColor style={styles.heroTitle}>{done ? 'Backup Complete!' : 'Your data is safe.'}</AppText>
+          <AppText fixedColor style={styles.heroSub}>
             {done ? 'All your data has been backed up successfully.' : 'Unlimited storage · Non-Stop Backup'}
-          </Text>
+          </AppText>
           <TouchableOpacity onPress={handleBackup} activeOpacity={0.85} disabled={backing}>
             <View style={[styles.backupBtn, backing && styles.backupBtnDisabled]}>
-              {backing && <Ionicons name="sync" size={15} color={COLORS.blueDeep} style={{ marginRight: 6 }} />}
-              <Text style={styles.backupBtnText}>{backing ? 'Backing up…' : 'Back Up Now'}</Text>
+              {backing && <AppIcon name="sync" size={15} color={COLORS.blueDeep} fixedColor style={{ marginRight: 6 }} />}
+              <AppText fixedColor style={styles.backupBtnText}>{backing ? 'Backing up…' : 'Back Up Now'}</AppText>
             </View>
           </TouchableOpacity>
         </LinearGradient>
 
         {/* Section label */}
-        <Text style={styles.sectionTitle}>WHAT'S INCLUDED</Text>
+        <AppText style={styles.sectionTitle}>WHAT'S INCLUDED</AppText>
 
         {/* Each included item = individual glass card */}
         {INCLUDED_ITEMS.map((item) => (
           <View key={item.label} style={styles.includedCard}>
             <View style={styles.includedIconBox}>
-              <Ionicons name={item.icon} size={20} color={COLORS.blue} />
+              <AppIcon name={item.icon} size={20} color={COLORS.blue} />
             </View>
-            <Text style={styles.includedLabel}>{item.label}</Text>
+            <AppText style={styles.includedLabel}>{item.label}</AppText>
             <LinearGradient colors={GRADIENTS.primary} style={styles.tick}>
-              <Ionicons name="checkmark" size={13} color="#fff" />
+              <AppIcon name="checkmark" size={13} color="#fff" fixedColor />
             </LinearGradient>
           </View>
         ))}
