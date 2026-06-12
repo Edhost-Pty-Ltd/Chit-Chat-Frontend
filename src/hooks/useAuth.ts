@@ -6,7 +6,7 @@
 // on both iOS and Android — no WebView or manual recaptcha needed.
 
 import { useState, useEffect } from 'react';
-import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import auth, { FirebaseAuthTypes, getAuth, onAuthStateChanged, signInWithPhoneNumber, signOut as firebaseSignOut } from '@react-native-firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -23,7 +23,8 @@ export function useAuth() {
 
   // ── Listen to auth state changes ──────────────────────────────
   useEffect(() => {
-    const unsub = auth().onAuthStateChanged(async (firebaseUser) => {
+    const authInstance = getAuth();
+    const unsub = onAuthStateChanged(authInstance, async (firebaseUser) => {
       setUser(firebaseUser);
       setLoading(false);
     });
@@ -38,7 +39,8 @@ export function useAuth() {
       setError(null);
 
       console.log('[useAuth] Sending OTP to:', phone);
-      const confirmation = await auth().signInWithPhoneNumber(phone);
+      const authInstance = getAuth();
+      const confirmation = await signInWithPhoneNumber(authInstance, phone);
       setConfirm(confirmation);
       setStep('otpSent');
       return true;
@@ -79,7 +81,8 @@ export function useAuth() {
 
   // ── Sign out ───────────────────────────────────────────────────
   async function signOut() {
-    await auth().signOut();
+    const authInstance = getAuth();
+    await firebaseSignOut(authInstance);
     setUser(null);
     setConfirm(null);
     setStep('idle');
