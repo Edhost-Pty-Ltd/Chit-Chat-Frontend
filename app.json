@@ -11,7 +11,8 @@
       "bundleIdentifier": "com.edhost.chitchat.app",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Chit-Chat needs access to your microphone to record voice notes."
+        "NSMicrophoneUsageDescription": "Chit-Chat needs access to your microphone to record voice notes.",
+        "NSContactsUsageDescription": "Chit-Chat needs access to your contacts to help you find friends on the app."
       }
     },
     "plugins": [
@@ -34,7 +35,12 @@
       "@react-native-firebase/app",
       "expo-contacts",
       "expo-font",
-      "expo-av"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Chit-Chat needs access to your microphone to record voice notes."
+        }
+      ]
     ],
     "android": {
       "adaptiveIcon": {

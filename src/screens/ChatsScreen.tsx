@@ -3,7 +3,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   TextInput, Modal, Pressable, ScrollView, Animated,
-  ActivityIndicator,
+  ActivityIndicator, Image,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -51,12 +51,31 @@ function getInitials(name: string): string {
 }
 
 // ─── Chat Avatar ──────────────────────────────────────────────────────────────
-function ChatAvatar({ displayName }: { displayName: string }) {
+interface ChatAvatarProps {
+  displayName: string;
+  contactPhotoUri?: string;
+  firebasePhotoURL?: string;
+  isSavedContact?: boolean;
+}
+
+function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedContact }: ChatAvatarProps) {
   const color = stringToColor(displayName);
   const initials = getInitials(displayName);
+  
+  // Priority: 1. Contact photo, 2. Firebase photo, 3. Initials
+  const photoUri = contactPhotoUri || firebasePhotoURL;
+  
   return (
     <View style={[styles.avatarCircle, { backgroundColor: color }]}>
-      <Text style={styles.avatarText}>{initials}</Text>
+      {photoUri ? (
+        <Image 
+          source={{ uri: photoUri }} 
+          style={styles.avatarImage}
+          defaultSource={require('../../assets/icon.png')}
+        />
+      ) : (
+        <Text style={styles.avatarText}>{initials}</Text>
+      )}
     </View>
   );
 }
@@ -213,7 +232,12 @@ function NewGroupSheet({
           return (
             <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
               onPress={() => toggle(c.userId)}>
-              <ChatAvatar displayName={c.displayName} />
+              <ChatAvatar 
+                displayName={c.displayName}
+                contactPhotoUri={c.photoUri}
+                firebasePhotoURL={c.firebasePhotoURL}
+                isSavedContact={c.isSaved}
+              />
               <View style={styles.contactMeta}>
                 <Text style={styles.contactName}>{c.displayName}</Text>
                 <Text style={styles.contactSub} numberOfLines={1}>{c.phone}</Text>
@@ -235,11 +259,17 @@ function SelectContactSheet({
   onNavigate,
   contacts,
   contactsLoading,
+  contactsError,
+  reloadContacts,
+  hasPermission,
 }: {
   onClose: () => void;
   onNavigate: (contact: AppContact) => void;
   contacts: AppContact[];
   contactsLoading: boolean;
+  contactsError: string | null;
+  reloadContacts: () => void;
+  hasPermission: boolean;
 }) {
   const [mode, setMode] = useState<SheetMode>('select');
 
@@ -293,6 +323,17 @@ function SelectContactSheet({
           <ActivityIndicator size="large" color={COLORS.blue} />
           <Text style={styles.emptyText}>Loading contacts…</Text>
         </View>
+      ) : contactsError ? (
+        <View style={styles.emptyWrap}>
+          <Ionicons name="people-outline" size={52} color={COLORS.sub} />
+          <Text style={styles.emptyText}>{contactsError}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={reloadContacts} activeOpacity={0.8}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.retryBtnGrad}>
+              <AppIcon name="refresh" size={16} color="#fff" fixedColor />
+              <Text style={styles.retryBtnText}>{hasPermission ? 'Retry' : 'Grant Permission'}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       ) : contacts.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="people-outline" size={52} color={COLORS.sub} />
@@ -303,7 +344,12 @@ function SelectContactSheet({
           {contacts.map((c) => (
             <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
               onPress={() => onNavigate(c)}>
-              <ChatAvatar displayName={c.displayName} />
+              <ChatAvatar 
+                displayName={c.displayName}
+                contactPhotoUri={c.photoUri}
+                firebasePhotoURL={c.firebasePhotoURL}
+                isSavedContact={c.isSaved}
+              />
               <View style={styles.contactMeta}>
                 <Text style={styles.contactName}>{c.displayName}</Text>
                 <Text style={styles.contactSub} numberOfLines={1}>{c.phone}</Text>
@@ -325,7 +371,14 @@ export default function ChatsScreen() {
   const { fontFamily, textColor, iconColor } = useTypography();
 
   const { chats, loading: chatsLoading } = useChats(userId);
-  const { contacts, loading: contactsLoading } = useContacts();
+  const { contacts, loading: contactsLoading, reload: reloadContacts, hasPermission, error: contactsError } = useContacts();
+
+  // Log contacts state
+  useEffect(() => {
+    if (contacts.length > 0) {
+      console.log(`[ChatsScreen] Loaded ${contacts.length} contacts with photos`);
+    }
+  }, [contacts]);
 
   const [tab,        setTab]        = useState<TabType>('Chats');
   const [query,      setQuery]      = useState('');
@@ -333,7 +386,7 @@ export default function ChatsScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
 
   // Extra member info fetched from Firestore for users not in device contacts
-  const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string }>>(new Map());
+  const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string; photoURL?: string }>>(new Map());
 
   // Animated width: 0 → 1 (multiplied by max width in style)
   const searchAnim = useRef(new Animated.Value(0)).current;
@@ -348,14 +401,23 @@ export default function ChatsScreen() {
     return map;
   }, [contacts]);
 
-  // Build firestoreUsers map: userId → { displayName, phone }
+  // Build firestoreUsers map: userId → { displayName, phone, photoURL }
   const firestoreUsersMap = useMemo(() => {
-    const map = new Map<string, { displayName: string; phone: string }>();
+    const map = new Map<string, { displayName: string; phone: string; photoURL?: string; contactPhotoUri?: string }>();
+    // Add all contacts (displayName from useContacts already has correct priority)
     for (const c of contacts) {
-      map.set(c.userId, { displayName: c.displayName, phone: c.phone });
+      map.set(c.userId, { 
+        displayName: c.displayName, 
+        phone: c.phone,
+        photoURL: c.firebasePhotoURL,
+        contactPhotoUri: c.photoUri,
+      });
     }
+    // Add users not in contacts (fetched separately from Firestore)
     for (const [uid, info] of memberInfo) {
-      if (!map.has(uid)) map.set(uid, info);
+      if (!map.has(uid)) {
+        map.set(uid, info);
+      }
     }
     return map;
   }, [contacts, memberInfo]);
@@ -389,6 +451,7 @@ export default function ChatsScreen() {
             newInfo.set(uid, {
               displayName: data.displayName ?? data.phone ?? uid,
               phone: data.phone ?? '',
+              photoURL: data.photoURL || null,
             });
           }
         } catch (_) {}
@@ -445,6 +508,13 @@ export default function ChatsScreen() {
     const displayName = getDisplayName(item);
     const isGroup = item.type === 'group';
     const isVoiceNote = item.lastMessage === '[Voice Note]';
+    
+    // Get photo data for the avatar
+    const otherMemberId = isGroup ? null : item.members.find((id) => id !== userId);
+    const otherUser = otherMemberId ? firestoreUsersMap.get(otherMemberId) : null;
+    const contactPhotoUri = otherUser?.contactPhotoUri;
+    const firebasePhotoURL = otherUser?.photoURL;
+    const isSavedContact = !!(contactPhotoUri || (otherUser && contactsMap.has(otherUser.phone)));
 
     const getSenderPrefix = (): string => {
       if (!item.lastSenderId) return '';
@@ -473,7 +543,12 @@ export default function ChatsScreen() {
     return (
       <TouchableOpacity style={[styles.chatCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} activeOpacity={0.75}
         onPress={() => navigation.navigate('Chat', { chatId: item.chatId, displayName, isGroup })}>
-        <ChatAvatar displayName={displayName} />
+        <ChatAvatar 
+          displayName={displayName} 
+          contactPhotoUri={contactPhotoUri}
+          firebasePhotoURL={firebasePhotoURL}
+          isSavedContact={isSavedContact}
+        />
         <View style={styles.chatMeta}>
           <AppText style={[styles.chatName, { color: textColor, fontFamily }]} numberOfLines={1}>{displayName}</AppText>
           {renderLastMessagePreview()}
@@ -507,6 +582,9 @@ export default function ChatsScreen() {
             onNavigate={handleSelectContact}
             contacts={contacts}
             contactsLoading={contactsLoading}
+            contactsError={contactsError}
+            reloadContacts={reloadContacts}
+            hasPermission={hasPermission}
           />
         </View>
       </Modal>
@@ -622,6 +700,11 @@ const styles = StyleSheet.create({
     width: 50, height: 50, borderRadius: 25,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   avatarText: { color: '#fff', fontWeight: '700', fontSize: 18 },
 
@@ -692,7 +775,7 @@ const styles = StyleSheet.create({
   fabInner: { flex: 1, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
 
   // ── Bottom sheet ──────────────────────────────────────────────────────────
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.22)' },
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.22)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     height: '88%',
@@ -755,6 +838,26 @@ const styles = StyleSheet.create({
   nameError: {
     fontSize: 12, color: COLORS.missed,
     marginHorizontal: 14, marginTop: -6, marginBottom: 8,
+  },
+
+  // Retry button
+  retryBtn: {
+    marginTop: 16,
+    borderRadius: RADIUS.full,
+    overflow: 'hidden',
+    ...SHADOW.button,
+  },
+  retryBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   // Group chips

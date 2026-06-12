@@ -14,7 +14,6 @@ import {
   View, Text, TextInput, TouchableOpacity, Image,
   StyleSheet, ScrollView, KeyboardAvoidingView,
   Platform, ActivityIndicator, Modal, FlatList,
-  SafeAreaView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,21 +21,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
-import { useAuth } from '../context/AuthContext';
+import { useAuth as useAuthContext } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Stub API helpers ─────────────────────────────────────────────────────────
-
-async function sendOtp(_phone: string): Promise<void> {
-  // TODO: call your backend / Firebase / Twilio
-  await new Promise<void>((r) => setTimeout(r, 800));
-}
-
-async function verifyOtp(_phone: string, code: string): Promise<boolean> {
-  // TODO: verify with your backend
-  await new Promise<void>((r) => setTimeout(r, 600));
-  return code === '123456';
-}
+// Removed - now using Firebase Phone Authentication via useAuth hook
 
 // ─── Country Picker Modal ─────────────────────────────────────────────────────
 
@@ -129,24 +120,27 @@ function CountryPicker({ visible, selected, onSelect, onClose }: CountryPickerPr
 type Step = 'phone' | 'otp';
 
 export default function SignInScreen() {
-  const { signIn } = useAuth();
+  const { signIn: signInToContext } = useAuthContext();
+  const { sendOTP, verifyOTP, step: authStep, error: authError } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'SignIn'>>();
 
-  const [step,        setStep]        = useState<Step>('phone');
-  const [country,     setCountry]     = useState<Country>(DEFAULT_COUNTRY);
+  const [step, setStep] = useState<Step>('phone');
+  const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
   const [localNumber, setLocalNumber] = useState('');
-  const [pickerOpen,  setPickerOpen]  = useState(false);
-  const [otp,         setOtp]         = useState(['', '', '', '', '', '']);
-  const [loading,     setLoading]     = useState(false);
-  const [errorMsg,    setErrorMsg]    = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const [resendTimer, setResendTimer] = useState(0);
 
-  const otpRefs  = useRef<Array<TextInput | null>>([null, null, null, null, null, null]);
+  const otpRefs = useRef<Array<TextInput | null>>([null, null, null, null, null, null]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const rawDigits   = localNumber.replace(/\D/g, '');
-  const formatted   = formatPhoneNumber(rawDigits, country.groups);
-  const fullNumber  = `+${country.dial}${rawDigits}`;
+  const rawDigits = localNumber.replace(/\D/g, '');
+  const formatted = formatPhoneNumber(rawDigits, country.groups);
+  const fullNumber = `+${country.dial}${rawDigits}`;
+
+  const insets = useSafeAreaInsets();
 
   // ── Resend countdown ──────────────────────────────────────────────────────
 
@@ -172,11 +166,15 @@ export default function SignInScreen() {
     setErrorMsg('');
     setLoading(true);
     try {
-      await sendOtp(fullNumber);
-      setStep('otp');
-      startResendTimer();
-    } catch {
-      setErrorMsg('Failed to send code. Please try again.');
+      const success = await sendOTP(fullNumber);
+      if (success) {
+        setStep('otp');
+        startResendTimer();
+      } else {
+        setErrorMsg(authError || 'Failed to send code. Please try again.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to send code. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -190,16 +188,19 @@ export default function SignInScreen() {
     setErrorMsg('');
     setLoading(true);
     try {
-      const ok = await verifyOtp(fullNumber, code);
-      if (ok) {
-        await signIn(fullNumber);
+      const success = await verifyOTP(code);
+      if (success) {
+        // Update the context with phone number for session management
+        await signInToContext(fullNumber);
+        // Firebase auth state will update automatically via onAuthStateChanged
+        // Navigation will happen via AppNavigator once auth state updates
       } else {
-        setErrorMsg('Incorrect code. Please try again.');
+        setErrorMsg(authError || 'Incorrect code. Please try again.');
         setOtp(['', '', '', '', '', '']);
         otpRefs.current[0]?.focus();
       }
-    } catch {
-      setErrorMsg('Verification failed. Please try again.');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -209,7 +210,7 @@ export default function SignInScreen() {
 
   const handleOtpChange = (text: string, index: number) => {
     const digit = text.replace(/\D/g, '').slice(-1);
-    const next  = [...otp];
+    const next = [...otp];
     next[index] = digit;
     setOtp(next);
     if (digit && index < 5) otpRefs.current[index + 1]?.focus();
@@ -231,10 +232,14 @@ export default function SignInScreen() {
     setErrorMsg('');
     setLoading(true);
     try {
-      await sendOtp(fullNumber);
-      startResendTimer();
-    } catch {
-      setErrorMsg('Failed to resend. Please try again.');
+      const success = await sendOTP(fullNumber);
+      if (success) {
+        startResendTimer();
+      } else {
+        setErrorMsg(authError || 'Failed to resend. Please try again.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to resend. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -244,180 +249,182 @@ export default function SignInScreen() {
 
   return (
     <>
-      <KeyboardAvoidingView
-        style={styles.root}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        {/* Fixed default sky-blue background — sign in always uses the brand colours */}
-        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
-
-
-
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+      <SafeAreaView style={styles.root} edges={['left', 'right']}>
+        <KeyboardAvoidingView
+          style={styles.root}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          {/* ── Logo block ── */}
-          <View style={styles.logoSection}>
-            <Image
-              source={require('../../assets/chitchat-logo.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-          </View>
+          {/* Fixed default sky-blue background — sign in always uses the brand colours */}
+          <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
 
-          {/* ── Sign-in card ── */}
-          <View style={styles.card}>
 
-            {step === 'phone' ? (
-              <>
-                <Text style={styles.cardTitle}>Sign In</Text>
-                <Text style={styles.cardSub}>
-                  Enter your phone number to receive a verification code.
-                </Text>
 
-                {/* Phone row: [country picker] [local number] */}
-                <View style={styles.phoneRow}>
-                  <TouchableOpacity
-                    style={styles.dialBtn}
-                    onPress={() => setPickerOpen(true)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.dialFlag}>{country.flag}</Text>
-                    <Text style={styles.dialCode}>+{country.dial}</Text>
-                    <View style={styles.iconTile}>
-                      <Ionicons name="chevron-down" size={13} color={COLORS.blue} />
-                    </View>
-                  </TouchableOpacity>
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* ── Logo block ── */}
+            <View style={styles.logoSection}>
+              <Image
+                source={require('../../assets/chitchat-logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
 
-                  <View style={[styles.inputWrap, styles.inputFlex]}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder={Array(country.digits + 1).join('0').replace(/(\d{3})(\d{3})(\d+)/, '$1 $2 $3')}
-                      placeholderTextColor={COLORS.textFaint}
-                      keyboardType="phone-pad"
-                      autoComplete="tel"
-                      textContentType="telephoneNumber"
-                      value={formatted}
-                      onChangeText={(t) => {
-                        // Strip non-digits, limit to country digit count
-                        const digits = t.replace(/\D/g, '').slice(0, country.digits);
-                        setLocalNumber(digits);
-                        setErrorMsg('');
-                      }}
-                      returnKeyType="done"
-                      onSubmitEditing={handleSendOtp}
-                    />
-                  </View>
-                </View>
+            {/* ── Sign-in card ── */}
+            <View style={styles.card}>
 
-                {rawDigits.length > 0 && (
-                  <Text style={styles.previewText}>Will send to: {fullNumber}</Text>
-                )}
-
-                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
-
-                <TouchableOpacity
-                  onPress={handleSendOtp}
-                  activeOpacity={0.85}
-                  disabled={loading}
-                >
-                  <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                    {loading
-                      ? <ActivityIndicator color="#fff" />
-                      : <Text style={styles.primaryBtnText}>Send Code</Text>}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <TouchableOpacity
-                  style={styles.backRow}
-                  onPress={() => {
-                    setStep('phone');
-                    setErrorMsg('');
-                    setOtp(['', '', '', '', '', '']);
-                  }}
-                >
-                  <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
-                  <Text style={styles.backText}>Change number</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.cardTitle}>Verify Code</Text>
-                <Text style={styles.cardSub}>
-                  We sent a 6-digit code to{'\n'}
-                  <Text style={styles.phoneHighlight}>{fullNumber}</Text>
-                </Text>
-
-                <View style={styles.otpRow}>
-                  {otp.map((digit, i) => (
-                    <TextInput
-                      key={i}
-                      ref={(el) => { otpRefs.current[i] = el; }}
-                      style={[styles.otpBox, digit ? styles.otpBoxFilled : null]}
-                      value={digit}
-                      onChangeText={(t) => handleOtpChange(t, i)}
-                      onKeyPress={({ nativeEvent }) => handleOtpKeyPress(nativeEvent.key, i)}
-                      keyboardType="number-pad"
-                      maxLength={1}
-                      textAlign="center"
-                      selectTextOnFocus
-                    />
-                  ))}
-                </View>
-
-                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
-
-                <TouchableOpacity
-                  onPress={handleVerifyOtp}
-                  activeOpacity={0.85}
-                  disabled={loading}
-                >
-                  <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                    {loading
-                      ? <ActivityIndicator color="#fff" />
-                      : <Text style={styles.primaryBtnText}>Verify</Text>}
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                <View style={styles.resendRow}>
-                  <Text style={styles.resendLabel}>Didn't receive a code? </Text>
-                  <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0}>
-                    <Text style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
-                      {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.hintBox}>
-                  <Ionicons name="information-circle-outline" size={15} color={COLORS.sub} />
-                  <Text style={styles.hintText}>
-                    Demo: use code <Text style={styles.hintCode}>123456</Text>
+              {step === 'phone' ? (
+                <>
+                  <Text style={styles.cardTitle}>Sign In</Text>
+                  <Text style={styles.cardSub}>
+                    Enter your phone number to receive a verification code.
                   </Text>
-                </View>
-              </>
-            )}
+
+                  {/* Phone row: [country picker] [local number] */}
+                  <View style={styles.phoneRow}>
+                    <TouchableOpacity
+                      style={styles.dialBtn}
+                      onPress={() => setPickerOpen(true)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.dialFlag}>{country.flag}</Text>
+                      <Text style={styles.dialCode}>+{country.dial}</Text>
+                      <View style={styles.iconTile}>
+                        <Ionicons name="chevron-down" size={13} color={COLORS.blue} />
+                      </View>
+                    </TouchableOpacity>
+
+                    <View style={[styles.inputWrap, styles.inputFlex]}>
+                      <TextInput
+                        style={styles.input}
+                        placeholder={Array(country.digits + 1).join('0').replace(/(\d{3})(\d{3})(\d+)/, '$1 $2 $3')}
+                        placeholderTextColor={COLORS.textFaint}
+                        keyboardType="phone-pad"
+                        autoComplete="tel"
+                        textContentType="telephoneNumber"
+                        value={formatted}
+                        onChangeText={(t) => {
+                          // Strip non-digits, limit to country digit count
+                          const digits = t.replace(/\D/g, '').slice(0, country.digits);
+                          setLocalNumber(digits);
+                          setErrorMsg('');
+                        }}
+                        returnKeyType="done"
+                        onSubmitEditing={handleSendOtp}
+                      />
+                    </View>
+                  </View>
+
+                  {rawDigits.length > 0 && (
+                    <Text style={styles.previewText}>Will send to: {fullNumber}</Text>
+                  )}
+
+                  {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+
+                  <TouchableOpacity
+                    onPress={handleSendOtp}
+                    activeOpacity={0.85}
+                    disabled={loading}
+                  >
+                    <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                      {loading
+                        ? <ActivityIndicator color="#fff" />
+                        : <Text style={styles.primaryBtnText}>Send Code</Text>}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.backRow}
+                    onPress={() => {
+                      setStep('phone');
+                      setErrorMsg('');
+                      setOtp(['', '', '', '', '', '']);
+                    }}
+                  >
+                    <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
+                    <Text style={styles.backText}>Change number</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.cardTitle}>Verify Code</Text>
+                  <Text style={styles.cardSub}>
+                    We sent a 6-digit code to{'\n'}
+                    <Text style={styles.phoneHighlight}>{fullNumber}</Text>
+                  </Text>
+
+                  <View style={styles.otpRow}>
+                    {otp.map((digit, i) => (
+                      <TextInput
+                        key={i}
+                        ref={(el) => { otpRefs.current[i] = el; }}
+                        style={[styles.otpBox, digit ? styles.otpBoxFilled : null]}
+                        value={digit}
+                        onChangeText={(t) => handleOtpChange(t, i)}
+                        onKeyPress={({ nativeEvent }) => handleOtpKeyPress(nativeEvent.key, i)}
+                        keyboardType="number-pad"
+                        maxLength={1}
+                        textAlign="center"
+                        selectTextOnFocus
+                      />
+                    ))}
+                  </View>
+
+                  {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+
+                  <TouchableOpacity
+                    onPress={handleVerifyOtp}
+                    activeOpacity={0.85}
+                    disabled={loading}
+                  >
+                    <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                      {loading
+                        ? <ActivityIndicator color="#fff" />
+                        : <Text style={styles.primaryBtnText}>Verify</Text>}
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  <View style={styles.resendRow}>
+                    <Text style={styles.resendLabel}>Didn't receive a code? </Text>
+                    <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0}>
+                      <Text style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
+                        {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.hintBox}>
+                    <Ionicons name="information-circle-outline" size={15} color={COLORS.sub} />
+                    <Text style={styles.hintText}>
+                      Enter the 6-digit code sent to your phone
+                    </Text>
+                  </View>
+                </>
+              )}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+
+        {/* ── Create account link — mobile only, below the card ── */}
+        {step === 'phone' && Platform.OS !== 'web' && (
+          <View style={styles.createAccountRow}>
+            <Text style={styles.createAccountText}>Don't have an account? </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
+              <Text style={styles.createAccountLink}>Create one</Text>
+            </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        )}
 
-      {/* ── Create account link — mobile only, below the card ── */}
-      {step === 'phone' && Platform.OS !== 'web' && (
-        <View style={styles.createAccountRow}>
-          <Text style={styles.createAccountText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
-            <Text style={styles.createAccountLink}>Create one</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      <CountryPicker
-        visible={pickerOpen}
-        selected={country}
-        onSelect={setCountry}
-        onClose={() => setPickerOpen(false)}
-      />
+        <CountryPicker
+          visible={pickerOpen}
+          selected={country}
+          onSelect={setCountry}
+          onClose={() => setPickerOpen(false)}
+        />
+      </SafeAreaView>
     </>
   );
 }
@@ -545,7 +552,7 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   // ── OTP step ──────────────────────────────────────────────────────────────
-  backRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  backRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   backText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
   phoneHighlight: { fontWeight: '700', color: COLORS.text },
@@ -583,9 +590,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.30,
   },
 
-  resendRow:          { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
-  resendLabel:        { fontSize: 13, color: COLORS.sub },
-  resendLink:         { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
+  resendRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
+  resendLabel: { fontSize: 13, color: COLORS.sub },
+  resendLink: { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
   resendLinkDisabled: { color: COLORS.textFaint },
 
   hintBox: {
@@ -645,7 +652,7 @@ const picker = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  title:    { flex: 1, fontSize: 17, fontWeight: '700', color: COLORS.text },
+  title: { flex: 1, fontSize: 17, fontWeight: '700', color: COLORS.text },
   closeBtn: { padding: 4 },
 
   searchWrap: {
@@ -657,7 +664,7 @@ const picker = StyleSheet.create({
     borderRadius: RADIUS.md,
     paddingHorizontal: 10,
   },
-  searchIcon:  { marginRight: 6 },
+  searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: COLORS.text },
 
   item: {
@@ -669,11 +676,11 @@ const picker = StyleSheet.create({
   },
   itemSelected: { backgroundColor: 'rgba(30,156,240,0.08)' },
 
-  flag:        { fontSize: 24, width: 32, textAlign: 'center' },
+  flag: { fontSize: 24, width: 32, textAlign: 'center' },
   countryName: { flex: 1, fontSize: 15, color: COLORS.text },
-  dialCode:    { fontSize: 14, fontWeight: '600', color: COLORS.sub },
-  check:       { marginLeft: 4 },
+  dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.sub },
+  check: { marginLeft: 4 },
 
-  sep:   { height: 1, backgroundColor: COLORS.border, marginLeft: 64 },
+  sep: { height: 1, backgroundColor: COLORS.border, marginLeft: 64 },
   empty: { textAlign: 'center', color: COLORS.sub, marginTop: 40, fontSize: 14 },
 });

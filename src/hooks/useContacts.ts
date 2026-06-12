@@ -4,7 +4,7 @@
 // which contacts are registered on SkyConnect.
 
 import { useState, useEffect } from 'react';
-import * as Contacts from 'expo-contacts';
+import { getContactsAsync, requestPermissionsAsync, Fields } from 'expo-contacts/legacy';
 import {
   collection, query, where, getDocs,
 } from 'firebase/firestore';
@@ -17,6 +17,7 @@ export interface AppContact {
   displayName: string;       // contact name from phone book, or phone number if not saved
   isSaved:     boolean;      // true = found in phone contacts
   photoUri?:   string;       // contact photo from phone book
+  firebasePhotoURL?: string; // Firebase profile photo
 }
 
 export function useContacts() {
@@ -35,7 +36,8 @@ export function useContacts() {
       setError(null);
 
       // ── 1. Request contacts permission ──────────────────────────
-      const { status } = await Contacts.requestPermissionsAsync();
+      const { status } = await requestPermissionsAsync();
+      
       if (status !== 'granted') {
         setError('Contacts permission denied');
         setLoading(false);
@@ -44,11 +46,11 @@ export function useContacts() {
       setHasPermission(true);
 
       // ── 2. Fetch all phone contacts ──────────────────────────────
-      const { data } = await Contacts.getContactsAsync({
+      const { data } = await getContactsAsync({
         fields: [
-          Contacts.Fields.Name,
-          Contacts.Fields.PhoneNumbers,
-          Contacts.Fields.Image,
+          Fields.Name,
+          Fields.PhoneNumbers,
+          Fields.Image,
         ],
       });
 
@@ -91,12 +93,17 @@ export function useContacts() {
         for (const doc of snap.docs) {
           const data = doc.data();
           const phone = data.phone as string;
+          const contactName = phoneToName.get(phone);
+          
+          // All users in this result are in phone contacts (isSaved: true)
+          // Use the contact name from phoneToName
           appContacts.push({
             userId:      doc.id,
             phone,
-            displayName: phoneToName.get(phone) ?? phone, // name or number
-            isSaved:     phoneToName.has(phone),
-            photoUri:    phoneToPhoto.get(phone),
+            displayName: contactName ?? phone,
+            isSaved:     true, // Always true since we queried for phones in contacts
+            photoUri:    phoneToPhoto.get(phone), // Contact photo from device
+            firebasePhotoURL: data.photoURL || null, // Firebase profile photo
           });
         }
       }

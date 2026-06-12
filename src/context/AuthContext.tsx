@@ -16,6 +16,7 @@ import React, {
 } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import auth from '@react-native-firebase/auth';
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -78,9 +79,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const doSignOut = async () => {
     clearWebTimer();
-    await AsyncStorage.multiRemove([KEYS.phone, KEYS.signedIn, KEYS.lastActive]);
+    // Sign out from Firebase Auth
+    await auth().signOut();
+    // Clear AsyncStorage session data
+    await AsyncStorage.multiRemove([
+      KEYS.phone,
+      KEYS.signedIn,
+      KEYS.lastActive,
+      KEYS.displayName,
+      KEYS.avatarUri,
+    ]);
     setPhone('');
     setIsSignedIn(false);
+    setDisplayNameState('');
+    setAvatarUriState(null);
   };
 
   // ── Hydrate on mount ──────────────────────────────────────────────────────
