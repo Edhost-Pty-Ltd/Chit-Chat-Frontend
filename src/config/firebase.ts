@@ -1,26 +1,17 @@
 // ─── Firebase Configuration (Hybrid) ──────────────────────────────────────────
-// Auth:      @react-native-firebase/auth (native module, supports phone OTP)
+// Auth:      @react-native-firebase/auth (native module, supports phone OTP)  
 // Firestore: firebase/firestore (JS SDK)
 //
-// IMPORTANT: The JS SDK Firestore and @react-native-firebase/auth are separate
-// Firebase instances. The JS Firestore won't see the native auth state.
-// For this to work, Firestore rules must allow access without auth checks,
-// OR we need to bridge the auth. We use signInWithCustomToken approach below.
+// WORKAROUND: Since bridging auth between native and JS SDK is complex and requires
+// a backend to generate custom tokens, we temporarily use permissive Firestore rules
+// that allow authenticated users (from either SDK) to access data.
+//
+// TODO: Implement proper auth bridge or migrate to full JS SDK when phone auth
+// supports it without requiring reCAPTCHA manual handling.
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import {
-  initializeAuth,
-  getReactNativePersistence,
-  signInWithCredential,
-  PhoneAuthProvider,
-} from 'firebase/auth';
-import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
-import rnAuth from '@react-native-firebase/auth';
-
-// Re-export RNFirebase auth for use in useAuth hook
-export { default as rnAuth } from '@react-native-firebase/auth';
 
 const firebaseConfig = {
   apiKey:            'AIzaSyBzstwF1NgQWASsqVa4R5IiZpFLoKZnSJQ',
@@ -39,5 +30,19 @@ export const db = getFirestore(app);
 
 // Firebase Storage — voice note audio file hosting
 export const storage = getStorage(app);
+
+// Enable offline persistence for better reliability
+// This allows Firestore to work offline and sync when connection is restored
+try {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn('[Firebase] Persistence failed: Multiple tabs open');
+    } else if (err.code === 'unimplemented') {
+      console.warn('[Firebase] Persistence not available in this browser');
+    }
+  });
+} catch (error) {
+  console.warn('[Firebase] Persistence initialization error:', error);
+}
 
 export default app;

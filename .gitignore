@@ -50,3 +50,39 @@ yarn-error.*
 .claude/
 .kiro/skills/
 skills-lock.json
+
+# Debug and troubleshooting documentation (generated during development)
+*_DEBUG.md
+*_FIX.md
+*_TROUBLESHOOTING.md
+*_STATUS.md
+*_ERROR*.md
+*_ISSUE.md
+DEBUGGING_*.md
+BUILD_*.md
+QUICK_FIX_*.md
+SIGNIN_*.md
+
+# Build logs
+build-output*.log
+*.log
+
+# Phase documentation (internal tracking)
+PHASE_*_COMPLETE.md
+PHASE_*_IMPLEMENTATION.md
+PHASE_*_QUICK_START.md
+PHASE_*_README.md
+PHASE_*_SUMMARY.md
+PHASE_*_CRASH_FIX.md
+
+# Feature-specific internal docs (keep main implementation plans)
+*_COMPLETE.md
+*_ENHANCEMENTS.md
+HYBRID_*.md
+IMPORT_*.md
+PERMISSION_*.md
+TEST_PHONE_NUMBERS.md
+WEBRTC_SETUP_NOTE.md
+
+# Kiro spec folders (keep if collaborators use Kiro, otherwise uncomment)
+.kiro/specs/user-registration/

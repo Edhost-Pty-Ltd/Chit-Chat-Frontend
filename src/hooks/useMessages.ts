@@ -16,10 +16,16 @@ export interface FireMessage {
   text:       string | null;
   imageUrl:   string | null;
   voiceUrl:   string | null;
-  type:       'text' | 'image' | 'voice';
+  videoUrl:   string | null;
+  fileUrl:    string | null;
+  type:       'text' | 'image' | 'voice' | 'video' | 'file';
   timestamp:  Date | null;
   readBy:     string[];
   duration:   number | null;
+  fileName:   string | null;
+  fileSize:   number | null;
+  mimeType:   string | null;
+  thumbnailUrl: string | null;
 }
 
 export function useMessages(chatId: string | null, currentUserId: string | null) {
@@ -49,12 +55,18 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
             text:      d.text      ?? null,
             imageUrl:  d.imageUrl  ?? null,
             voiceUrl:  d.voiceUrl  ?? null,
+            videoUrl:  d.videoUrl  ?? null,
+            fileUrl:   d.fileUrl   ?? null,
             type:      d.type      ?? 'text',
             timestamp: d.timestamp
               ? (d.timestamp as Timestamp).toDate()
               : null,
             readBy: d.readBy ?? [],
             duration: d.duration ?? null,
+            fileName: d.fileName ?? null,
+            fileSize: d.fileSize ?? null,
+            mimeType: d.mimeType ?? null,
+            thumbnailUrl: d.thumbnailUrl ?? null,
           };
         });
         setMessages(msgs);

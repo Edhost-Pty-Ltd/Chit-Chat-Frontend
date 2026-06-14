@@ -140,8 +140,6 @@ export default function SignInScreen() {
   const formatted = formatPhoneNumber(rawDigits, country.groups);
   const fullNumber = `+${country.dial}${rawDigits}`;
 
-  const insets = useSafeAreaInsets();
-
   // ── Resend countdown ──────────────────────────────────────────────────────
 
   const startResendTimer = () => {
@@ -188,18 +186,30 @@ export default function SignInScreen() {
     setErrorMsg('');
     setLoading(true);
     try {
+      console.log('[SignInScreen] Verifying OTP code...');
       const success = await verifyOTP(code);
+      console.log('[SignInScreen] verifyOTP result:', success);
+      
       if (success) {
+        console.log('[SignInScreen] OTP verified, signing in to context...');
         // Update the context with phone number for session management
-        await signInToContext(fullNumber);
-        // Firebase auth state will update automatically via onAuthStateChanged
-        // Navigation will happen via AppNavigator once auth state updates
+        try {
+          await signInToContext(fullNumber);
+          console.log('[SignInScreen] Sign-in to context successful');
+          // Firebase auth state will update automatically via onAuthStateChanged
+          // Navigation will happen via AppNavigator once auth state updates
+        } catch (contextError: any) {
+          console.error('[SignInScreen] Error signing in to context:', contextError);
+          setErrorMsg(contextError.message || 'Failed to complete sign-in. Please try again.');
+        }
       } else {
+        console.log('[SignInScreen] OTP verification failed:', authError);
         setErrorMsg(authError || 'Incorrect code. Please try again.');
         setOtp(['', '', '', '', '', '']);
         otpRefs.current[0]?.focus();
       }
     } catch (err: any) {
+      console.error('[SignInScreen] Exception during verification:', err);
       setErrorMsg(err.message || 'Verification failed. Please try again.');
     } finally {
       setLoading(false);
@@ -249,7 +259,7 @@ export default function SignInScreen() {
 
   return (
     <>
-      <SafeAreaView style={styles.root} edges={['left', 'right']}>
+      <SafeAreaView style={styles.root} edges={['top', 'left', 'right', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.root}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -408,15 +418,15 @@ export default function SignInScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
 
-        {/* ── Create account link — mobile only, below the card ── */}
-        {step === 'phone' && Platform.OS !== 'web' && (
-          <View style={styles.createAccountRow}>
-            <Text style={styles.createAccountText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
-              <Text style={styles.createAccountLink}>Create one</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          {/* ── Create account link — mobile only, below the card ── */}
+          {step === 'phone' && Platform.OS !== 'web' && (
+            <View style={styles.createAccountRow}>
+              <Text style={styles.createAccountText}>Don't have an account? </Text>
+              <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
+                <Text style={styles.createAccountLink}>Create one</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
         <CountryPicker
           visible={pickerOpen}
@@ -610,12 +620,11 @@ const styles = StyleSheet.create({
   hintCode: { fontWeight: '700', color: COLORS.blue },
 
   createAccountRow: {
-    position: 'absolute',
-    bottom: 28,
-    left: 0, right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 12,
   },
   createAccountText: { fontSize: 14, color: COLORS.sub },
   createAccountLink: { fontSize: 14, color: COLORS.blue, fontWeight: '700' },

@@ -1,11 +1,11 @@
 // ─── Screen: Create Account ──────────────────────────────────────────────────
 // Mobile only. Collects name, phone + optional photo → OTP → biometric check.
 // If no photo is chosen, the first letter of their first name is used as avatar.
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Image, Alert, Modal, FlatList, SafeAreaView,
+  ActivityIndicator, Image, Alert, Modal, FlatList,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,23 +13,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import { useRegistration } from '../hooks/useRegistration';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
+import { validateUsername, validatePhone, validateImage } from '../utils/validationUtils';
+import { AvatarPreview } from '../components/AvatarPreview';
 import { Text } from 'react-native';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'CreateAccount'>;
 type Step = 'details' | 'otp' | 'biometric';
-
-// ─── Stub OTP helpers ─────────────────────────────────────────────────────────
-async function sendOtp(_phone: string): Promise<void> {
-  await new Promise<void>((r) => setTimeout(r, 800));
-}
-async function verifyOtp(_phone: string, code: string): Promise<boolean> {
-  await new Promise<void>((r) => setTimeout(r, 600));
-  return code === '123456';
-}
 
 // ─── Biometric helper ─────────────────────────────────────────────────────────
 async function runBiometric(): Promise<{ success: boolean; message: string }> {
@@ -107,6 +102,19 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
 export default function CreateAccountScreen() {
   const navigation = useNavigation<NavProp>();
   const { signIn, setDisplayName, setAvatarUri } = useAuth();
+  const {
+    registrationStep,
+    error: hookError,
+    isLoading: hookLoading,
+    submitRegistration,
+    verifyOTP,
+    resendOTP,
+    resendCount,
+    canResend,
+    createProfile,
+    retryProfileCreation,
+    proceedWithoutPhoto,
+  } = useRegistration();
 
   const [step,        setStep]        = useState<Step>('details');
   const [name,        setName]        = useState('');
@@ -117,10 +125,45 @@ export default function CreateAccountScreen() {
   const [otp,         setOtp]         = useState(['', '', '', '', '', '']);
   const [loading,     setLoading]     = useState(false);
   const [errorMsg,    setErrorMsg]    = useState('');
+  const [nameError,   setNameError]   = useState('');
   const [resendTimer, setResendTimer] = useState(0);
 
   const otpRefs  = useRef<Array<TextInput | null>>([null, null, null, null, null, null]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Resend countdown ──────────────────────────────────────────────────────
+  const startResendTimer = () => {
+    setResendTimer(60);
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setResendTimer(t => { if (t <= 1) { clearInterval(timerRef.current!); return 0; } return t - 1; });
+    }, 1000);
+  };
+
+  // Sync hook error to local errorMsg for display
+  useEffect(() => {
+    if (hookError) setErrorMsg(hookError);
+  }, [hookError]);
+
+  // Watch registrationStep to transition screen to 'otp' on successful OTP send
+  useEffect(() => {
+    if (registrationStep === 'otp' && step === 'details') {
+      setStep('otp');
+      startResendTimer();
+    }
+  }, [registrationStep]);
+
+  // When profile creation completes successfully, sign in and navigate to Chats
+  useEffect(() => {
+    if (registrationStep === 'done') {
+      (async () => {
+        await signIn(fullNumber);
+        await setDisplayName(name.trim());
+        if (avatarUri) await setAvatarUri(avatarUri);
+        // AppNavigator will react to isSignedIn and navigate to Chats
+      })();
+    }
+  }, [registrationStep]);
 
   const rawDigits  = localNumber.replace(/\D/g, '');
   const formatted  = formatPhoneNumber(rawDigits, country.groups);
@@ -139,16 +182,19 @@ export default function CreateAccountScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true, aspect: [1, 1], quality: 0.85,
     });
-    if (!result.canceled && result.assets[0]) setLocalAvatar(result.assets[0].uri);
-  };
-
-  // ── Resend countdown ──────────────────────────────────────────────────────
-  const startResendTimer = () => {
-    setResendTimer(60);
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setResendTimer(t => { if (t <= 1) { clearInterval(timerRef.current!); return 0; } return t - 1; });
-    }, 1000);
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      const fileSize = asset.fileSize;
+      const mimeType = asset.mimeType ?? '';
+      if (fileSize != null && mimeType) {
+        const validation = validateImage(fileSize, mimeType);
+        if (!validation.valid) {
+          Alert.alert('Invalid Image', validation.error!);
+          return;
+        }
+      }
+      setLocalAvatar(asset.uri);
+    }
   };
 
   // ── Step 1: Send OTP ──────────────────────────────────────────────────────
@@ -157,42 +203,39 @@ export default function CreateAccountScreen() {
     if (rawDigits.length < country.digits) {
       setErrorMsg(`Enter a ${country.digits}-digit number for ${country.name}.`); return;
     }
-    setErrorMsg(''); setLoading(true);
-    try {
-      await sendOtp(fullNumber);
-      setStep('otp'); startResendTimer();
-    } catch { setErrorMsg('Failed to send code. Please try again.'); }
-    finally { setLoading(false); }
+    setErrorMsg('');
+    await submitRegistration(name.trim(), fullNumber, avatarUri);
+    // Screen transition handled by useEffect watching registrationStep
   };
 
   // ── Step 2: Verify OTP → biometric ──────────────────────────────────────
   const handleVerify = async () => {
     const code = otp.join('');
     if (code.length < 6) { setErrorMsg('Enter all 6 digits.'); return; }
-    setErrorMsg(''); setLoading(true);
-    try {
-      const ok = await verifyOtp(fullNumber, code);
-      if (ok) {
-        setStep('biometric');
-      } else {
-        setErrorMsg('Incorrect code. Please try again.');
-        setOtp(['', '', '', '', '', '']);
-        otpRefs.current[0]?.focus();
-      }
-    } catch { setErrorMsg('Verification failed. Please try again.'); }
-    finally { setLoading(false); }
+    setErrorMsg('');
+    const ok = await verifyOTP(code);
+    if (ok) {
+      setStep('biometric');
+    } else if (!hookError) {
+      // Only set local error if hook didn't already provide one
+      setErrorMsg('Incorrect code. Please try again.');
+      setOtp(['', '', '', '', '', '']);
+      otpRefs.current[0]?.focus();
+    } else {
+      // Hook error synced via useEffect, just clear input
+      setOtp(['', '', '', '', '', '']);
+      otpRefs.current[0]?.focus();
+    }
   };
 
-  // ── Step 3: Biometric → create account ───────────────────────────────────
+  // ── Step 3: Biometric → create profile ─────────────────────────────────
   const handleBiometric = async () => {
     setLoading(true);
     try {
       const { success, message } = await runBiometric();
       if (success) {
-        await signIn(fullNumber);
-        await setDisplayName(name.trim());
-        if (avatarUri) await setAvatarUri(avatarUri);
-        // AppNavigator will react to isSignedIn and navigate to Chats
+        // Trigger Firestore profile creation (hook manages 'creating' → 'done' / 'error')
+        await createProfile();
       } else {
         Alert.alert(
           'Authentication failed',
@@ -216,28 +259,28 @@ export default function CreateAccountScreen() {
     }
   };
   const handleResend = async () => {
-    if (resendTimer > 0) return;
-    setOtp(['', '', '', '', '', '']); setErrorMsg(''); setLoading(true);
-    try { await sendOtp(fullNumber); startResendTimer(); }
-    catch { setErrorMsg('Failed to resend.'); }
-    finally { setLoading(false); }
+    if (resendTimer > 0 || !canResend) return;
+    setOtp(['', '', '', '', '', '']); setErrorMsg('');
+    const sent = await resendOTP();
+    if (sent) startResendTimer();
   };
 
-  // First letter of first name as avatar initial
-  const firstInitial = name.trim().charAt(0).toUpperCase() || '?';
+  // Compute form validity for button state
+  const isFormValid = validateUsername(name.trim()).valid && validatePhone(fullNumber);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
-      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      <SafeAreaView style={styles.root} edges={['top', 'left', 'right', 'bottom']}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Back link */}
+          {/* Back link - uses native back navigation */}
           <TouchableOpacity style={styles.backRow} onPress={() => navigation.goBack()}>
             <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
-            <Text style={styles.backText}>Sign In</Text>
+            <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
 
           <View style={styles.card}>
@@ -247,19 +290,13 @@ export default function CreateAccountScreen() {
                 <Text style={styles.cardSub}>Fill in your details to get started.</Text>
 
                 {/* Avatar picker */}
-                <TouchableOpacity style={styles.avatarWrap} onPress={pickPhoto} activeOpacity={0.8}>
-                  {avatarUri ? (
-                    <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
-                  ) : (
-                    <LinearGradient colors={[COLORS.blue, COLORS.blueDark]} style={styles.avatarPlaceholder}>
-                      <Text style={styles.avatarInitials}>{firstInitial}</Text>
-                    </LinearGradient>
-                  )}
+                <View style={styles.avatarWrap}>
+                  <AvatarPreview imageUri={avatarUri} username={name.trim()} size={90} onPress={pickPhoto} />
                   <View style={styles.cameraBadge}>
                     <Ionicons name="camera" size={14} color={COLORS.blue} />
                   </View>
                   <Text style={styles.avatarHint}>Add photo</Text>
-                </TouchableOpacity>
+                </View>
 
                 {/* Name */}
                 <View style={styles.inputWrap}>
@@ -271,11 +308,25 @@ export default function CreateAccountScreen() {
                     placeholder="Full name"
                     placeholderTextColor={COLORS.textFaint}
                     value={name}
-                    onChangeText={t => { setName(t); setErrorMsg(''); }}
+                    onChangeText={t => { setName(t); setErrorMsg(''); setNameError(''); }}
+                    onBlur={() => {
+                      const trimmed = name.trim();
+                      if (trimmed.length > 0) {
+                        const result = validateUsername(trimmed);
+                        if (!result.valid) {
+                          setNameError(result.error!);
+                        } else {
+                          setNameError('');
+                        }
+                      } else {
+                        setNameError('');
+                      }
+                    }}
                     autoCapitalize="words"
                     returnKeyType="next"
                   />
                 </View>
+                {nameError ? <Text style={styles.error}>{nameError}</Text> : null}
 
                 {/* Phone */}
                 <View style={styles.phoneRow}>
@@ -305,9 +356,9 @@ export default function CreateAccountScreen() {
 
                 {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
-                <TouchableOpacity onPress={handleSend} activeOpacity={0.85} disabled={loading}>
-                  <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Send Verification Code</Text>}
+                <TouchableOpacity onPress={handleSend} activeOpacity={0.85} disabled={hookLoading || !isFormValid}>
+                  <LinearGradient colors={GRADIENTS.primary} style={[styles.primaryBtn, (!isFormValid) && { opacity: 0.5 }]}>
+                    {hookLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Send Verification Code</Text>}
                   </LinearGradient>
                 </TouchableOpacity>
               </>
@@ -340,51 +391,101 @@ export default function CreateAccountScreen() {
 
                 {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
-                <TouchableOpacity onPress={handleVerify} activeOpacity={0.85} disabled={loading}>
+                <TouchableOpacity onPress={handleVerify} activeOpacity={0.85} disabled={hookLoading}>
                   <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Verify Code</Text>}
+                    {hookLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Verify Code</Text>}
                   </LinearGradient>
                 </TouchableOpacity>
 
                 <View style={styles.resendRow}>
                   <Text style={styles.resendLabel}>Didn't receive a code? </Text>
-                  <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0}>
-                    <Text style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
+                  <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0 || !canResend}>
+                    <Text style={[styles.resendLink, (resendTimer > 0 || !canResend) && styles.resendLinkDisabled]}>
                       {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.hintBox}>
-                  <Ionicons name="information-circle-outline" size={15} color={COLORS.sub} />
-                  <Text style={styles.hintText}>Demo: use code <Text style={styles.hintCode}>123456</Text></Text>
-                </View>
+                {!canResend && (
+                  <Text style={styles.resendLimitMsg}>Maximum resend attempts reached</Text>
+                )}
               </>
             ) : (
               /* Biometric step */
               <View style={styles.biometricWrap}>
-                <View style={styles.biometricIcon}>
-                  <Ionicons name="finger-print" size={70} color={COLORS.blue} />
-                </View>
-                <Text style={styles.cardTitle}>Two-Factor Verification</Text>
-                <Text style={styles.cardSub}>
-                  For your security, please verify your identity using{'\n'}
-                  your device's biometrics.
-                </Text>
+                {registrationStep === 'creating' ? (
+                  /* Profile creation in progress */
+                  <>
+                    <ActivityIndicator size="large" color={COLORS.blue} style={{ marginBottom: 20 }} />
+                    <Text style={styles.cardTitle}>Creating your profile...</Text>
+                    <Text style={styles.cardSub}>Please wait while we set up your account.</Text>
+                  </>
+                ) : registrationStep === 'error' ? (
+                  /* Profile creation failed */
+                  <>
+                    <View style={styles.biometricIcon}>
+                      <Ionicons name="alert-circle-outline" size={70} color={COLORS.missed} />
+                    </View>
+                    <Text style={styles.cardTitle}>Profile Creation Failed</Text>
+                    <Text style={[styles.cardSub, { textAlign: 'center', marginBottom: 16 }]}>
+                      {hookError ?? 'Something went wrong. Please try again.'}
+                    </Text>
 
-                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+                    <TouchableOpacity onPress={retryProfileCreation} activeOpacity={0.85}>
+                      <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                        <Text style={styles.primaryBtnText}>Retry</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
 
-                <TouchableOpacity onPress={handleBiometric} activeOpacity={0.85} disabled={loading}>
-                  <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                    {loading
-                      ? <ActivityIndicator color="#fff" />
-                      : <Text style={styles.primaryBtnText}>Verify with Biometrics</Text>}
-                  </LinearGradient>
-                </TouchableOpacity>
+                    {hookError && (hookError.toLowerCase().includes('upload') || hookError.toLowerCase().includes('photo') || hookError.toLowerCase().includes('storage')) && (
+                      <TouchableOpacity onPress={proceedWithoutPhoto} activeOpacity={0.85} style={{ marginTop: 12 }}>
+                        <View style={styles.secondaryBtn}>
+                          <Text style={styles.secondaryBtnText}>Continue without photo</Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                    
+                    <TouchableOpacity 
+                      onPress={() => {
+                        setStep('details');
+                        setErrorMsg('');
+                      }} 
+                      activeOpacity={0.85} 
+                      style={{ marginTop: 12 }}
+                    >
+                      <View style={styles.secondaryBtn}>
+                        <Text style={styles.secondaryBtnText}>Change Phone Number</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  /* Default biometric prompt */
+                  <>
+                    <View style={styles.biometricIcon}>
+                      <Ionicons name="finger-print" size={70} color={COLORS.blue} />
+                    </View>
+                    <Text style={styles.cardTitle}>Two-Factor Verification</Text>
+                    <Text style={styles.cardSub}>
+                      For your security, please verify your identity using{'\n'}
+                      your device's biometrics.
+                    </Text>
+
+                    {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+
+                    <TouchableOpacity onPress={handleBiometric} activeOpacity={0.85} disabled={loading}>
+                      <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                        {loading
+                          ? <ActivityIndicator color="#fff" />
+                          : <Text style={styles.primaryBtnText}>Verify with Biometrics</Text>}
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+    </SafeAreaView>
 
       <CountryPicker visible={pickerOpen} selected={country} onSelect={setCountry} onClose={() => setPickerOpen(false)} />
     </>
@@ -432,6 +533,9 @@ const styles = StyleSheet.create({
   primaryBtn:     { borderRadius: RADIUS.md, paddingVertical: 15, alignItems: 'center', ...SHADOW.button, marginTop: 4 },
   primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
+  secondaryBtn:     { borderRadius: RADIUS.md, paddingVertical: 15, alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.blue, backgroundColor: 'rgba(30,156,240,0.08)' },
+  secondaryBtnText: { color: COLORS.blue, fontSize: 15, fontWeight: '700' },
+
   phoneHighlight: { fontWeight: '700', color: COLORS.text },
 
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
@@ -467,10 +571,7 @@ const styles = StyleSheet.create({
   resendLabel:        { fontSize: 13, color: COLORS.sub },
   resendLink:         { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
   resendLinkDisabled: { color: COLORS.textFaint },
-
-  hintBox: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, padding: 10, backgroundColor: 'rgba(30,156,240,0.06)', borderRadius: RADIUS.sm, borderWidth: 1, borderColor: 'rgba(30,156,240,0.15)' },
-  hintText: { fontSize: 12, color: COLORS.sub },
-  hintCode: { fontWeight: '700', color: COLORS.blue },
+  resendLimitMsg:     { fontSize: 12, color: COLORS.missed, textAlign: 'center', marginTop: 8 },
 
   // Biometric step
   biometricWrap: { alignItems: 'center', paddingVertical: 10 },

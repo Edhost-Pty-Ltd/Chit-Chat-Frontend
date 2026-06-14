@@ -17,6 +17,8 @@ import React, {
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth, signOut as firebaseSignOut } from '@react-native-firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -137,6 +139,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })();
 
+    // Listen to Firebase auth state changes
+    const authInstance = getAuth();
+    const unsubscribe = authInstance.onAuthStateChanged(async (user) => {
+      console.log('[AuthContext] Firebase auth state changed:', user?.uid);
+      
+      if (!user) {
+        // User signed out in Firebase, sync with local state
+        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+        if (signedIn === 'true') {
+          console.log('[AuthContext] Firebase signed out but local state says signed in, cleaning up...');
+          await doSignOut();
+        }
+      } else {
+        // User signed in to Firebase
+        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+        if (signedIn !== 'true') {
+          console.log('[AuthContext] Firebase signed in but local state not updated');
+          // This case is handled by explicit signIn() call
+        }
+      }
+    });
+
     // On web, also check whenever the tab becomes visible again
     if (Platform.OS === 'web') {
       const handleVisibilityChange = async () => {
@@ -156,23 +180,89 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       };
       document.addEventListener('visibilitychange', handleVisibilityChange);
-      return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        unsubscribe();
+      };
     }
+    
+    return () => unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Public API ────────────────────────────────────────────────────────────
 
   const signIn = async (phoneNumber: string) => {
-    const now = Date.now().toString();
-    await AsyncStorage.multiSet([
-      [KEYS.phone,      phoneNumber],
-      [KEYS.signedIn,   'true'],
-      [KEYS.lastActive, now],
-    ]);
-    setPhone(phoneNumber);
-    setIsSignedIn(true);
-    if (Platform.OS === 'web') {
-      scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS);
+    try {
+      console.log('[AuthContext] Starting signIn for:', phoneNumber);
+      const now = Date.now().toString();
+      
+      // Save basic session data to AsyncStorage
+      await AsyncStorage.multiSet([
+        [KEYS.phone,      phoneNumber],
+        [KEYS.signedIn,   'true'],
+        [KEYS.lastActive, now],
+      ]);
+      console.log('[AuthContext] Session data saved to AsyncStorage');
+      
+      // Fetch user profile from Firestore and populate displayName and avatarUri
+      try {
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        
+        console.log('[AuthContext] Current Firebase user:', currentUser?.uid);
+        
+        if (currentUser) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          console.log('[AuthContext] Fetching user profile from Firestore...');
+          
+          const userSnap = await getDoc(userRef);
+          
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const firestoreDisplayName = userData.displayName || '';
+            const firestorePhotoURL = userData.photoURL || null;
+            
+            console.log('[AuthContext] Profile found in Firestore:', {
+              displayName: firestoreDisplayName,
+              photoURL: firestorePhotoURL,
+            });
+            
+            // Update state
+            if (firestoreDisplayName) {
+              setDisplayNameState(firestoreDisplayName);
+              await AsyncStorage.setItem(KEYS.displayName, firestoreDisplayName);
+            }
+            
+            if (firestorePhotoURL) {
+              setAvatarUriState(firestorePhotoURL);
+              await AsyncStorage.setItem(KEYS.avatarUri, firestorePhotoURL);
+            }
+          } else {
+            console.log('[AuthContext] No user profile found in Firestore');
+          }
+        } else {
+          console.warn('[AuthContext] No Firebase user found after sign-in');
+        }
+      } catch (error: any) {
+        console.error('[AuthContext] Error fetching user profile from Firestore:', error);
+        // Check if it's an offline error
+        if (error?.code === 'unavailable' || error?.message?.includes('offline')) {
+          console.warn('[AuthContext] Firestore offline - continuing with sign-in');
+        }
+        // Continue with sign-in even if profile fetch fails
+      }
+      
+      setPhone(phoneNumber);
+      setIsSignedIn(true);
+      console.log('[AuthContext] Sign-in completed successfully - isSignedIn state updated to true');
+      console.log('[AuthContext] Current state - phone:', phoneNumber, 'isSignedIn:', true);
+      
+      if (Platform.OS === 'web') {
+        scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS);
+      }
+    } catch (error: any) {
+      console.error('[AuthContext] Critical error during signIn:', error);
+      throw error; // Re-throw to let SignInScreen handle it
     }
   };
 

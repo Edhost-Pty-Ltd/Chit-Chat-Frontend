@@ -498,7 +498,13 @@ export default function ChatsScreen() {
     setSheetOpen(false);
     try {
       const chatId = await getOrCreateDirectChat(userId, contact.userId);
-      navigation.navigate('Chat', { chatId, displayName: contact.displayName, isGroup: false });
+      navigation.navigate('Chat', { 
+        chatId, 
+        displayName: contact.displayName, 
+        isGroup: false,
+        otherUserId: contact.userId,
+        otherUserPhoto: contact.contactPhotoUri || contact.photoURL || null,
+      });
     } catch (err) {
       console.error('Failed to create/get chat:', err);
     }
@@ -542,7 +548,13 @@ export default function ChatsScreen() {
 
     return (
       <TouchableOpacity style={[styles.chatCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} activeOpacity={0.75}
-        onPress={() => navigation.navigate('Chat', { chatId: item.chatId, displayName, isGroup })}>
+        onPress={() => navigation.navigate('Chat', { 
+          chatId: item.chatId, 
+          displayName, 
+          isGroup,
+          otherUserId: otherMemberId || undefined,
+          otherUserPhoto: firebasePhotoURL || contactPhotoUri || null,
+        })}>
         <ChatAvatar 
           displayName={displayName} 
           contactPhotoUri={contactPhotoUri}

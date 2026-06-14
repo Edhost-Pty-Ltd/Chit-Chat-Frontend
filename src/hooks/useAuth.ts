@@ -62,17 +62,36 @@ export function useAuth() {
       setStep('verifying');
       setError(null);
 
+      console.log('[useAuth] Confirming OTP...');
       const result = await confirm.confirm(otp);
+      console.log('[useAuth] OTP confirmed, user authenticated:', result?.user?.uid);
 
       if (result?.user) {
-        // Create or update user profile in Firestore
-        await upsertUserProfile(result.user);
+        // Try to create or update user profile in Firestore
+        // But don't fail sign-in if Firestore is offline
+        try {
+          console.log('[useAuth] Creating/updating user profile in Firestore...');
+          await upsertUserProfile(result.user);
+          console.log('[useAuth] User profile updated successfully');
+        } catch (firestoreError: any) {
+          console.error('[useAuth] Firestore error (non-critical):', firestoreError);
+          // If Firestore is offline, continue with sign-in anyway
+          if (firestoreError?.code === 'unavailable' || firestoreError?.message?.includes('offline')) {
+            console.warn('[useAuth] Firestore offline - continuing with sign-in');
+          } else {
+            // For other Firestore errors, log but don't block sign-in
+            console.warn('[useAuth] Non-critical Firestore error - continuing with sign-in');
+          }
+        }
+        
         setUser(result.user);
       }
 
       setStep('done');
+      console.log('[useAuth] Sign-in complete');
       return true;
     } catch (err: any) {
+      console.error('[useAuth] verifyOTP error:', err.code, err.message);
       setError(getAuthErrorMessage(err.code));
       setStep('error');
       return false;
@@ -93,21 +112,47 @@ export function useAuth() {
 
 // ─── Create user doc in Firestore if it doesn't exist yet ─────────────────────
 async function upsertUserProfile(user: FirebaseAuthTypes.User) {
-  const ref  = doc(db, 'users', user.uid);
-  const snap = await getDoc(ref);
+  try {
+    const ref  = doc(db, 'users', user.uid);
+    
+    console.log('[useAuth] Checking if user profile exists...');
+    
+    // Add timeout for Firestore operations
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Firestore operation timeout')), 15000)
+    );
+    
+    const snap = await Promise.race([
+      getDoc(ref),
+      timeoutPromise
+    ]) as any;
 
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      uid:         user.uid,
-      phone:       user.phoneNumber ?? '',
-      displayName: user.phoneNumber ?? '',   // user can update later
-      photoURL:    null,
-      createdAt:   serverTimestamp(),
-      lastSeen:    serverTimestamp(),
-    });
-  } else {
-    // Update lastSeen on every login
-    await setDoc(ref, { lastSeen: serverTimestamp() }, { merge: true });
+    if (!snap.exists()) {
+      console.log('[useAuth] Creating new user profile in Firestore...');
+      await Promise.race([
+        setDoc(ref, {
+          uid:         user.uid,
+          phone:       user.phoneNumber ?? '',
+          displayName: user.phoneNumber ?? '',   // user can update later
+          photoURL:    null,
+          createdAt:   serverTimestamp(),
+          lastSeen:    serverTimestamp(),
+        }),
+        timeoutPromise
+      ]);
+      console.log('[useAuth] New user profile created');
+    } else {
+      console.log('[useAuth] Updating existing user lastSeen...');
+      // Update lastSeen on every login
+      await Promise.race([
+        setDoc(ref, { lastSeen: serverTimestamp() }, { merge: true }),
+        timeoutPromise
+      ]);
+      console.log('[useAuth] User lastSeen updated');
+    }
+  } catch (error: any) {
+    console.error('[useAuth] upsertUserProfile error:', error);
+    throw error; // Re-throw to be handled by caller
   }
 }
 

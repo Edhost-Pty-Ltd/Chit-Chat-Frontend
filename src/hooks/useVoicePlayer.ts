@@ -2,10 +2,11 @@
 // Manages audio playback for voice notes. Single-active-player pattern ensures
 // only one voice note plays at a time. Handles audio mode configuration,
 // progress tracking, interruption, and cleanup.
+//
+// Uses expo-audio (SDK 56).
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
-import type { AVPlaybackStatus } from 'expo-av';
+import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -41,19 +42,88 @@ const LOADING_TIMEOUT_MS = 15_000;
 
 export function useVoicePlayer(): UseVoicePlayerReturn {
   const [state, setState] = useState<PlaybackState>(INITIAL_STATE);
+  const [currentSource, setCurrentSource] = useState<string | null>(null);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  // Create a player with current source
+  const player = useAudioPlayer(currentSource);
+  const playerStatus = useAudioPlayerStatus(player);
+
+  const activeMessageIdRef = useRef<string | null>(null);
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track whether we were previously playing — helps detect audio interruption
   const wasPlayingRef = useRef(false);
+
+  // ── Sync player status to state ─────────────────────────────────────────
+  useEffect(() => {
+    // Only process status updates when we have an active message
+    if (!activeMessageIdRef.current) return;
+
+    if (playerStatus.error) {
+      setState((prev) => ({
+        ...prev,
+        status: 'error',
+        error: playerStatus.error ?? 'Playback error',
+      }));
+      wasPlayingRef.current = false;
+      return;
+    }
+
+    if (playerStatus.didJustFinish) {
+      setState((prev) => ({
+        ...prev,
+        status: 'idle',
+        positionMs: 0,
+      }));
+      wasPlayingRef.current = false;
+      return;
+    }
+
+    if (playerStatus.playing) {
+      wasPlayingRef.current = true;
+      setState((prev) => ({
+        ...prev,
+        status: 'playing',
+        positionMs: Math.round(playerStatus.currentTime * 1000),
+        durationMs: playerStatus.duration > 0 ? Math.round(playerStatus.duration * 1000) : prev.durationMs,
+      }));
+    } else if (playerStatus.isLoaded && wasPlayingRef.current && !playerStatus.isBuffering) {
+      // Audio was interrupted externally (phone call etc.)
+      wasPlayingRef.current = false;
+      setState((prev) => {
+        if (prev.status === 'playing') {
+          return {
+            ...prev,
+            status: 'paused',
+            positionMs: Math.round(playerStatus.currentTime * 1000),
+          };
+        }
+        return prev;
+      });
+    } else if (playerStatus.isLoaded) {
+      setState((prev) => ({
+        ...prev,
+        positionMs: Math.round(playerStatus.currentTime * 1000),
+        durationMs: playerStatus.duration > 0 ? Math.round(playerStatus.duration * 1000) : prev.durationMs,
+      }));
+    }
+  }, [playerStatus]);
+
+  // ── Auto-play when source is set ────────────────────────────────────────
+  useEffect(() => {
+    if (currentSource && player && activeMessageIdRef.current) {
+      // Source was set, start playing
+      try {
+        player.play();
+      } catch (err) {
+        console.error('[useVoicePlayer] Auto-play error:', err);
+      }
+    }
+  }, [currentSource, player]);
 
   // ── Cleanup on unmount ──────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      cleanupSound();
       clearLoadingTimeout();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -65,97 +135,32 @@ export function useVoicePlayer(): UseVoicePlayerReturn {
     }
   }
 
-  async function cleanupSound() {
-    if (soundRef.current) {
-      try {
-        await soundRef.current.unloadAsync();
-      } catch {
-        // Ignore unload errors during cleanup
-      }
-      soundRef.current = null;
-    }
-    // Reset audio mode
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: false,
-        staysActiveInBackground: false,
-        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-    } catch {
-      // Ignore audio mode reset errors
-    }
-  }
-
-  // ── Playback Status Update Handler ──────────────────────────────────────
-
-  const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      // Handle error state when sound fails/unloads
-      if (status.error) {
-        setState((prev) => ({
-          ...prev,
-          status: 'error',
-          error: status.error ?? 'Playback error',
-        }));
-        wasPlayingRef.current = false;
-      }
-      return;
-    }
-
-    // Detect didJustFinish — reset position to 0, show play button
-    if (status.didJustFinish) {
-      setState((prev) => ({
-        ...prev,
-        status: 'idle',
-        positionMs: 0,
-      }));
-      wasPlayingRef.current = false;
-      return;
-    }
-
-    // Update position for waveform progress
-    if (status.isPlaying) {
-      wasPlayingRef.current = true;
-      setState((prev) => ({
-        ...prev,
-        status: 'playing',
-        positionMs: status.positionMillis,
-        durationMs: status.durationMillis ?? prev.durationMs,
-      }));
-    } else if (wasPlayingRef.current && !status.isBuffering) {
-      // Audio interruption: was playing but now stopped unexpectedly
-      // This handles external interruptions like phone calls
-      wasPlayingRef.current = false;
-      setState((prev) => {
-        // Only set paused if we were in a playing state
-        if (prev.status === 'playing') {
-          return {
-            ...prev,
-            status: 'paused',
-            positionMs: status.positionMillis,
-          };
-        }
-        return prev;
-      });
-    } else {
-      // Standard position update while paused or buffering
-      setState((prev) => ({
-        ...prev,
-        positionMs: status.positionMillis,
-        durationMs: status.durationMillis ?? prev.durationMs,
-      }));
-    }
-  }, []);
-
   // ── Play ────────────────────────────────────────────────────────────────
 
   const play = useCallback(async (voiceUrl: string, messageId: string, durationMs: number) => {
-    // Stop any currently playing sound
-    await stopInternal();
+    console.log('[useVoicePlayer] play() called:', {
+      voiceUrl,
+      messageId,
+      durationMs,
+      currentSource,
+      isLocal: voiceUrl.startsWith('file://'),
+      isFirebase: voiceUrl.startsWith('https://firebasestorage'),
+    });
+    
+    // If this is a new voice note (different URL), stop the current one first
+    if (currentSource && currentSource !== voiceUrl) {
+      try {
+        if (player) {
+          player.pause();
+        }
+      } catch (err) {
+        // Ignore errors from pausing - player might not be loaded
+        console.warn('[useVoicePlayer] Pause before new play (expected):', err);
+      }
+    }
+    
+    clearLoadingTimeout();
+    activeMessageIdRef.current = messageId;
 
     // Set loading state
     setState({
@@ -166,16 +171,11 @@ export function useVoicePlayer(): UseVoicePlayerReturn {
       error: null,
     });
 
-    // Configure audio mode for playback with ducking
+    // Configure audio mode for playback
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'duckOthers',
       });
     } catch {
       setState((prev) => ({
@@ -187,116 +187,106 @@ export function useVoicePlayer(): UseVoicePlayerReturn {
     }
 
     // Set up loading timeout
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      loadingTimeoutRef.current = setTimeout(() => {
-        reject(new Error('LOADING_TIMEOUT'));
-      }, LOADING_TIMEOUT_MS);
-    });
-
-    try {
-      // Create and load sound from URL — race against timeout
-      const createPromise = Audio.Sound.createAsync(
-        { uri: voiceUrl },
-        { shouldPlay: true },
-        onPlaybackStatusUpdate,
-      );
-
-      const { sound } = await Promise.race([createPromise, timeoutPromise]);
-
-      clearLoadingTimeout();
-      soundRef.current = sound;
-      wasPlayingRef.current = true;
-
-      setState((prev) => ({
-        ...prev,
-        status: 'playing',
-      }));
-    } catch (error: any) {
-      clearLoadingTimeout();
-
-      // Clean up any partially loaded sound
-      if (soundRef.current) {
-        try {
-          await soundRef.current.unloadAsync();
-        } catch {
-          // Ignore
-        }
-        soundRef.current = null;
-      }
-
-      const errorMessage = error?.message === 'LOADING_TIMEOUT'
-        ? 'Voice note unavailable — network timeout'
-        : 'Failed to load voice note';
-
+    loadingTimeoutRef.current = setTimeout(() => {
       setState((prev) => ({
         ...prev,
         status: 'error',
-        error: errorMessage,
+        error: 'Voice note unavailable — network timeout',
+      }));
+      activeMessageIdRef.current = null;
+    }, LOADING_TIMEOUT_MS);
+
+    try {
+      // If same source, just seek to start and play
+      if (currentSource === voiceUrl && player) {
+        console.log('[useVoicePlayer] Replaying same audio, seeking to start');
+        player.seekTo(0);
+        player.play();
+        clearLoadingTimeout();
+        wasPlayingRef.current = true;
+        setState((prev) => ({
+          ...prev,
+          status: 'playing',
+        }));
+      } else {
+        // Different source - update source to trigger player recreation
+        console.log('[useVoicePlayer] Loading new audio source');
+        setCurrentSource(voiceUrl);
+        clearLoadingTimeout();
+        wasPlayingRef.current = true;
+        setState((prev) => ({
+          ...prev,
+          status: 'playing',
+        }));
+      }
+    } catch (error: any) {
+      clearLoadingTimeout();
+      activeMessageIdRef.current = null;
+
+      console.error('[useVoicePlayer] Play error:', error);
+      setState((prev) => ({
+        ...prev,
+        status: 'error',
+        error: 'Failed to load voice note',
       }));
     }
-  }, [onPlaybackStatusUpdate]);
+  }, [currentSource, player]);
 
   // ── Pause ───────────────────────────────────────────────────────────────
 
   const pause = useCallback(async () => {
-    if (!soundRef.current) return;
-
     try {
-      await soundRef.current.pauseAsync();
-      wasPlayingRef.current = false;
-      setState((prev) => ({
-        ...prev,
-        status: 'paused',
-      }));
-    } catch {
-      // If pause fails, try to get current status
+      if (player) {
+        player.pause();
+        wasPlayingRef.current = false;
+        setState((prev) => ({
+          ...prev,
+          status: 'paused',
+        }));
+      }
+    } catch (err) {
+      console.error('[useVoicePlayer] Pause error:', err);
     }
-  }, []);
+  }, [player]);
 
   // ── Resume ──────────────────────────────────────────────────────────────
 
   const resume = useCallback(async () => {
-    if (!soundRef.current) return;
-
     try {
-      await soundRef.current.playAsync();
-      wasPlayingRef.current = true;
-      setState((prev) => ({
-        ...prev,
-        status: 'playing',
-      }));
-    } catch {
-      setState((prev) => ({
-        ...prev,
-        status: 'error',
-        error: 'Failed to resume playback',
-      }));
-    }
-  }, []);
-
-  // ── Stop (internal — used before new play and during cleanup) ───────────
-
-  async function stopInternal() {
-    clearLoadingTimeout();
-    wasPlayingRef.current = false;
-
-    if (soundRef.current) {
-      try {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-      } catch {
-        // Ignore stop/unload errors
+      if (player) {
+        player.play();
+        wasPlayingRef.current = true;
+        setState((prev) => ({
+          ...prev,
+          status: 'playing',
+        }));
       }
-      soundRef.current = null;
+    } catch (err) {
+      console.error('[useVoicePlayer] Resume error:', err);
     }
-  }
+  }, [player]);
 
   // ── Stop (public) ──────────────────────────────────────────────────────
 
   const stop = useCallback(async () => {
-    await stopInternal();
-    setState(INITIAL_STATE);
-  }, []);
+    try {
+      clearLoadingTimeout();
+      wasPlayingRef.current = false;
+      activeMessageIdRef.current = null;
+      
+      if (player && currentSource) {
+        player.pause();
+        player.seekTo(0);
+      }
+      
+      // Don't set currentSource to null - keep it so replay works
+      setState(INITIAL_STATE);
+    } catch (err) {
+      console.error('[useVoicePlayer] Stop error:', err);
+      // Reset state even if stop fails
+      setState(INITIAL_STATE);
+    }
+  }, [player, currentSource]);
 
   return { state, play, pause, resume, stop };
 }

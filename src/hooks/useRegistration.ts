@@ -131,6 +131,9 @@ export function useRegistration(): UseRegistrationReturn {
 
       const authInstance = getAuth();
       const currentUser = authInstance.currentUser;
+      
+      console.log('[useRegistration] createProfile - Current user:', currentUser?.uid);
+      
       if (!currentUser) {
         throw new Error('No authenticated user found');
       }
@@ -140,27 +143,45 @@ export function useRegistration(): UseRegistrationReturn {
 
       // Upload profile picture if provided
       if (imageUriRef.current) {
-        photoURL = await uploadProfilePicture(uid, imageUriRef.current);
+        console.log('[useRegistration] Uploading profile picture...');
+        try {
+          photoURL = await uploadProfilePicture(uid, imageUriRef.current);
+          console.log('[useRegistration] Profile picture uploaded:', photoURL);
+        } catch (uploadErr: any) {
+          console.error('[useRegistration] Photo upload failed:', uploadErr);
+          throw new Error(`Photo upload failed: ${uploadErr.message}`);
+        }
       }
 
       // Create/update Firestore user document
+      console.log('[useRegistration] Creating Firestore document for uid:', uid);
       const userDocRef = doc(db, 'users', uid);
-      await setDoc(
-        userDocRef,
-        {
-          uid,
-          username: usernameRef.current,
-          phone: phoneRef.current,
-          photoURL,
-          createdAt: serverTimestamp(),
-          lastSeen: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      
+      try {
+        await setDoc(
+          userDocRef,
+          {
+            uid,
+            displayName: usernameRef.current,  // Use displayName to match the rest of the app
+            phone: phoneRef.current,
+            photoURL,
+            createdAt: serverTimestamp(),
+            lastSeen: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        console.log('[useRegistration] Firestore document created successfully');
+      } catch (firestoreErr: any) {
+        console.error('[useRegistration] Firestore write failed:', firestoreErr);
+        throw new Error(`Database error: ${firestoreErr.message}`);
+      }
 
       setRegistrationStep('done');
+      console.log('[useRegistration] Profile creation complete');
     } catch (err: any) {
-      setError(getRegistrationErrorMessage(err.code ?? err.message));
+      console.error('[useRegistration] createProfile error:', err);
+      const errorMessage = err.message || getRegistrationErrorMessage(err.code);
+      setError(errorMessage);
       setRegistrationStep('error');
     } finally {
       setIsLoading(false);
@@ -195,16 +216,29 @@ export function useRegistration(): UseRegistrationReturn {
 
 // ─── Upload profile picture to Firebase Storage ───────────────────────────────
 async function uploadProfilePicture(uid: string, imageUri: string): Promise<string> {
-  const storageRef = ref(storage, `profile-pictures/${uid}.jpg`);
-
-  // Fetch the image as a blob for upload
-  const response = await fetch(imageUri);
-  const blob = await response.blob();
-
-  await uploadBytes(storageRef, blob);
-  const downloadURL = await getDownloadURL(storageRef);
-
-  return downloadURL;
+  console.log('[uploadProfilePicture] Starting upload for uid:', uid);
+  console.log('[uploadProfilePicture] Image URI:', imageUri);
+  
+  try {
+    // Use the fixed uploadFile function from storage.ts that handles React Native properly
+    const { uploadFile, generateFileName } = await import('../config/storage');
+    
+    const fileName = generateFileName('jpg');
+    console.log('[uploadProfilePicture] Uploading via storage.ts uploadFile...');
+    
+    const downloadURL = await uploadFile(imageUri, 'avatar', {
+      userId: uid,
+      fileName,
+    }, (progress) => {
+      console.log(`[uploadProfilePicture] Upload progress: ${progress}%`);
+    });
+    
+    console.log('[uploadProfilePicture] Upload complete:', downloadURL);
+    return downloadURL;
+  } catch (err: any) {
+    console.error('[uploadProfilePicture] Upload error:', err);
+    throw err;
+  }
 }
 
 // ─── Human-readable error messages ────────────────────────────────────────────

@@ -7,6 +7,9 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import { doc, updateDoc } from 'firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
+import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
@@ -26,7 +29,28 @@ export default function ProfileScreen() {
   // ── Save name ─────────────────────────────────────────────────────────────
   const saveName = async () => {
     const trimmed = draftName.trim();
-    if (trimmed) await setDisplayName(trimmed);
+    if (!trimmed) {
+      setEditingName(false);
+      return;
+    }
+    
+    try {
+      // Save to AsyncStorage via context
+      await setDisplayName(trimmed);
+      
+      // Also save to Firestore so other users can see the updated name
+      const authInstance = getAuth();
+      const currentUser = authInstance.currentUser;
+      if (currentUser) {
+        const userRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userRef, { displayName: trimmed });
+        console.log('[ProfileScreen] Updated displayName in Firestore:', trimmed);
+      }
+    } catch (error) {
+      console.error('[ProfileScreen] Error saving displayName:', error);
+      Alert.alert('Error', 'Failed to save display name. Please try again.');
+    }
+    
     setEditingName(false);
   };
 
@@ -45,8 +69,46 @@ export default function ProfileScreen() {
       aspect: [1, 1],
       quality: 0.85,
     });
+    
     if (!result.canceled && result.assets[0]) {
-      await setAvatarUri(result.assets[0].uri);
+      const uri = result.assets[0].uri;
+      
+      try {
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        
+        if (!currentUser) {
+          Alert.alert('Error', 'Not signed in');
+          return;
+        }
+        
+        // Upload to Firebase Storage first
+        console.log('[ProfileScreen] Uploading profile picture to Firebase Storage...');
+        const { uploadFile, generateFileName } = await import('../config/storage');
+        
+        const fileName = generateFileName('jpg');
+        const downloadURL = await uploadFile(uri, 'avatar', {
+          userId: currentUser.uid,
+          fileName,
+        }, (progress) => {
+          console.log(`[ProfileScreen] Upload progress: ${progress}%`);
+        });
+        
+        console.log('[ProfileScreen] Upload complete, download URL:', downloadURL);
+        
+        // Save local URI to AsyncStorage for immediate UI update
+        await setAvatarUri(uri);
+        
+        // Save download URL to Firestore so other users can access it
+        const userRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userRef, { photoURL: downloadURL });
+        console.log('[ProfileScreen] Updated photoURL in Firestore');
+        
+        Alert.alert('Success', 'Profile picture updated successfully');
+      } catch (error: any) {
+        console.error('[ProfileScreen] Error saving avatar:', error);
+        Alert.alert('Error', `Failed to save profile picture: ${error.message}`);
+      }
     }
   };
 

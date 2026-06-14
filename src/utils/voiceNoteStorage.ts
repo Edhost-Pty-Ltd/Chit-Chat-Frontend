@@ -13,10 +13,9 @@ export interface UploadResult {
 }
 
 // ─── Dev mode: skip real Firebase Storage upload ──────────────────────────────
-// Uses the local file URI directly as the "download URL" so playback works
-// on the same device without needing Firebase Storage (Blaze plan).
-// Remove this block and set USE_DEV_STORAGE_MOCK = false for production.
-const USE_DEV_STORAGE_MOCK = __DEV__;
+// DISABLED: Voice notes must use real Firebase Storage to work across devices.
+// The mock only stores local file URIs which don't exist on other devices.
+const USE_DEV_STORAGE_MOCK = false; // Changed from __DEV__ to false
 
 async function uploadVoiceNoteMock(
   uri: string,
@@ -45,47 +44,99 @@ async function uploadVoiceNoteReal(
   onProgress: (progress: UploadProgress) => void,
 ): Promise<UploadResult> {
   const storagePath = `voiceNotes/${chatId}/${messageId}.m4a`;
-  const storageRef = ref(storage, storagePath);
-
-  const response = await fetch(uri);
-  const blob = await response.blob();
-
-  if (blob.size > 10 * 1024 * 1024) {
-    throw new Error('RECORDING_TOO_LARGE');
+  
+  try {
+    console.log('[VoiceStorage] Reading file from:', uri);
+    
+    // Import file system and storage helpers
+    const { readAsStringAsync, EncodingType } = await import('expo-file-system/legacy');
+    const { getAuth } = await import('@react-native-firebase/auth');
+    
+    // Read file as base64
+    const base64Data = await readAsStringAsync(uri, {
+      encoding: EncodingType.Base64,
+    });
+    
+    console.log('[VoiceStorage] File read successfully, getting auth token...');
+    
+    // Get Firebase auth token
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('User not authenticated');
+    }
+    
+    const token = await currentUser.getIdToken();
+    console.log('[VoiceStorage] Got auth token, uploading via XMLHttpRequest...');
+    
+    // Convert base64 to Uint8Array (no blob!)
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Check file size
+    if (bytes.length > 10 * 1024 * 1024) {
+      throw new Error('RECORDING_TOO_LARGE');
+    }
+    
+    // Upload via XMLHttpRequest (works in React Native, no blobs!)
+    return new Promise<UploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      const timeout = setTimeout(() => {
+        xhr.abort();
+        reject(new Error('UPLOAD_TIMEOUT'));
+      }, 30000);
+      
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const percentage = Math.round((e.loaded / e.total) * 100);
+          onProgress({
+            bytesTransferred: e.loaded,
+            totalBytes: e.total,
+            percentage,
+          });
+        }
+      });
+      
+      xhr.addEventListener('load', () => {
+        clearTimeout(timeout);
+        if (xhr.status === 200) {
+          // Get download URL
+          const bucketName = 'chit-chat-67a7f.firebasestorage.app';
+          const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(storagePath)}?alt=media`;
+          console.log('[VoiceStorage] Upload complete, URL:', downloadUrl);
+          resolve({ downloadUrl, storagePath });
+        } else {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      });
+      
+      xhr.addEventListener('error', () => {
+        clearTimeout(timeout);
+        reject(new Error('Upload network error'));
+      });
+      
+      xhr.addEventListener('abort', () => {
+        clearTimeout(timeout);
+        reject(new Error('Upload aborted'));
+      });
+      
+      // Upload to Firebase Storage REST API
+      const bucketName = 'chit-chat-67a7f.firebasestorage.app';
+      const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o?name=${encodeURIComponent(storagePath)}`;
+      
+      xhr.open('POST', uploadUrl);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Content-Type', 'audio/mp4');
+      xhr.send(bytes);
+    });
+  } catch (error: any) {
+    console.error('[VoiceStorage] Upload error:', error);
+    throw error;
   }
-
-  const uploadTask = uploadBytesResumable(storageRef, blob, {
-    contentType: 'audio/mp4',
-  });
-
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      uploadTask.cancel();
-      reject(new Error('UPLOAD_TIMEOUT'));
-    }, 30000);
-
-    uploadTask.on(
-      'state_changed',
-      (snapshot) => {
-        onProgress({
-          bytesTransferred: snapshot.bytesTransferred,
-          totalBytes: snapshot.totalBytes,
-          percentage: Math.round(
-            (snapshot.bytesTransferred / snapshot.totalBytes) * 100,
-          ),
-        });
-      },
-      (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      },
-      async () => {
-        clearTimeout(timeout);
-        const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-        resolve({ downloadUrl, storagePath });
-      },
-    );
-  });
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────

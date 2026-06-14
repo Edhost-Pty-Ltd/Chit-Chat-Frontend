@@ -70,6 +70,18 @@ export function VoiceMessageBubble({
   const status = isActiveMessage ? playerState.status : 'idle';
   const positionMs = isActiveMessage ? playerState.positionMs : 0;
 
+  // Debug logging for voice URL
+  React.useEffect(() => {
+    console.log('[VoiceMessageBubble] Rendering:', {
+      messageId,
+      voiceUrl: _voiceUrl,
+      durationMs,
+      isOutgoing,
+      isLocal: _voiceUrl.startsWith('file://'),
+      isFirebase: _voiceUrl.startsWith('https://firebasestorage'),
+    });
+  }, [messageId, _voiceUrl, durationMs, isOutgoing]);
+
   const barHeights = React.useMemo(() => generateBarHeights(messageId), [messageId]);
 
   // Progress ratio for waveform fill

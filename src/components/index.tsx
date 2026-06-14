@@ -2,7 +2,8 @@
 import React from 'react';
 import {
   View, TouchableOpacity, StyleSheet, ViewStyle, Image,
-} from 'react-native';import { useNavigation } from '@react-navigation/native';
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,18 +21,32 @@ interface AvatarProps {
   size?: number;
   status?: ContactStatus;
   style?: ViewStyle;
+  imageUrl?: string | null;
 }
-export function Avatar({ initials, color, size = 44, status: _status, style }: AvatarProps) {
+export function Avatar({ initials, color, size = 44, status: _status, style, imageUrl }: AvatarProps) {
   return (
     <View style={[{ width: size, height: size }, style]}>
-      <View style={[styles.avatarCircle, {
-        width: size, height: size, borderRadius: size / 2,
-        backgroundColor: color,
-      }]}>
-        <AppText style={[styles.avatarText, { fontSize: Math.round(size * 0.36) }]}>
-          {initials}
-        </AppText>
-      </View>
+      {imageUrl ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: 2,
+            borderColor: 'rgba(255,255,255,0.50)',
+          }}
+        />
+      ) : (
+        <View style={[styles.avatarCircle, {
+          width: size, height: size, borderRadius: size / 2,
+          backgroundColor: color,
+        }]}>
+          <AppText style={[styles.avatarText, { fontSize: Math.round(size * 0.36) }]}>
+            {initials}
+          </AppText>
+        </View>
+      )}
     </View>
   );
 }
@@ -189,3 +204,8 @@ const styles = StyleSheet.create({
   headerTitle:    { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: COLORS.text },
   headerRightBtn: { width: 32, height: 32, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
 });
+
+// ─── Re-exports ──────────────────────────────────────────────────────────────
+// Export other components that are in separate files
+export { IncomingCallOverlay } from './IncomingCallOverlay';
+export { IncomingCallManager } from './IncomingCallManager';

@@ -28,6 +28,32 @@ export interface Message {
   type: MessageType;
 }
 
+// ─── Real-time Chat Message (Firestore) ───────────────────────────────────────
+export interface ChatMessage {
+  messageId: string;
+  senderId: string;
+  text: string | null;
+  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file';
+  
+  // Media URLs
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  voiceUrl?: string | null;
+  audioUrl?: string | null;
+  fileUrl?: string | null;
+  
+  // Media metadata
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  duration?: number;
+  thumbnailUrl?: string;
+  
+  timestamp: Date;
+  readBy: string[];
+  editedAt?: Date | null;
+}
+
 export interface Call {
   id: number;
   name: string;
@@ -70,7 +96,7 @@ export type RootStackParamList = {
   Splash: undefined;
   SignIn: undefined;
   Chats: undefined;
-  Chat: { chatId: string; displayName: string; isGroup: boolean };
+  Chat: { chatId: string; displayName: string; isGroup: boolean; otherUserId?: string; otherUserPhoto?: string | null };
   Calls: undefined;
   Status: undefined;
   Contacts: undefined;
@@ -82,5 +108,13 @@ export type RootStackParamList = {
   Profile: undefined;
   CreateAccount: undefined;
   VideoCall: { contact: Contact };
-  AudioCall: { contact: Contact };
+  AudioCall: { 
+    callId: string;
+    isOutgoing: boolean;
+    otherParty: {
+      userId: string;
+      displayName: string;
+      photoUrl: string | null;
+    };
+  };
 };

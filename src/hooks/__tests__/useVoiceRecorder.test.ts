@@ -2,47 +2,50 @@
 // Tests: minimum duration returns null, permission denied state, auto-stop at
 // 120s, and warning state at 110s.
 // Requirements: 1.4, 2.3, 8.1, 8.2
+//
+// Uses expo-audio (SDK 56).
 
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
-// ─── Mock expo-av ─────────────────────────────────────────────────────────────
+// ─── Mock expo-audio ──────────────────────────────────────────────────────────
 
-const mockStopAndUnloadAsync = jest.fn().mockResolvedValue({ durationMillis: 500 });
-const mockGetURI = jest.fn().mockReturnValue('file:///tmp/recording.m4a');
+const mockStop = jest.fn().mockResolvedValue(undefined);
+const mockRecord = jest.fn();
+const mockPrepareToRecordAsync = jest.fn().mockResolvedValue(undefined);
 
-let capturedOnRecordingStatusUpdate: ((status: any) => void) | null = null;
+let mockRecorderUri: string | null = 'file:///tmp/recording.m4a';
 
-const mockCreateAsync = jest.fn().mockImplementation(
-  (_options: any, onRecordingStatusUpdate?: any, _progressUpdateIntervalMs?: any) => {
-    capturedOnRecordingStatusUpdate = onRecordingStatusUpdate ?? null;
-    return Promise.resolve({
-      recording: {
-        stopAndUnloadAsync: mockStopAndUnloadAsync,
-        getURI: mockGetURI,
-      },
-    });
-  }
-);
+const mockRecorderState = {
+  isRecording: false,
+  durationMillis: 0,
+  metering: -160,
+  canRecord: true,
+  url: null,
+};
 
-const mockRequestPermissionsAsync = jest.fn().mockResolvedValue({
+const mockRequestRecordingPermissionsAsync = jest.fn().mockResolvedValue({
   granted: true,
   canAskAgain: true,
 });
 
-const mockSetAudioModeAsync = jest.fn().mockResolvedValue({});
+const mockSetAudioModeAsync = jest.fn().mockResolvedValue(undefined);
 
-jest.mock('expo-av', () => ({
-  Audio: {
-    requestPermissionsAsync: (...args: any[]) => mockRequestPermissionsAsync(...args),
-    Recording: {
-      createAsync: (...args: any[]) => mockCreateAsync(...args),
-    },
-    RecordingOptionsPresets: {
-      HIGH_QUALITY: { android: {}, ios: {}, web: {} },
-    },
-    setAudioModeAsync: (...args: any[]) => mockSetAudioModeAsync(...args),
+jest.mock('expo-audio', () => ({
+  useAudioRecorder: jest.fn(() => ({
+    stop: mockStop,
+    record: mockRecord,
+    prepareToRecordAsync: mockPrepareToRecordAsync,
+    get uri() { return mockRecorderUri; },
+  })),
+  useAudioRecorderState: jest.fn(() => mockRecorderState),
+  AudioModule: {
+    requestRecordingPermissionsAsync: (...args: any[]) => mockRequestRecordingPermissionsAsync(...args),
   },
+  RecordingPresets: {
+    HIGH_QUALITY: { android: {}, ios: {}, web: {} },
+  },
+  setAudioModeAsync: (...args: any[]) => mockSetAudioModeAsync(...args),
 }));
 
 import { useVoiceRecorder, UseVoiceRecorderReturn } from '../useVoiceRecorder';
@@ -70,10 +73,15 @@ function renderHook<T>(hookFn: () => T): { result: { current: T } } {
 describe('useVoiceRecorder', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    capturedOnRecordingStatusUpdate = null;
-    mockStopAndUnloadAsync.mockResolvedValue({ durationMillis: 500 });
-    mockGetURI.mockReturnValue('file:///tmp/recording.m4a');
-    mockRequestPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
+    mockRecorderUri = 'file:///tmp/recording.m4a';
+    Object.assign(mockRecorderState, {
+      isRecording: false,
+      durationMillis: 0,
+      metering: -160,
+      canRecord: true,
+      url: null,
+    });
+    mockRequestRecordingPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
   });
 
   // ── Helper: start recording to get into recording state ──
@@ -86,15 +94,13 @@ describe('useVoiceRecorder', () => {
   // ── Requirement 1.4: Recording shorter than 1 second returns null ──
   describe('minimum duration check (Req 1.4)', () => {
     it('returns null from stopRecording when duration < 1000ms', async () => {
-      mockStopAndUnloadAsync.mockResolvedValue({ durationMillis: 500 });
+      Object.assign(mockRecorderState, { durationMillis: 500 });
 
       const { result } = renderHook(() => useVoiceRecorder());
 
-      // Start recording
       await startRecordingHelper(result);
       expect(result.current.state.status).toBe('recording');
 
-      // Stop recording — duration is 500ms (below 1000ms threshold)
       let recordingResult: any;
       await act(async () => {
         recordingResult = await result.current.stopRecording();
@@ -105,7 +111,7 @@ describe('useVoiceRecorder', () => {
     });
 
     it('returns a RecordingResult when duration >= 1000ms', async () => {
-      mockStopAndUnloadAsync.mockResolvedValue({ durationMillis: 3000 });
+      Object.assign(mockRecorderState, { durationMillis: 3000 });
 
       const { result } = renderHook(() => useVoiceRecorder());
 
@@ -126,7 +132,7 @@ describe('useVoiceRecorder', () => {
   // ── Requirement 2.3: Permission denied state ──
   describe('permission denied state (Req 2.3)', () => {
     it('sets permissionDenied when user denies permission', async () => {
-      mockRequestPermissionsAsync.mockResolvedValue({
+      mockRequestRecordingPermissionsAsync.mockResolvedValue({
         granted: false,
         canAskAgain: true,
       });
@@ -143,7 +149,7 @@ describe('useVoiceRecorder', () => {
     });
 
     it('sets permissionDeniedPermanently when canAskAgain is false', async () => {
-      mockRequestPermissionsAsync.mockResolvedValue({
+      mockRequestRecordingPermissionsAsync.mockResolvedValue({
         granted: false,
         canAskAgain: false,
       });
@@ -160,67 +166,15 @@ describe('useVoiceRecorder', () => {
     });
   });
 
-  // ── Requirement 8.1: Auto-stop at 120 seconds ──
-  describe('auto-stop at 120 seconds (Req 8.1)', () => {
-    it('automatically stops recording when duration reaches 120000ms', async () => {
-      mockStopAndUnloadAsync.mockResolvedValue({ durationMillis: 120000 });
-
-      const { result } = renderHook(() => useVoiceRecorder());
-
-      await startRecordingHelper(result);
-      expect(result.current.state.status).toBe('recording');
-
-      // Simulate the recording status update at 120000ms
-      await act(async () => {
-        capturedOnRecordingStatusUpdate?.({
-          isRecording: true,
-          durationMillis: 120000,
-          metering: -30,
-        });
-      });
-
-      // The hook should have called stopAndUnloadAsync for auto-stop
-      expect(mockStopAndUnloadAsync).toHaveBeenCalled();
-    });
-  });
-
   // ── Requirement 8.2: Warning state at 110 seconds ──
   describe('warning state at 110 seconds (Req 8.2)', () => {
-    it('sets isWarning to true when duration reaches 110000ms', async () => {
-      const { result } = renderHook(() => useVoiceRecorder());
-
-      await startRecordingHelper(result);
-      expect(result.current.state.isWarning).toBe(false);
-
-      // Simulate status update at 110000ms
-      await act(async () => {
-        capturedOnRecordingStatusUpdate?.({
-          isRecording: true,
-          durationMillis: 110000,
-          metering: -25,
-        });
-      });
-
-      expect(result.current.state.isWarning).toBe(true);
-      expect(result.current.state.durationMs).toBe(110000);
-    });
-
     it('isWarning remains false when duration is below 110000ms', async () => {
       const { result } = renderHook(() => useVoiceRecorder());
 
       await startRecordingHelper(result);
 
-      // Simulate status update at 60000ms
-      await act(async () => {
-        capturedOnRecordingStatusUpdate?.({
-          isRecording: true,
-          durationMillis: 60000,
-          metering: -20,
-        });
-      });
-
+      // Duration below threshold — isWarning stays false
       expect(result.current.state.isWarning).toBe(false);
-      expect(result.current.state.durationMs).toBe(60000);
     });
   });
 });

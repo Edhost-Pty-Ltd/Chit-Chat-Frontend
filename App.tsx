@@ -5,6 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
+import { CallProvider } from './src/context/CallContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
 // Disable native screens on web to avoid touch/interaction issues
@@ -42,11 +43,13 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ActivityWatcher />
-        <NavigationContainer>
-          <StatusBar style="auto" />
-          <AppNavigator />
-        </NavigationContainer>
+        <CallProvider>
+          <ActivityWatcher />
+          <NavigationContainer>
+            <StatusBar style="auto" />
+            <AppNavigator />
+          </NavigationContainer>
+        </CallProvider>
       </AuthProvider>
     </ThemeProvider>
   );

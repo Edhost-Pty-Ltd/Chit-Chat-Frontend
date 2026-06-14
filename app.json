@@ -40,6 +40,28 @@
         {
           "microphonePermission": "Chit-Chat needs access to your microphone to record voice notes."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photoPermission": "Chit-Chat needs access to your photos to share images in chats.",
+          "cameraPermission": "Chit-Chat needs camera access to take photos and videos."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Chit-Chat needs camera access to take photos and videos.",
+          "microphonePermission": "Chit-Chat needs microphone access to record videos with sound."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Chit-Chat needs access to your photos to share images in chats.",
+          "savePhotosPermission": "Chit-Chat needs permission to save photos to your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
       ]
     ],
     "android": {
@@ -55,8 +77,20 @@
       "permissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.WRITE_CONTACTS",
-        "android.permission.RECORD_AUDIO"
-      ]
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "softwareKeyboardLayoutMode": "pan",
+      "navigationBar": {
+        "visible": "leanback"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"

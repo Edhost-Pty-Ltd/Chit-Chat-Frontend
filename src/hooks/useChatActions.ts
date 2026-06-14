@@ -14,25 +14,32 @@ export async function getOrCreateDirectChat(
   currentUserId: string,
   otherUserId: string,
 ): Promise<string> {
+  // Ensure consistent ordering of user IDs to prevent duplicates
+  const sortedIds = [currentUserId, otherUserId].sort();
+  
+  console.log('[getOrCreateDirectChat] Looking for chat between:', sortedIds);
+  
   // Check if a direct chat already exists between these two users
+  // Query for chats where both users are members
   const q = query(
     collection(db, 'chats'),
     where('type', '==', 'direct'),
-    where('members', 'array-contains', currentUserId),
+    where('members', '==', sortedIds), // Exact match with sorted array
   );
 
   const snap = await getDocs(q);
-  const existing = snap.docs.find((doc) => {
-    const members: string[] = doc.data().members ?? [];
-    return members.includes(otherUserId);
-  });
+  
+  if (snap.docs.length > 0) {
+    console.log('[getOrCreateDirectChat] Found existing chat:', snap.docs[0].id);
+    return snap.docs[0].id;
+  }
 
-  if (existing) return existing.id;
-
-  // Create new direct chat
+  console.log('[getOrCreateDirectChat] Creating new chat');
+  
+  // Create new direct chat with sorted member IDs
   const newChat = await addDoc(collection(db, 'chats'), {
     type:        'direct',
-    members:     [currentUserId, otherUserId],
+    members:     sortedIds, // Always store in sorted order
     groupName:   null,
     groupPhoto:  null,
     createdBy:   currentUserId,
@@ -44,6 +51,7 @@ export async function getOrCreateDirectChat(
     },
   });
 
+  console.log('[getOrCreateDirectChat] Created new chat:', newChat.id);
   return newChat.id;
 }
 
@@ -195,3 +203,213 @@ export async function sendVoiceMessage(
     return { success: false, messageId: '' };
   }
 }
+
+// ── Send an image message ─────────────────────────────────────────────────────
+export async function sendImageMessage(
+  chatId: string,
+  senderId: string,
+  imageUri: string,
+  onProgress?: (progress: number) => void,
+): Promise<{ success: boolean; messageId: string }> {
+  try {
+    console.log('[sendImageMessage] Starting upload...');
+    
+    // Upload image to Storage
+    const { uploadFile, generateFileName, getFileExtension } = await import('../config/storage');
+    const fileName = generateFileName(getFileExtension(imageUri));
+    
+    const imageUrl = await uploadFile(imageUri, 'chatMedia', {
+      chatId,
+      fileName,
+    }, onProgress);
+    
+    console.log('[sendImageMessage] Upload complete, creating message...');
+    
+    // Get chat members
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return { success: false, messageId: '' };
+    
+    const members: string[] = chatSnap.data().members ?? [];
+    const otherMembers = members.filter((id) => id !== senderId);
+    
+    // Create message
+    const batch = writeBatch(db);
+    const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+    
+    batch.set(msgRef, {
+      messageId: msgRef.id,
+      senderId,
+      text: null,
+      type: 'image',
+      imageUrl,
+      timestamp: serverTimestamp(),
+      readBy: [senderId],
+    });
+    
+    // Update chat
+    const unreadUpdates = Object.fromEntries(
+      otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
+    );
+    
+    batch.update(chatRef, {
+      'lastMessage.text': '📷 Photo',
+      'lastMessage.senderId': senderId,
+      'lastMessage.timestamp': serverTimestamp(),
+      ...unreadUpdates,
+    });
+    
+    await batch.commit();
+    console.log('[sendImageMessage] Message created successfully');
+    return { success: true, messageId: msgRef.id };
+  } catch (err) {
+    console.error('sendImageMessage error:', err);
+    return { success: false, messageId: '' };
+  }
+}
+
+// ── Send a video message ──────────────────────────────────────────────────────
+export async function sendVideoMessage(
+  chatId: string,
+  senderId: string,
+  videoUri: string,
+  thumbnailUri?: string,
+  onProgress?: (progress: number) => void,
+): Promise<{ success: boolean; messageId: string }> {
+  try {
+    console.log('[sendVideoMessage] Starting upload...');
+    
+    const { uploadFile, generateFileName, getFileExtension } = await import('../config/storage');
+    
+    // Upload video
+    const videoFileName = generateFileName(getFileExtension(videoUri));
+    const videoUrl = await uploadFile(videoUri, 'chatMedia', {
+      chatId,
+      fileName: videoFileName,
+    }, onProgress);
+    
+    // Upload thumbnail if provided
+    let thumbnailUrl: string | undefined;
+    if (thumbnailUri) {
+      const thumbFileName = generateFileName('.jpg');
+      thumbnailUrl = await uploadFile(thumbnailUri, 'chatMedia', {
+        chatId,
+        fileName: thumbFileName,
+      });
+    }
+    
+    console.log('[sendVideoMessage] Upload complete, creating message...');
+    
+    // Get chat members
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return { success: false, messageId: '' };
+    
+    const members: string[] = chatSnap.data().members ?? [];
+    const otherMembers = members.filter((id) => id !== senderId);
+    
+    // Create message
+    const batch = writeBatch(db);
+    const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+    
+    batch.set(msgRef, {
+      messageId: msgRef.id,
+      senderId,
+      text: null,
+      type: 'video',
+      videoUrl,
+      thumbnailUrl,
+      timestamp: serverTimestamp(),
+      readBy: [senderId],
+    });
+    
+    // Update chat
+    const unreadUpdates = Object.fromEntries(
+      otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
+    );
+    
+    batch.update(chatRef, {
+      'lastMessage.text': '🎥 Video',
+      'lastMessage.senderId': senderId,
+      'lastMessage.timestamp': serverTimestamp(),
+      ...unreadUpdates,
+    });
+    
+    await batch.commit();
+    console.log('[sendVideoMessage] Message created successfully');
+    return { success: true, messageId: msgRef.id };
+  } catch (err) {
+    console.error('sendVideoMessage error:', err);
+    return { success: false, messageId: '' };
+  }
+}
+
+// ── Send a file message ───────────────────────────────────────────────────────
+export async function sendFileMessage(
+  chatId: string,
+  senderId: string,
+  fileUri: string,
+  fileName: string,
+  fileSize: number,
+  mimeType: string,
+  onProgress?: (progress: number) => void,
+): Promise<{ success: boolean; messageId: string }> {
+  try {
+    console.log('[sendFileMessage] Starting upload...');
+    
+    const { uploadFile } = await import('../config/storage');
+    
+    // Upload file
+    const fileUrl = await uploadFile(fileUri, 'chatMedia', {
+      chatId,
+      fileName,
+    }, onProgress);
+    
+    console.log('[sendFileMessage] Upload complete, creating message...');
+    
+    // Get chat members
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return { success: false, messageId: '' };
+    
+    const members: string[] = chatSnap.data().members ?? [];
+    const otherMembers = members.filter((id) => id !== senderId);
+    
+    // Create message
+    const batch = writeBatch(db);
+    const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+    
+    batch.set(msgRef, {
+      messageId: msgRef.id,
+      senderId,
+      text: null,
+      type: 'file',
+      fileUrl,
+      fileName,
+      fileSize,
+      mimeType,
+      timestamp: serverTimestamp(),
+      readBy: [senderId],
+    });
+    
+    // Update chat
+    const unreadUpdates = Object.fromEntries(
+      otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
+    );
+    
+    batch.update(chatRef, {
+      'lastMessage.text': `📎 ${fileName}`,
+      'lastMessage.senderId': senderId,
+      'lastMessage.timestamp': serverTimestamp(),
+      ...unreadUpdates,
+    });
+    
+    await batch.commit();
+    console.log('[sendFileMessage] Message created successfully');
+    return { success: true, messageId: msgRef.id };
+  } catch (err) {
+    console.error('sendFileMessage error:', err);
+    return { success: false, messageId: '' };
+  }
+}
+

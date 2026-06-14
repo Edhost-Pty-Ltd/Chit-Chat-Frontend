@@ -4,7 +4,7 @@ import {
   View, FlatList, TouchableOpacity, ScrollView,
   StyleSheet, TextInput, KeyboardAvoidingView, Platform,
   ActivityIndicator, PanResponder, Linking, Modal, Alert,
-  GestureResponderEvent, PanResponderGestureState,
+  GestureResponderEvent, PanResponderGestureState, Image, Dimensions,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -12,22 +12,26 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { usePermissions as useMediaLibraryPermissions } from 'expo-media-library';
 import { collection, doc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Avatar } from '../components';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
+import { FileMessageBubble } from '../components/FileMessageBubble';
 import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages, FireMessage } from '../hooks/useMessages';
 import { useVoicePlayer } from '../hooks/useVoicePlayer';
 import { useVoiceRecorder, RecordingResult } from '../hooks/useVoiceRecorder';
+import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
-import { sendVoiceMessage } from '../hooks/useChatActions';
+import { sendVoiceMessage, sendImageMessage, sendFileMessage } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type NavProp       = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
 type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -37,9 +41,9 @@ const PERMISSION_MESSAGE_DURATION_MS = 3000;
 
 // Common emoji picks
 const EMOJI_LIST = [
-  '😀','😂','😍','🥰','😎','😢','😡','👍','👎','❤️',
-  '🔥','🎉','🙏','💯','✅','🤣','😅','🤔','👀','💪',
-  '🥳','😭','🫡','💀','🤯','🫶','😴','🤩','😏','🙈',
+  '😀', '😂', '😍', '🥰', '😎', '😢', '😡', '👍', '👎', '❤️',
+  '🔥', '🎉', '🙏', '💯', '✅', '🤣', '😅', '🤔', '👀', '💪',
+  '🥳', '😭', '🫡', '💀', '🤯', '🫶', '😴', '🤩', '😏', '🙈',
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,12 +63,14 @@ function formatTime(date: Date | null): string {
 
 export default function ChatScreen() {
   const navigation = useNavigation<NavProp>();
-  const route      = useRoute<RoutePropType>();
-  const { chatId, displayName, isGroup } = route.params;
-  const { FG }     = useForeground();
+  const route = useRoute<RoutePropType>();
+  const insets = useSafeAreaInsets();
+  const { chatId, displayName, isGroup, otherUserId, otherUserPhoto } = route.params;
+  const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
 
-  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [mediaLibraryPermission, requestMediaLibraryPermission] = useMediaLibraryPermissions();
 
   // ── Auth — get current user ID ──────────────────────────────────
   const { user } = useAuth();
@@ -79,6 +85,9 @@ export default function ChatScreen() {
   // ── Voice recorder ─────────────────────────────────────────────
   const recorder = useVoiceRecorder();
 
+  // ── Outgoing call ──────────────────────────────────────────────
+  const outgoingCall = useOutgoingCall();
+
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
   const [showEmoji, setShowEmoji] = useState(false);
@@ -91,6 +100,17 @@ export default function ChatScreen() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const pendingRecordingRef = useRef<RecordingResult | null>(null);
+
+  // ── Image upload state ──────────────────────────────────────────
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageUploadProgress, setImageUploadProgress] = useState<number>(0);
+
+  // ── Image viewer state ──────────────────────────────────────────
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
+
+  // ── Camera ref ──────────────────────────────────────────────────
+  const cameraRef = useRef<any>(null);
 
   // ── Permission message state ────────────────────────────────────
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
@@ -202,6 +222,57 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Voice call handler ──────────────────────────────────────────
+  const handleVoiceCall = useCallback(async () => {
+    if (!userId || !otherUserId || isGroup) {
+      Alert.alert('Cannot make call', isGroup ? 'Group calls are not supported yet.' : 'User information not available.');
+      return;
+    }
+
+    if (outgoingCall.isInitiating) {
+      return; // Already initiating a call
+    }
+
+    try {
+      console.log('[ChatScreen] Initiating voice call to:', otherUserId);
+
+      // Get current user's profile data
+      const callerInfo = {
+        userId: userId,
+        displayName: user?.displayName || 'Unknown',
+        photoUrl: user?.photoURL || null,
+      };
+
+      const calleeInfo = {
+        userId: otherUserId,
+        displayName: displayName,
+        photoUrl: otherUserPhoto || null,
+      };
+
+      // Initiate the call
+      const callId = await outgoingCall.initiateCall(
+        userId,
+        otherUserId,
+        callerInfo,
+        calleeInfo
+      );
+
+      if (callId) {
+        // Navigate to AudioCallScreen
+        navigation.navigate('AudioCall', {
+          callId,
+          isOutgoing: true,
+          otherParty: calleeInfo,
+        });
+      } else {
+        Alert.alert('Call Failed', outgoingCall.error || 'Failed to initiate call');
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Error initiating call:', error);
+      Alert.alert('Call Failed', 'An error occurred while trying to start the call');
+    }
+  }, [userId, otherUserId, isGroup, displayName, otherUserPhoto, user, outgoingCall, navigation]);
+
   // ── PanResponder for mic button ─────────────────────────────────
   const micPanResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -249,34 +320,274 @@ export default function ChatScreen() {
     dismissPermissionMessage();
   }, [dismissPermissionMessage]);
 
+  // ── Image compression helper ────────────────────────────────────
+  const compressImage = async (uri: string): Promise<string> => {
+    try {
+      console.log('[ChatScreen] Attempting to compress image:', uri);
+      
+      // Dynamic import to avoid crash if module not available
+      const { manipulateAsync, SaveFormat } = await import('expo-image-manipulator');
+      
+      const compressed = await manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }], // Resize to max 1200px width, maintain aspect ratio
+        { compress: 0.8, format: SaveFormat.JPEG }
+      );
+      
+      console.log('[ChatScreen] Compressed successfully');
+      return compressed.uri;
+    } catch (error) {
+      console.warn('[ChatScreen] Compression not available or failed, using original:', error);
+      return uri; // Fallback to original if compression fails or module unavailable
+    }
+  };
+
+  // ── Upload single image helper ─────────────────────────────────
+  const uploadSingleImage = async (uri: string) => {
+    if (!userId) return;
+
+    try {
+      console.log('[ChatScreen] Uploading image:', uri);
+      
+      // Compress before upload
+      const compressedUri = await compressImage(uri);
+      
+      const uploadResult = await sendImageMessage(
+        chatId,
+        userId,
+        compressedUri,
+        (progress) => {
+          setImageUploadProgress(progress);
+          console.log('[ChatScreen] Image upload progress:', progress);
+        }
+      );
+      
+      if (!uploadResult.success) {
+        Alert.alert('Upload Failed', 'Could not send the image. Please try again.');
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Upload error:', error);
+      Alert.alert('Error', 'Failed to upload image.');
+    }
+  };
+
   // ── Camera / gallery / documents ────────────────────────────────
   const openCamera = async () => {
     if (Platform.OS === 'web') {
       Alert.alert('Camera', 'Camera is not available on web.');
       return;
     }
-    const { granted } = permission ?? await requestPermission();
-    if (!granted) { Alert.alert('Permission needed', 'Allow camera access to take photos.'); return; }
-    setCameraOpen(true);
+    
+    // Check if permission is already granted
+    if (cameraPermission?.granted) {
+      setCameraOpen(true);
+      return;
+    }
+    
+    // Request permission
+    const { granted } = await requestCameraPermission();
+    if (granted) {
+      setCameraOpen(true);
+    } else {
+      Alert.alert('Permission needed', 'Allow camera access to take photos.');
+    }
+  };
+
+  const takePicture = async () => {
+    if (!cameraRef.current || !userId) return;
+
+    try {
+      console.log('[ChatScreen] Taking picture...');
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.85,
+      });
+      
+      console.log('[ChatScreen] Picture taken:', photo.uri);
+      setCameraOpen(false);
+      
+      setUploadingImage(true);
+      setImageUploadProgress(0);
+      
+      await uploadSingleImage(photo.uri);
+      
+      setUploadingImage(false);
+      setImageUploadProgress(0);
+      console.log('[ChatScreen] Picture uploaded successfully');
+    } catch (error) {
+      console.error('[ChatScreen] Camera error:', error);
+      Alert.alert('Error', 'Failed to take or upload picture.');
+      setUploadingImage(false);
+      setImageUploadProgress(0);
+    }
   };
 
   const openGallery = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsMultipleSelection: true,
-      quality: 0.85,
-    });
-    if (!result.canceled) {
-      setShowAttach(false);
-      Alert.alert('Photos selected', `${result.assets.length} item(s) selected.\n(Would be sent as messages)`);
+    try {
+      // Request media library permission first
+      const { granted } = mediaLibraryPermission ?? await requestMediaLibraryPermission();
+      if (!granted) {
+        Alert.alert('Permission needed', 'Allow photo access to select images from your gallery.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true, // Enable multiple selection
+        quality: 0.85,
+      });
+      
+      if (!result.canceled && result.assets.length > 0 && userId) {
+        setShowAttach(false);
+        setUploadingImage(true);
+        setImageUploadProgress(0);
+        
+        // Upload images sequentially
+        for (let i = 0; i < result.assets.length; i++) {
+          const imageUri = result.assets[i].uri;
+          console.log(`[ChatScreen] Uploading image ${i + 1}/${result.assets.length}`);
+          
+          try {
+            // Reset progress for each image
+            setImageUploadProgress(0);
+            
+            const compressedUri = await compressImage(imageUri);
+            
+            const uploadResult = await sendImageMessage(
+              chatId,
+              userId,
+              compressedUri,
+              (progress) => {
+                setImageUploadProgress(progress);
+                console.log(`[ChatScreen] Image ${i + 1} upload progress:`, progress);
+              }
+            );
+            
+            if (!uploadResult.success) {
+              console.error(`[ChatScreen] Image ${i + 1} upload failed`);
+              Alert.alert('Upload Failed', `Image ${i + 1} could not be sent. Continuing with others...`);
+            } else {
+              console.log(`[ChatScreen] Image ${i + 1} uploaded successfully`);
+            }
+          } catch (error) {
+            console.error(`[ChatScreen] Image ${i + 1} upload error:`, error);
+            Alert.alert('Error', `Failed to upload image ${i + 1}. Continuing with others...`);
+          }
+        }
+        
+        console.log('[ChatScreen] All images processed');
+        setUploadingImage(false);
+        setImageUploadProgress(0);
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Gallery error:', error);
+      setUploadingImage(false);
+      setImageUploadProgress(0);
+      Alert.alert('Error', 'Failed to select or upload images.');
     }
   };
 
   const openDocuments = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ multiple: true });
-    if (!result.canceled) {
-      setShowAttach(false);
-      Alert.alert('Files selected', `${result.assets.length} file(s) selected.\n(Would be sent as messages)`);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ 
+        multiple: true,
+        type: '*/*', // Allow all file types
+      });
+      
+      if (!result.canceled && result.assets.length > 0 && userId) {
+        setShowAttach(false);
+        setUploadingImage(true);
+        setImageUploadProgress(0);
+        
+        for (let i = 0; i < result.assets.length; i++) {
+          const file = result.assets[i];
+          console.log(`[ChatScreen] Uploading file ${i + 1}/${result.assets.length}:`, file.name, file.mimeType);
+          
+          try {
+            // Reset progress for each file
+            setImageUploadProgress(0);
+            
+            const uploadResult = await sendFileMessage(
+              chatId,
+              userId,
+              file.uri,
+              file.name,
+              file.size || 0,
+              file.mimeType || 'application/octet-stream',
+              (progress) => {
+                setImageUploadProgress(progress);
+                console.log(`[ChatScreen] File ${i + 1} upload progress:`, progress);
+              }
+            );
+            
+            if (!uploadResult.success) {
+              console.error(`[ChatScreen] File ${i + 1} upload failed`);
+              Alert.alert('Upload Failed', `${file.name} could not be sent. Continuing with others...`);
+            } else {
+              console.log(`[ChatScreen] File ${i + 1} uploaded successfully`);
+            }
+          } catch (error) {
+            console.error(`[ChatScreen] File ${i + 1} upload error:`, error);
+            Alert.alert('Error', `Failed to upload ${file.name}. Continuing with others...`);
+          }
+        }
+        
+        console.log('[ChatScreen] All files processed');
+        setUploadingImage(false);
+        setImageUploadProgress(0);
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Document picker error:', error);
+      setUploadingImage(false);
+      setImageUploadProgress(0);
+      Alert.alert('Error', 'Failed to select files.');
+    }
+  };
+
+  const openAudioPicker = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ 
+        type: 'audio/*', // Only audio files
+        multiple: false,
+      });
+      
+      if (!result.canceled && result.assets.length > 0 && userId) {
+        setShowAttach(false);
+        const audioFile = result.assets[0];
+        console.log('[ChatScreen] Selected audio file:', audioFile.name, audioFile.mimeType);
+        
+        setUploadingImage(true);
+        setImageUploadProgress(0);
+        
+        try {
+          const uploadResult = await sendFileMessage(
+            chatId,
+            userId,
+            audioFile.uri,
+            audioFile.name,
+            audioFile.size || 0,
+            audioFile.mimeType || 'audio/mpeg',
+            (progress) => {
+              setImageUploadProgress(progress);
+              console.log('[ChatScreen] Audio file upload progress:', progress);
+            }
+          );
+          
+          if (uploadResult.success) {
+            console.log('[ChatScreen] Audio file sent successfully');
+          } else {
+            Alert.alert('Upload Failed', 'Could not send the audio file. Please try again.');
+          }
+        } catch (error) {
+          console.error('[ChatScreen] Audio upload error:', error);
+          Alert.alert('Error', 'Failed to upload audio file.');
+        } finally {
+          setUploadingImage(false);
+          setImageUploadProgress(0);
+        }
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Audio picker error:', error);
+      Alert.alert('Error', 'Failed to select audio file.');
     }
   };
 
@@ -286,6 +597,18 @@ export default function ChatScreen() {
   // ── Render a single message bubble ──────────────────────────────
   const renderMessage = ({ item }: { item: FireMessage }) => {
     const isOut = item.senderId === userId;
+    
+    // Debug logging for file messages
+    if (item.type === 'file') {
+      console.log('[ChatScreen] Rendering file message:', {
+        type: item.type,
+        fileName: item.fileName,
+        fileUrl: item.fileUrl,
+        fileSize: item.fileSize,
+        mimeType: item.mimeType,
+      });
+    }
+    
     return (
       <View style={[styles.msgRow, isOut ? styles.msgRowOut : styles.msgRowIn]}>
         {!isOut && (
@@ -305,13 +628,33 @@ export default function ChatScreen() {
               }}
               onPause={() => player.pause()}
             />
+          ) : item.type === 'file' && item.fileUrl && item.fileName ? (
+            <FileMessageBubble
+              fileName={item.fileName!}
+              fileSize={item.fileSize ?? undefined}
+              fileUrl={item.fileUrl!}
+              mimeType={item.mimeType ?? undefined}
+              isOutgoing={false}
+            />
+          ) : item.type === 'image' && item.imageUrl ? (
+            <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+              <TouchableOpacity 
+                activeOpacity={0.9}
+                onPress={() => {
+                  setViewerImageUrl(item.imageUrl!);
+                  setViewerVisible(true);
+                }}
+              >
+                <Image 
+                  source={{ uri: item.imageUrl }} 
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+              <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
+            </LinearGradient>
           ) : (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
-              {item.type === 'image' && (
-                <View style={styles.imagePlaceholder}>
-                  <AppIcon name="image-outline" size={32} color="rgba(255,255,255,0.70)" fixedColor />
-                </View>
-              )}
               {item.text && <AppText fixedColor style={styles.bubbleTextIn}>{item.text}</AppText>}
               <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
             </LinearGradient>
@@ -334,6 +677,39 @@ export default function ChatScreen() {
               }}
               onPause={() => player.pause()}
             />
+          ) : item.type === 'file' && item.fileUrl && item.fileName ? (
+            <FileMessageBubble
+              fileName={item.fileName!}
+              fileSize={item.fileSize ?? undefined}
+              fileUrl={item.fileUrl!}
+              mimeType={item.mimeType ?? undefined}
+              isOutgoing={true}
+            />
+          ) : item.type === 'image' && item.imageUrl ? (
+            <View style={[styles.bubble, styles.bubbleOut]}>
+              <TouchableOpacity 
+                activeOpacity={0.9}
+                onPress={() => {
+                  setViewerImageUrl(item.imageUrl!);
+                  setViewerVisible(true);
+                }}
+              >
+                <Image 
+                  source={{ uri: item.imageUrl }} 
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+              <View style={styles.timeOutRow}>
+                <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
+                <AppIcon
+                  name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
+                  size={13}
+                  color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
+                  fixedColor
+                />
+              </View>
+            </View>
           ) : (
             <View style={[styles.bubble, styles.bubbleOut]}>
               {item.text && <AppText style={[styles.bubbleTextOut, { color: textColor, fontFamily }]}>{item.text}</AppText>}
@@ -370,174 +746,176 @@ export default function ChatScreen() {
 
   return (
     <>
-      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <AppBg />
+      <SafeAreaView style={styles.root} edges={['left', 'right', 'bottom']}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <AppBg />
 
-        {/* ── Top bar ── */}
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <AppIcon name="chevron-back" size={24} color={COLORS.blue} fixedColor />
-          </TouchableOpacity>
+          {/* ── Top bar ── */}
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+              <AppIcon name="chevron-back" size={24} color={COLORS.blue} fixedColor />
+            </TouchableOpacity>
 
-          <Avatar initials={getInitials(displayName)} color={COLORS.blue} size={40} />
+            <Avatar initials={getInitials(displayName)} color={COLORS.blue} size={40} />
 
-          <View style={styles.contactInfo}>
-            <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
-            <AppText style={styles.onlineText}>
-              {isGroup ? 'Group chat' : 'Tap here for info'}
-            </AppText>
+            <View style={styles.contactInfo}>
+              <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
+              <AppText style={styles.onlineText}>
+                {isGroup ? 'Group chat' : 'Tap here for info'}
+              </AppText>
+            </View>
+
+            <TouchableOpacity style={styles.iconBtn} onPress={handleVoiceCall} disabled={isGroup || outgoingCall.isInitiating}>
+              <AppIcon name="call-outline" size={20} color={COLORS.blue} fixedColor />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn}>
+              <AppIcon name="videocam-outline" size={20} color={COLORS.blue} fixedColor />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn}>
+              <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} />
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.iconBtn}>
-            <AppIcon name="call-outline" size={20} color={COLORS.blue} fixedColor />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
-            <AppIcon name="videocam-outline" size={20} color={COLORS.blue} fixedColor />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
-            <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} />
-          </TouchableOpacity>
-        </View>
-
-        {/* ── Messages ── */}
-        {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
-          <FlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={(item) => item.messageId}
-            renderItem={renderMessage}
-            contentContainerStyle={styles.messageList}
-            showsVerticalScrollIndicator={false}
-            ListHeaderComponent={
-              <View style={styles.datePillWrap}>
-                <View style={styles.datePill}>
-                  <AppText style={styles.datePillText}>Today</AppText>
+          {/* ── Messages ── */}
+          {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
+            <FlatList
+              ref={listRef}
+              data={messages}
+              keyExtractor={(item) => item.messageId}
+              renderItem={renderMessage}
+              contentContainerStyle={styles.messageList}
+              showsVerticalScrollIndicator={false}
+              ListHeaderComponent={
+                <View style={styles.datePillWrap}>
+                  <View style={styles.datePill}>
+                    <AppText style={styles.datePillText}>Today</AppText>
+                  </View>
                 </View>
-              </View>
-            }
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-          />
-        )}
+              }
+              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+            />
+          )}
 
-        {/* ── Permission denied message ── */}
-        {permissionMessage && (
-          <View style={styles.permissionBanner}>
-            <AppText style={styles.permissionText}>{permissionMessage}</AppText>
-            {showSettingsButton ? (
-              <View style={styles.permissionActions}>
-                <TouchableOpacity onPress={handleOpenSettings} style={styles.permissionBtn}>
-                  <AppText fixedColor style={styles.permissionBtnText}>Open Settings</AppText>
-                </TouchableOpacity>
+          {/* ── Permission denied message ── */}
+          {permissionMessage && (
+            <View style={styles.permissionBanner}>
+              <AppText style={styles.permissionText}>{permissionMessage}</AppText>
+              {showSettingsButton ? (
+                <View style={styles.permissionActions}>
+                  <TouchableOpacity onPress={handleOpenSettings} style={styles.permissionBtn}>
+                    <AppText fixedColor style={styles.permissionBtnText}>Open Settings</AppText>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
+                    <AppIcon name="close" size={18} color={COLORS.sub} />
+                  </TouchableOpacity>
+                </View>
+              ) : (
                 <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
                   <AppIcon name="close" size={18} color={COLORS.sub} />
                 </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity onPress={dismissPermissionMessage} style={styles.permissionDismissBtn}>
+              )}
+            </View>
+          )}
+
+          {/* ── Upload error / retry banner ── */}
+          {uploadError && (
+            <View style={styles.uploadErrorBanner}>
+              <AppIcon name="alert-circle-outline" size={16} color={COLORS.missed} fixedColor />
+              <AppText style={styles.uploadErrorText}>{uploadError}</AppText>
+              {pendingRecordingRef.current && retryCount < MAX_UPLOAD_RETRIES && (
+                <TouchableOpacity onPress={handleRetryUpload} style={styles.retryBtn}>
+                  <AppText fixedColor style={styles.retryBtnText}>Retry</AppText>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => { setUploadError(null); pendingRecordingRef.current = null; }} style={styles.permissionDismissBtn}>
                 <AppIcon name="close" size={18} color={COLORS.sub} />
               </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* ── Upload error / retry banner ── */}
-        {uploadError && (
-          <View style={styles.uploadErrorBanner}>
-            <AppIcon name="alert-circle-outline" size={16} color={COLORS.missed} fixedColor />
-            <AppText style={styles.uploadErrorText}>{uploadError}</AppText>
-            {pendingRecordingRef.current && retryCount < MAX_UPLOAD_RETRIES && (
-              <TouchableOpacity onPress={handleRetryUpload} style={styles.retryBtn}>
-                <AppText fixedColor style={styles.retryBtnText}>Retry</AppText>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={() => { setUploadError(null); pendingRecordingRef.current = null; }} style={styles.permissionDismissBtn}>
-              <AppIcon name="close" size={18} color={COLORS.sub} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ── Emoji panel ── */}
-        {showEmoji && (
-          <View style={[styles.emojiPanel, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
-            <ScrollView horizontal={false} showsVerticalScrollIndicator={false}>
-              <View style={styles.emojiGrid}>
-                {EMOJI_LIST.map((e) => (
-                  <TouchableOpacity key={e} style={styles.emojiItem} onPress={() => handleSend(e)}>
-                    <AppText fixedColor style={styles.emojiChar}>{e}</AppText>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-        )}
-
-        {/* ── Input bar ── */}
-        <View style={styles.inputBar}>
-          {isRecording ? (
-            <View style={styles.recordingOverlayContainer}>
-              <VoiceRecordingOverlay
-                durationMs={recorder.state.durationMs}
-                isWarning={recorder.state.isWarning}
-                onCancel={() => recorder.cancelRecording()}
-              />
             </View>
-          ) : (
-            <>
-              {/* Attachments */}
-              <TouchableOpacity style={styles.inputSideBtn} onPress={() => { setShowEmoji(false); setShowAttach(true); }}>
-                <AppIcon name="add" size={26} color={COLORS.sub} />
-              </TouchableOpacity>
+          )}
 
-              {/* Text field + emoji */}
-              <View style={styles.inputFieldWrap}>
-                <TextInput
-                  style={[styles.inputField, { color: FG.primary }]}
-                  placeholder="Message"
-                  placeholderTextColor={FG.faint}
-                  value={input}
-                  onChangeText={setInput}
-                  multiline
-                  maxLength={500}
-                  onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
+          {/* ── Emoji panel ── */}
+          {showEmoji && (
+            <View style={[styles.emojiPanel, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
+              <ScrollView horizontal={false} showsVerticalScrollIndicator={false}>
+                <View style={styles.emojiGrid}>
+                  {EMOJI_LIST.map((e) => (
+                    <TouchableOpacity key={e} style={styles.emojiItem} onPress={() => handleSend(e)}>
+                      <AppText fixedColor style={styles.emojiChar}>{e}</AppText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          )}
+
+          {/* ── Input bar ── */}
+          <View style={styles.inputBar}>
+            {isRecording ? (
+              <View style={styles.recordingOverlayContainer}>
+                <VoiceRecordingOverlay
+                  durationMs={recorder.state.durationMs}
+                  isWarning={recorder.state.isWarning}
+                  onCancel={() => recorder.cancelRecording()}
                 />
-                <TouchableOpacity style={styles.emojiBtn} onPress={() => { setShowAttach(false); setShowEmoji((e) => !e); }}>
-                  <AppIcon name={showEmoji ? 'keypad-outline' : 'happy-outline'} size={22} color={COLORS.sub} />
-                </TouchableOpacity>
               </View>
+            ) : (
+              <>
+                {/* Attachments */}
+                <TouchableOpacity style={styles.inputSideBtn} onPress={() => { setShowEmoji(false); setShowAttach(true); }}>
+                  <AppIcon name="add" size={26} color={COLORS.sub} />
+                </TouchableOpacity>
 
-              {/* Camera */}
-              <TouchableOpacity style={styles.inputSideBtn} onPress={openCamera}>
-                <AppIcon name="camera-outline" size={22} color={COLORS.sub} />
+                {/* Text field + emoji */}
+                <View style={styles.inputFieldWrap}>
+                  <TextInput
+                    style={[styles.inputField, { color: FG.primary }]}
+                    placeholder="Message"
+                    placeholderTextColor={FG.faint}
+                    value={input}
+                    onChangeText={setInput}
+                    multiline
+                    maxLength={500}
+                    onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
+                  />
+                  <TouchableOpacity style={styles.emojiBtn} onPress={() => { setShowAttach(false); setShowEmoji((e) => !e); }}>
+                    <AppIcon name={showEmoji ? 'keypad-outline' : 'happy-outline'} size={22} color={COLORS.sub} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Camera */}
+                <TouchableOpacity style={styles.inputSideBtn} onPress={openCamera}>
+                  <AppIcon name="camera-outline" size={22} color={COLORS.sub} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Mic / Send button */}
+            {input.trim() ? (
+              <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
+                <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
+                  <AppIcon name="send" size={19} color="#fff" fixedColor />
+                </LinearGradient>
               </TouchableOpacity>
-            </>
-          )}
+            ) : (
+              <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
+                <LinearGradient
+                  colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
+                  style={styles.sendBtnInner}
+                >
+                  <AppIcon name="mic" size={19} color="#fff" fixedColor />
+                </LinearGradient>
+              </View>
+            )}
+          </View>
 
-          {/* Mic / Send button */}
-          {input.trim() ? (
-            <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
-              <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
-                <AppIcon name="send" size={19} color="#fff" fixedColor />
-              </LinearGradient>
-            </TouchableOpacity>
-          ) : (
-            <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
-              <LinearGradient
-                colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
-                style={styles.sendBtnInner}
-              >
-                <AppIcon name="mic" size={19} color="#fff" fixedColor />
-              </LinearGradient>
+          {/* ── Upload progress indicator ── */}
+          {(isUploading || uploadingImage) && (
+            <View style={styles.uploadProgressBar}>
+              <View style={[styles.uploadProgressFill, { width: `${isUploading ? uploadProgress : imageUploadProgress}%` }]} />
             </View>
           )}
-        </View>
-
-        {/* ── Upload progress indicator ── */}
-        {isUploading && (
-          <View style={styles.uploadProgressBar}>
-            <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` }]} />
-          </View>
-        )}
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
 
       {/* ── Attachments sheet ── */}
       <Modal visible={showAttach} transparent animationType="slide" onRequestClose={() => setShowAttach(false)}>
@@ -547,12 +925,12 @@ export default function ChatScreen() {
           <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share</AppText>
           <View style={styles.attachGrid}>
             {[
-              { icon: 'images-outline'   as const, label: 'Photos',   action: openGallery },
-              { icon: 'document-outline' as const, label: 'Files',    action: openDocuments },
-              { icon: 'camera-outline'   as const, label: 'Camera',   action: () => { setShowAttach(false); openCamera(); } },
-              { icon: 'mic-outline'      as const, label: 'Audio',    action: () => Alert.alert('Audio', 'Record audio message') },
+              { icon: 'images-outline' as const, label: 'Photos', action: openGallery },
+              { icon: 'document-outline' as const, label: 'Files', action: openDocuments },
+              { icon: 'camera-outline' as const, label: 'Camera', action: () => { setShowAttach(false); openCamera(); } },
+              { icon: 'musical-notes-outline' as const, label: 'Audio', action: openAudioPicker },
               { icon: 'location-outline' as const, label: 'Location', action: () => Alert.alert('Location', 'Share location') },
-              { icon: 'person-outline'   as const, label: 'Contact',  action: () => Alert.alert('Contact', 'Share contact') },
+              { icon: 'person-outline' as const, label: 'Contact', action: () => Alert.alert('Contact', 'Share contact') },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={[styles.attachItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
                 onPress={item.action} activeOpacity={0.8}>
@@ -570,17 +948,47 @@ export default function ChatScreen() {
       {cameraOpen && Platform.OS !== 'web' && (
         <Modal visible animationType="slide" onRequestClose={() => setCameraOpen(false)}>
           <View style={{ flex: 1, backgroundColor: '#000' }}>
-            <CameraView style={{ flex: 1 }} facing="back">
+            <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back">
               <View style={styles.cameraControls}>
                 <TouchableOpacity onPress={() => setCameraOpen(false)} style={styles.cameraCloseBtn}>
                   <AppIcon name="close" size={28} color="#fff" fixedColor />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.cameraShutterBtn} onPress={() => setCameraOpen(false)}>
+                <TouchableOpacity style={styles.cameraShutterBtn} onPress={takePicture}>
                   <View style={styles.cameraShutter} />
                 </TouchableOpacity>
                 <View style={{ width: 52 }} />
               </View>
             </CameraView>
+          </View>
+        </Modal>
+      )}
+
+      {/* ── Full-screen image viewer ── */}
+      {viewerVisible && viewerImageUrl && (
+        <Modal 
+          visible 
+          transparent 
+          animationType="fade" 
+          onRequestClose={() => setViewerVisible(false)}
+        >
+          <View style={styles.imageViewerContainer}>
+            <TouchableOpacity 
+              style={styles.imageViewerBackdrop}
+              activeOpacity={1}
+              onPress={() => setViewerVisible(false)}
+            >
+              <Image
+                source={{ uri: viewerImageUrl }}
+                style={styles.imageViewerImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.imageViewerCloseBtn}
+              onPress={() => setViewerVisible(false)}
+            >
+              <AppIcon name="close" size={32} color="#fff" fixedColor />
+            </TouchableOpacity>
           </View>
         </Modal>
       )}
@@ -597,42 +1005,48 @@ const styles = StyleSheet.create({
     paddingTop: 52, paddingBottom: 12, paddingHorizontal: 14,
     gap: 8, ...GLASS.header,
   },
-  backBtn:     { padding: 2 },
+  backBtn: { padding: 2 },
   contactInfo: { flex: 1 },
   contactName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  onlineText:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
-  iconBtn:     { padding: 4 },
+  onlineText: { fontSize: 12, color: COLORS.sub, marginTop: 2 },
+  iconBtn: { padding: 4 },
 
   // ── Center states (loading / empty) ───────────────────────────────────────
   centerState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyEmoji:  { fontSize: 48, marginBottom: 8 },
-  emptyText:   { fontSize: 16, color: COLORS.sub, fontWeight: '500' },
+  emptyEmoji: { fontSize: 48, marginBottom: 8 },
+  emptyText: { fontSize: 16, color: COLORS.sub, fontWeight: '500' },
 
   // ── Messages ──────────────────────────────────────────────────────────────
-  messageList:  { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
+  messageList: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
   datePillWrap: { alignItems: 'center', marginBottom: 10 },
-  datePill:     { ...GLASS.card, borderRadius: RADIUS.full, paddingHorizontal: 16, paddingVertical: 5 },
+  datePill: { ...GLASS.card, borderRadius: RADIUS.full, paddingHorizontal: 16, paddingVertical: 5 },
   datePillText: { fontSize: 11, color: COLORS.sub },
 
-  msgRow:    { flexDirection: 'row', marginBottom: 4 },
-  msgRowIn:  { justifyContent: 'flex-start' },
+  msgRow: { flexDirection: 'row', marginBottom: 4 },
+  msgRowIn: { justifyContent: 'flex-start' },
   msgRowOut: { justifyContent: 'flex-end' },
 
-  bubble:       { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleIn:     { borderBottomLeftRadius: 4, ...SHADOW.card },
+  bubble: { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleIn: { borderBottomLeftRadius: 4, ...SHADOW.card },
   bubbleTextIn: { fontSize: 14, color: '#fff', lineHeight: 20 },
-  timeIn:       { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
+  timeIn: { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
 
-  bubbleOut:     { backgroundColor: 'rgba(255,255,255,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.50)', borderBottomRightRadius: 4, ...SHADOW.card },
+  bubbleOut: { backgroundColor: 'rgba(255,255,255,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.50)', borderBottomRightRadius: 4, ...SHADOW.card },
   bubbleTextOut: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
-  timeOutRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
-  timeOut:       { fontSize: 10, color: COLORS.sub },
+  timeOutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
+  timeOut: { fontSize: 10, color: COLORS.sub },
 
   // Voice / image
   imagePlaceholder: {
     width: 160, height: 100, borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 4,
   },
 
   inputBar: {
@@ -641,12 +1055,12 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 28 : 10,
     gap: 4, ...GLASS.header,
   },
-  inputSideBtn:   { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
+  inputSideBtn: { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
   inputFieldWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', ...GLASS.card, borderRadius: RADIUS.xl, paddingHorizontal: 14, height: 42 },
-  inputField:     { flex: 1, fontSize: 14, color: COLORS.text, padding: 0, margin: 0, height: 42 },
-  emojiBtn:       { paddingLeft: 8, alignSelf: 'center' },
-  sendBtn:        { width: 42, height: 42, borderRadius: 21, ...SHADOW.button },
-  sendBtnInner:   { flex: 1, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  inputField: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0, margin: 0, height: 42 },
+  emojiBtn: { paddingLeft: 8, alignSelf: 'center' },
+  sendBtn: { width: 42, height: 42, borderRadius: 21, ...SHADOW.button },
+  sendBtnInner: { flex: 1, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
 
   // Emoji panel
   emojiPanel: {
@@ -666,23 +1080,23 @@ const styles = StyleSheet.create({
     ...SHADOW.glow,
   },
   attachHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(30,156,240,0.30)', alignSelf: 'center', marginBottom: 14 },
-  attachTitle:  { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 16 },
-  attachGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  attachTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 16 },
+  attachGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   attachItem: {
     width: 90, paddingVertical: 14, alignItems: 'center', gap: 8,
     borderRadius: RADIUS.lg, borderWidth: 1, ...SHADOW.card,
   },
   attachIconWrap: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(30,156,240,0.10)', alignItems: 'center', justifyContent: 'center' },
-  attachLabel:    { fontSize: 11, fontWeight: '600', color: COLORS.sub, textAlign: 'center' },
+  attachLabel: { fontSize: 11, fontWeight: '600', color: COLORS.sub, textAlign: 'center' },
 
   // Camera UI
   cameraControls: {
     position: 'absolute', bottom: 40, left: 0, right: 0,
     flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center',
   },
-  cameraCloseBtn:  { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
-  cameraShutterBtn:{ alignItems: 'center', justifyContent: 'center' },
-  cameraShutter:   { width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
+  cameraCloseBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  cameraShutterBtn: { alignItems: 'center', justifyContent: 'center' },
+  cameraShutter: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
 
   // ── Recording overlay ─────────────────────────────────────────────────────
   recordingOverlayContainer: {
@@ -761,5 +1175,34 @@ const styles = StyleSheet.create({
   uploadProgressFill: {
     height: 3,
     backgroundColor: COLORS.blue,
+  },
+
+  // ── Image viewer ──────────────────────────────────────────────────────────
+  imageViewerContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerBackdrop: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  imageViewerCloseBtn: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
