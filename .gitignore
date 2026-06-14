@@ -78,6 +78,8 @@ PHASE_*_CRASH_FIX.md
 # Feature-specific internal docs (keep main implementation plans)
 *_COMPLETE.md
 *_ENHANCEMENTS.md
+*_TODO.md
+*_FIXES.md
 HYBRID_*.md
 IMPORT_*.md
 PERMISSION_*.md
