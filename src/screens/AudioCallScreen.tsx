@@ -139,7 +139,7 @@ export default function AudioCallScreen() {
   const getCallStatusText = () => {
     if (onHold) return '⏸ On hold';
     if (callStatus === 'ringing') return isOutgoing ? 'Calling...' : 'Incoming call...';
-    if (callStatus === 'connecting' || callStatus === 'accepted') return 'Connecting...';
+    if (callStatus === 'accepted') return 'Connecting...';
     if (callStatus === 'connected') return formatDuration(callDuration);
     return 'Call ended';
   };

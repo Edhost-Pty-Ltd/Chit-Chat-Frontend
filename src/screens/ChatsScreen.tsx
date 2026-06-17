@@ -503,7 +503,7 @@ export default function ChatsScreen() {
         displayName: contact.displayName, 
         isGroup: false,
         otherUserId: contact.userId,
-        otherUserPhoto: contact.contactPhotoUri || contact.photoURL || null,
+        otherUserPhoto: contact.photoUri || contact.firebasePhotoURL || null,
       });
     } catch (err) {
       console.error('Failed to create/get chat:', err);

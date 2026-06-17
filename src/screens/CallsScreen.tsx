@@ -120,23 +120,23 @@ function ContactPickerSheet({
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
             {contacts.map((c) => (
               <TouchableOpacity key={c.userId} style={styles.contactCard}
-                activeOpacity={0.75} onPress={() => onSelectAudio(c.userId, c.displayName, c.photoURL)}>
+                activeOpacity={0.75} onPress={() => onSelectAudio(c.userId, c.displayName, c.photoUri || c.firebasePhotoURL || null)}>
                 <Avatar 
                   initials={getInitials(c.displayName)} 
                   color={COLORS.blue} 
                   size={46} 
-                  imageUrl={c.photoURL}
+                  imageUrl={c.photoUri || c.firebasePhotoURL || null}
                 />
                 <View style={styles.contactMeta}>
                   <AppText style={styles.contactName}>{c.displayName}</AppText>
                   <AppText style={styles.contactNum}>Tap to call</AppText>
                 </View>
                 {/* Audio call button */}
-                <TouchableOpacity onPress={() => onSelectAudio(c.userId, c.displayName, c.photoURL)} activeOpacity={0.8} style={{ marginRight: 8 }}>
+                <TouchableOpacity onPress={() => onSelectAudio(c.userId, c.displayName, c.photoUri || c.firebasePhotoURL || null)} activeOpacity={0.8} style={{ marginRight: 8 }}>
                   <AppIcon glass tileSize={38} name="call" size={17} color={COLORS.blue} />
                 </TouchableOpacity>
                 {/* Video call button */}
-                <TouchableOpacity onPress={() => onSelectVideo(c.userId, c.displayName, c.photoURL)} activeOpacity={0.8}>
+                <TouchableOpacity onPress={() => onSelectVideo(c.userId, c.displayName, c.photoUri || c.firebasePhotoURL || null)} activeOpacity={0.8}>
                   <AppIcon glass tileSize={38} name="videocam" size={17} color={COLORS.blue} />
                 </TouchableOpacity>
               </TouchableOpacity>
@@ -153,7 +153,7 @@ export default function CallsScreen() {
   const navigation = useNavigation<NavProp>();
   const { user } = useAuth();
   const { callHistory, loading, error } = useCallHistory(user?.uid ?? null);
-  const { contacts, loading: contactsLoading } = useContacts(user?.uid ?? null);
+  const { contacts, loading: contactsLoading } = useContacts();
   const { setCallStatus, setActiveCallId } = useCallContext();
   const outgoingCall = useOutgoingCall();
   
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
   emptyHint: { fontSize: 13, color: COLORS.sub },
 
   callingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.8)',
     alignItems: 'center',
     justifyContent: 'center',

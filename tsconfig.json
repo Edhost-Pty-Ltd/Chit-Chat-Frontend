@@ -3,10 +3,17 @@
   "compilerOptions": {
     "strict": true,
     "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "types": ["jest"],
     "paths": {
       "@/*": [
         "src/*"
       ]
     }
-  }
+  },
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/__tests__/**"
+  ]
 }

@@ -165,7 +165,7 @@ export default function VideoCallScreen() {
 
   const getCallStatusText = () => {
     if (callStatus === 'ringing') return isOutgoing ? 'Calling...' : 'Incoming call...';
-    if (callStatus === 'connecting' || callStatus === 'accepted') return 'Connecting...';
+    if (callStatus === 'accepted') return 'Connecting...';
     if (callStatus === 'connected') return formatDuration(callDuration);
     return 'Call ended';
   };
@@ -372,12 +372,12 @@ const styles = StyleSheet.create({
   },
 
   remoteVideo: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 0,
   },
 
   remoteVideoPlaceholder: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 0,

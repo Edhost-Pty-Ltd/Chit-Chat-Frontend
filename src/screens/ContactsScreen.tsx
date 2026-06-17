@@ -24,7 +24,7 @@ function getInitials(name: string): string {
 
 // Helper to get avatar color based on userId
 function getAvatarColor(userId: string): string {
-  const colors = [COLORS.blue, COLORS.green, COLORS.purple, COLORS.orange, '#e84343'];
+  const colors = [COLORS.blue, COLORS.blueDark, COLORS.green, COLORS.amber, COLORS.missed];
   const index = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
   return colors[index];
 }
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 15, color: COLORS.sub, fontWeight: '600' },
 
   callingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.8)',
     alignItems: 'center',
     justifyContent: 'center',

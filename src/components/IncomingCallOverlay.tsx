@@ -58,7 +58,7 @@ export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: Incom
           playsInSilentModeIOS: true,
           allowsRecordingIOS: false,
           shouldPlayInBackground: true,
-        } as AudioMode);
+        } as unknown as AudioMode);
 
         // For now, just log that we'd play a ringtone
         // You can add a custom ringtone file to assets later

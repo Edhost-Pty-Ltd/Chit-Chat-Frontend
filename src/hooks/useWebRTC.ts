@@ -77,8 +77,10 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
       localStreamRef.current = stream;
       setStreamVersion(v => v + 1);
 
+      const pcAny = pc as any;
+
       // Handle remote stream
-      pc.ontrack = (event) => {
+      pcAny.ontrack = (event: any) => {
         console.log('[useWebRTC] Remote track received:', event.track.kind);
         if (event.streams && event.streams[0]) {
           // Assign remote stream to ref and trigger UI update
@@ -89,7 +91,7 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
       };
 
       // Handle ICE candidates
-      pc.onicecandidate = (event) => {
+      pcAny.onicecandidate = (event: any) => {
         if (event.candidate) {
           console.log('[useWebRTC] ICE candidate generated');
           // Convert candidate to plain object (toJSON might not exist)
@@ -103,7 +105,7 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
       };
 
       // Handle connection state changes
-      pc.onconnectionstatechange = () => {
+      pcAny.onconnectionstatechange = () => {
         const state = pc.connectionState;
         console.log('[useWebRTC] Connection state:', state);
         setConnectionState(state);
@@ -111,7 +113,7 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
       };
 
       // Handle ICE connection state
-      pc.oniceconnectionstatechange = () => {
+      pcAny.oniceconnectionstatechange = () => {
         console.log('[useWebRTC] ICE connection state:', pc.iceConnectionState);
       };
 
@@ -269,7 +271,7 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
         let jitter = 0;
         let rtt = 0;
 
-        stats.forEach((report) => {
+        stats.forEach((report: any) => {
           if (report.type === 'inbound-rtp' && report.kind === 'audio') {
             packetsLost = report.packetsLost || 0;
             packetsReceived = report.packetsReceived || 0;

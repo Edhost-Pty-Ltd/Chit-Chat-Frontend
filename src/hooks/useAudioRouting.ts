@@ -82,8 +82,8 @@ async function setSpeakerphoneOn(enabled: boolean): Promise<void> {
       // Android: Use setSpeakerphoneOn from react-native-webrtc
       // This requires access to the audio manager
       // For now, we'll use a workaround with media devices
-      const devices = await mediaDevices.enumerateDevices();
-      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+      const devices = await mediaDevices.enumerateDevices() as MediaDeviceInfo[];
+      const audioOutputs = devices.filter((d) => d.kind === 'audiooutput');
       
       console.log('[setSpeakerphoneOn] Available audio outputs:', audioOutputs.length);
       
