@@ -16,6 +16,7 @@ export interface Contact {
   time: string;
   unread: number;
   pinned?: boolean;
+  members?: Contact[];  // group members (only set for group contacts)
 }
 
 export interface Message {
@@ -26,6 +27,17 @@ export interface Message {
   voice?: boolean;
   time: string;
   type: MessageType;
+  // Number-change system message fields
+  numberChange?: {
+    oldNumber: string;
+    newNumber: string;
+    displayName: string;
+  };
+  // Group-left system message
+  groupLeft?: {
+    groupName: string;
+    displayName: string;
+  };
 }
 
 export interface Call {
@@ -57,12 +69,26 @@ export interface CalendarEvent {
 }
 
 // ─── Notes ────────────────────────────────────────────────────────────────
+export interface NoteAttachment {
+  uri:  string;
+  name: string;
+  type: 'image' | 'document';
+}
+
+export interface DrawStroke {
+  points: { x: number; y: number }[];
+  color:  string;
+  width:  number;
+}
+
 export interface Note {
   id: number;
   title: string;
   preview: string;
   date: string;
   checked?: boolean;
+  attachments?: NoteAttachment[];
+  strokes?: DrawStroke[];
 }
 
 // ─── Navigation param list ─────────────────────────────────────────────────
@@ -76,11 +102,16 @@ export type RootStackParamList = {
   Contacts: undefined;
   Calendar: undefined;
   Notes: undefined;
-  CloudBackup: undefined;
   Settings: undefined;
   Appearance: undefined;
   Profile: undefined;
   CreateAccount: undefined;
-  VideoCall: { contact: Contact };
-  AudioCall: { contact: Contact };
+  VideoCall: { contact: Contact; duration?: number; participants?: Contact[] };
+  AudioCall: { contact: Contact; duration?: number; participants?: Contact[] };
+  AccountSettings: undefined;
+  PrivacySettings: undefined;
+  NotificationSettings: undefined;
+  ChangeNumber: undefined;
+  Notifications: undefined;
+  LinkedDevices: undefined;
 };

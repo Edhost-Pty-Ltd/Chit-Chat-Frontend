@@ -16,13 +16,18 @@ import StatusScreen       from '../screens/StatusScreen';
 import ContactsScreen     from '../screens/ContactsScreen';
 import CalendarScreen     from '../screens/CalendarScreen';
 import NotesScreen        from '../screens/NotesScreen';
-import CloudBackupScreen  from '../screens/CloudBackupScreen';
 import SettingsScreen     from '../screens/SettingsScreen';
 import AppearanceScreen  from '../screens/AppearanceScreen';
 import ProfileScreen     from '../screens/ProfileScreen';
 import CreateAccountScreen from '../screens/CreateAccountScreen';
 import VideoCallScreen    from '../screens/VideoCallScreen';
 import AudioCallScreen    from '../screens/AudioCallScreen';
+import AccountSettingsScreen      from '../screens/AccountSettingsScreen';
+import PrivacySettingsScreen      from '../screens/PrivacySettingsScreen';
+import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
+import ChangeNumberScreen         from '../screens/ChangeNumberScreen';
+import NotificationsScreen        from '../screens/NotificationsScreen';
+import LinkedDevicesScreen        from '../screens/LinkedDevicesScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -57,12 +62,17 @@ export default function AppNavigator() {
           <Stack.Screen name="Contacts"    component={ContactsScreen}    />
           <Stack.Screen name="Calendar"    component={CalendarScreen}    />
           <Stack.Screen name="Notes"       component={NotesScreen}       />
-          <Stack.Screen name="CloudBackup" component={CloudBackupScreen} />
           <Stack.Screen name="Settings"    component={SettingsScreen}    />
           <Stack.Screen name="Appearance"      component={AppearanceScreen}      />
           <Stack.Screen name="Profile"         component={ProfileScreen}         />
           <Stack.Screen name="VideoCall"       component={VideoCallScreen}       />
           <Stack.Screen name="AudioCall"       component={AudioCallScreen}       />
+          <Stack.Screen name="AccountSettings"      component={AccountSettingsScreen}      />
+          <Stack.Screen name="PrivacySettings"      component={PrivacySettingsScreen}      />
+          <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+          <Stack.Screen name="ChangeNumber"         component={ChangeNumberScreen}         />
+          <Stack.Screen name="Notifications"        component={NotificationsScreen}        />
+          <Stack.Screen name="LinkedDevices"        component={LinkedDevicesScreen}        />
         </>
       ) : (
         // ── Unauthenticated screens ──────────────────────────────────────

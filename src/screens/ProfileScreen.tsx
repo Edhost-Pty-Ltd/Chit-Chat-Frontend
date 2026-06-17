@@ -40,7 +40,7 @@ export default function ProfileScreen() {
       }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'] as any,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.85,
@@ -131,8 +131,12 @@ export default function ProfileScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Phone */}
-          <View style={[styles.infoCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+          {/* Phone — tap to go directly to Change Number */}
+          <TouchableOpacity
+            style={[styles.infoCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('ChangeNumber' as never)}
+          >
             <AppIcon glass tileSize={40} name="call-outline" size={20} />
             <View style={styles.infoContent}>
               <AppText style={[styles.infoLabel, { color: FG.secondary, fontFamily }]}>Phone Number</AppText>
@@ -140,7 +144,8 @@ export default function ProfileScreen() {
                 {phone || 'Not set'}
               </AppText>
             </View>
-          </View>
+            <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
+          </TouchableOpacity>
 
         </View>
       </ScrollView>
@@ -153,7 +158,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: 56, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 12, paddingHorizontal: 14,
     gap: 8, borderBottomWidth: 1,
   },
   headerTitle: {
@@ -168,12 +173,12 @@ const styles = StyleSheet.create({
   avatarWrap:    { width: 110, height: 110, borderRadius: 55, ...SHADOW.glow },
   avatarImg: {
     width: 110, height: 110, borderRadius: 55,
-    borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
+    borderWidth: 3, borderColor: 'rgba(30,156,240,0.40)',
   },
   avatarPlaceholder: {
     width: 110, height: 110, borderRadius: 55,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 3, borderColor: 'rgba(255,255,255,0.40)',
+    borderWidth: 3, borderColor: 'rgba(30,156,240,0.30)',
   },
   avatarInitials: { fontSize: 38, fontWeight: '800', color: '#fff' },
   cameraBadge: {

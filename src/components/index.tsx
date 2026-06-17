@@ -34,9 +34,7 @@ export function Avatar({ initials, color, size = 44, status: _status, style }: A
       </View>
     </View>
   );
-}
-
-// ─── BottomNav ────────────────────────────────────────────────────────────────
+}// ─── BottomNav ────────────────────────────────────────────────────────────────
 type TabKey = 'chats' | 'calls' | 'status' | 'settings';
 const TABS: {
   id: TabKey;
@@ -58,7 +56,8 @@ export function BottomNav({ active }: BottomNavProps) {
   const { fontFamily, textColor } = useTypography();
 
   return (
-    <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
+    <View style={styles.navBarWrapper}>
+    <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
       {TABS.map((t) => {
         const isActive = active === t.id;
         return (
@@ -73,13 +72,9 @@ export function BottomNav({ active }: BottomNavProps) {
                 <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
               </LinearGradient>
             ) : (
-              <AppIcon
-                glass
-                tileSize={46}
-                name={t.icon}
-                size={20}
-                color={FG.icon}
-              />
+              <View style={styles.iconTileInactive}>
+                <AppIcon name={t.icon} size={20} color={FG.secondary} />
+              </View>
             )}
             <AppText style={[
               styles.navLabel,
@@ -91,6 +86,7 @@ export function BottomNav({ active }: BottomNavProps) {
           </TouchableOpacity>
         );
       })}
+    </View>
     </View>
   );
 }
@@ -152,17 +148,28 @@ export function AppHeader({ title, showBack, rightIcon, onRightPress }: AppHeade
 const styles = StyleSheet.create({
   avatarCircle: {
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)',
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)',
   },
   avatarText: { color: '#fff', fontWeight: '700' },
   statusDot:  { position: 'absolute', borderWidth: 2, borderColor: COLORS.sky1 },
 
+  navBarWrapper: {
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+    paddingTop: 6,
+  },
   navBar: {
     flexDirection: 'row',
-    borderTopWidth: 1,
-    paddingBottom: 24,
-    paddingTop: 10,
+    borderWidth: 1,
+    borderRadius: 50,
+    paddingVertical: 10,
     paddingHorizontal: 8,
+    overflow: 'hidden',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 8,
   },
   navItem: {
     flex: 1,
@@ -179,6 +186,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOW.button,
+  },
+
+  // Inactive — plain container, no glass tile (avoids Android overflow artifacts)
+  iconTileInactive: {
+    width: 46,
+    height: 40,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   navLabel:       { fontSize: 10, fontWeight: '500' },

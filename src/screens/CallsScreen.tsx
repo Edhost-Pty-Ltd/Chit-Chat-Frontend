@@ -2,18 +2,20 @@
 import React, { useState } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet,
-  Modal, Pressable, ScrollView, Linking, Alert,
+  Modal, Pressable, ScrollView, Linking, Alert, Platform,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar, BottomNav } from '../components';
 import { CALLS, CONTACTS } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
-import { Call, Contact } from '../types';
-import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
+import { Call, Contact, RootStackParamList } from '../types';
+import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 
+type NavProp = NativeStackNavigationProp<RootStackParamList>;
 type CallTab = 'All' | 'Missed' | 'Voicemail';
 
-// Mock phone numbers mapped by contact name
 const PHONE_NUMBERS: Record<string, string> = {
   'Anna Martin':  '+27 71 234 5678',
   'Kevin Patel':  '+27 82 345 6789',
@@ -25,59 +27,54 @@ const PHONE_NUMBERS: Record<string, string> = {
 };
 
 function CallDirectionIcon({ type, missed }: { type: string; missed?: boolean }) {
-  if (missed)              return <AppIcon name="call"              size={14} color={COLORS.missed} fixedColor />;
-  if (type === 'Outgoing') return <AppIcon name="arrow-up-outline"  size={14} color={COLORS.green}  fixedColor />;
-  return                          <AppIcon name="arrow-down-outline" size={14} color={COLORS.blue}   fixedColor />;
+  if (missed)              return <AppIcon name="call"              size={13} color={COLORS.missed} fixedColor />;
+  if (type === 'Outgoing') return <AppIcon name="arrow-up-outline"  size={13} color={COLORS.green}  fixedColor />;
+  return                          <AppIcon name="arrow-down-outline" size={13} color={COLORS.blue}   fixedColor />;
 }
 
 // ─── Contact Picker Sheet ────────────────────────────────────────────────────
-function ContactPickerSheet({
-  visible,
-  onClose,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSelect: (c: Contact) => void;
+function ContactPickerSheet({ visible, onClose, onAudioCall, onVideoCall }: {
+  visible: boolean; onClose: () => void;
+  onAudioCall: (c: Contact) => void; onVideoCall: (c: Contact) => void;
 }) {
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
   return (
-    <Modal visible={visible} transparent animationType="slide"
-      onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={styles.overlay} onPress={onClose} />
       <View style={styles.sheet}>
         <AppBg />
         <View style={styles.handle} />
-
-        {/* Sheet header */}
         <View style={styles.sheetHeader}>
           <TouchableOpacity onPress={onClose} style={styles.iconPad}>
-            <AppIcon name="close" size={22} color={COLORS.sub} />
+            <AppIcon name="close" size={22} color={FG.secondary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <AppText style={styles.sheetTitle}>Call a contact</AppText>
-            <AppText style={styles.sheetSub}>{CONTACTS.length} contacts</AppText>
+            <AppText style={[styles.sheetTitle, { color: textColor, fontFamily }]}>Call a contact</AppText>
+            <AppText style={[styles.sheetSub, { color: FG.secondary }]}>{CONTACTS.length} contacts</AppText>
           </View>
-          <AppIcon name="search-outline" size={22} color={COLORS.sub} style={styles.iconPad} />
         </View>
-
-        <AppText style={styles.sectionHint}>SELECT CONTACT TO CALL</AppText>
-
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
           {CONTACTS.map((c) => (
-            <TouchableOpacity key={c.id} style={styles.contactCard}
-              activeOpacity={0.75} onPress={() => onSelect(c)}>
+            <View key={c.id} style={[styles.contactCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
               <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
               <View style={styles.contactMeta}>
-                <AppText style={styles.contactName}>{c.name}</AppText>
-                <AppText style={styles.contactNum}>
-                  {PHONE_NUMBERS[c.name] ?? 'No number'}
-                </AppText>
+                <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{c.name}</AppText>
+                <AppText style={[styles.contactNum, { color: FG.secondary }]}>{PHONE_NUMBERS[c.name] ?? 'No number'}</AppText>
               </View>
-              {/* Light blue call button */}
-              <TouchableOpacity onPress={() => onSelect(c)} activeOpacity={0.8}>
-                <AppIcon glass tileSize={38} name="call" size={17} color={COLORS.blue} />
+              {/* Audio call button */}
+              <TouchableOpacity onPress={() => onAudioCall(c)} activeOpacity={0.85}>
+                <LinearGradient colors={GRADIENTS.primary} style={styles.callActionBtn}>
+                  <AppIcon name="call" size={16} color="#fff" fixedColor />
+                </LinearGradient>
               </TouchableOpacity>
-            </TouchableOpacity>
+              {/* Video call button */}
+              <TouchableOpacity onPress={() => onVideoCall(c)} activeOpacity={0.85}>
+                <LinearGradient colors={GRADIENTS.primary} style={styles.callActionBtn}>
+                  <AppIcon name="videocam" size={16} color="#fff" fixedColor />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           ))}
         </ScrollView>
       </View>
@@ -85,48 +82,148 @@ function ContactPickerSheet({
   );
 }
 
+// ─── Call Info Sheet ─────────────────────────────────────────────────────────
+function CallInfoSheet({ call, visible, onClose, onAudioCall, onVideoCall, onMessage }: {
+  call: Call | null; visible: boolean; onClose: () => void;
+  onAudioCall: () => void; onVideoCall: () => void; onMessage: () => void;
+}) {
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
+  if (!call) return null;
+
+  const number = PHONE_NUMBERS[call.name];
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={styles.overlay} onPress={onClose} />
+      <View style={styles.sheet}>
+        <AppBg />
+        <View style={styles.handle} />
+
+        {/* Contact info */}
+        <View style={styles.infoHeader}>
+          <Avatar initials={call.avatar} color={call.color} size={64} />
+          <View style={styles.infoMeta}>
+            <AppText style={[styles.infoName, { color: textColor, fontFamily }]}>{call.name}</AppText>
+            <AppText style={[styles.infoNum, { color: FG.secondary }]}>{number ?? 'No number saved'}</AppText>
+          </View>
+        </View>
+
+        {/* Call details card */}
+        <View style={[styles.detailCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+          <View style={styles.detailRow}>
+            <CallDirectionIcon type={call.type} missed={call.missed} />
+            <AppText style={[styles.detailType, call.missed && styles.detailTypeMissed, { color: call.missed ? COLORS.missed : FG.primary }]}>
+              {call.missed ? 'Missed call' : call.type}
+            </AppText>
+          </View>
+          <AppText style={[styles.detailTime, { color: FG.secondary }]}>{call.time}</AppText>
+        </View>
+
+        {/* Action buttons — same style as ChatScreen top bar */}
+        <View style={styles.actionRow}>
+          {/* Audio call */}
+          <TouchableOpacity style={styles.actionItem} onPress={onAudioCall} activeOpacity={0.85}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
+              <AppIcon name="call" size={24} color="#fff" fixedColor />
+            </LinearGradient>
+            <AppText style={[styles.actionLabel, { color: FG.secondary }]}>Call</AppText>
+          </TouchableOpacity>
+
+          {/* Video call */}
+          <TouchableOpacity style={styles.actionItem} onPress={onVideoCall} activeOpacity={0.85}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
+              <AppIcon name="videocam" size={24} color="#fff" fixedColor />
+            </LinearGradient>
+            <AppText style={[styles.actionLabel, { color: FG.secondary }]}>Video</AppText>
+          </TouchableOpacity>
+
+          {/* Message */}
+          <TouchableOpacity style={styles.actionItem} onPress={onMessage} activeOpacity={0.85}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
+              <AppIcon name="chatbubble" size={22} color="#fff" fixedColor />
+            </LinearGradient>
+            <AppText style={[styles.actionLabel, { color: FG.secondary }]}>Message</AppText>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={[styles.closeBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} onPress={onClose}>
+          <AppText style={[styles.closeBtnText, { color: FG.secondary }]}>Close</AppText>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function CallsScreen() {
-  const [tab,         setTab]         = useState<CallTab>('All');
-  const [pickerOpen,  setPickerOpen]  = useState(false);
-  const { FG } = useForeground();
+  const navigation  = useNavigation<NavProp>();
+  const { FG }      = useForeground();
+  const { fontFamily, textColor } = useTypography();
+
+  const [tab,        setTab]        = useState<CallTab>('All');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedCall, setSelectedCall] = useState<Call | null>(null);
+  const [infoOpen,   setInfoOpen]   = useState(false);
 
   const filtered = tab === 'Missed' ? CALLS.filter((c) => c.missed) : CALLS;
 
-  const handleSelectContact = (contact: Contact) => {
+  const placeAudioCall = (contact: Contact) => {
     setPickerOpen(false);
-    const number = PHONE_NUMBERS[contact.name];
-    if (number) {
-      const tel = `tel:${number.replace(/\s/g, '')}`;
-      Linking.canOpenURL(tel).then((can) => {
-        if (can) {
-          Linking.openURL(tel);
-        } else {
-          Alert.alert('Cannot place call', `Dialling ${number}`);
-        }
-      });
-    } else {
-      Alert.alert('No number', `${contact.name} has no phone number saved.`);
-    }
+    navigation.navigate('AudioCall', { contact });
+  };
+
+  const placeVideoCall = (contact: Contact) => {
+    setPickerOpen(false);
+    navigation.navigate('VideoCall', { contact });
+  };
+
+  const handleCallRowPress = (item: Call) => {
+    setSelectedCall(item);
+    setInfoOpen(true);
+  };
+
+  const getContactForCall = (call: Call): Contact => {
+    return CONTACTS.find((c) => c.name === call.name) ?? {
+      id: call.id, name: call.name, avatar: call.avatar, color: call.color,
+      status: 'offline', lastMsg: '', time: call.time, unread: 0,
+    };
   };
 
   const renderCall = ({ item }: { item: Call }) => (
-    <View style={[styles.callCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+    <TouchableOpacity
+      style={[styles.callCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+      activeOpacity={0.75}
+      onPress={() => handleCallRowPress(item)}
+    >
       <Avatar initials={item.avatar} color={item.color} size={48} />
       <View style={styles.callMeta}>
-        <AppText style={[styles.callName, { color: FG.primary }]}>{item.name}</AppText>
+        <AppText style={[styles.callName, { color: textColor, fontFamily }]}>{item.name}</AppText>
         <View style={styles.callSubRow}>
           <CallDirectionIcon type={item.type} missed={item.missed} />
-          <AppText fixedColor={item.missed} style={[styles.callType, item.missed && styles.callTypeMissed, { color: FG.secondary }]}>{item.type}</AppText>
+          <AppText fixedColor={item.missed}
+            style={[styles.callType, item.missed && styles.callTypeMissed, { color: item.missed ? COLORS.missed : FG.secondary }]}>
+            {item.type}
+          </AppText>
         </View>
       </View>
       <View style={styles.callRight}>
         <AppText style={[styles.callTime, { color: FG.secondary }]}>{item.time}</AppText>
-        <TouchableOpacity style={styles.infoBtn}>
-          <AppIcon name="information-circle-outline" size={20} color={COLORS.blue} />
-        </TouchableOpacity>
+        {/* Call action buttons — same gradient pill as ChatScreen */}
+        <View style={styles.callBtns}>
+          <TouchableOpacity onPress={() => placeAudioCall(getContactForCall(item))} activeOpacity={0.85}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.callBtnPill}>
+              <AppIcon name="call" size={14} color="#fff" fixedColor />
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => placeVideoCall(getContactForCall(item))} activeOpacity={0.85}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.callBtnPill}>
+              <AppIcon name="videocam" size={14} color="#fff" fixedColor />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -136,34 +233,54 @@ export default function CallsScreen() {
       <ContactPickerSheet
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onSelect={handleSelectContact}
+        onAudioCall={placeAudioCall}
+        onVideoCall={placeVideoCall}
       />
 
-      <View style={styles.header}>
-        <AppText style={[styles.title, { color: FG.primary }]}>Calls</AppText>
-        {/* New call button — phone icon + "+" as a clean pill */}
+      <CallInfoSheet
+        call={selectedCall}
+        visible={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        onAudioCall={() => {
+          setInfoOpen(false);
+          if (selectedCall) placeAudioCall(getContactForCall(selectedCall));
+        }}
+        onVideoCall={() => {
+          setInfoOpen(false);
+          if (selectedCall) placeVideoCall(getContactForCall(selectedCall));
+        }}
+        onMessage={() => {
+          setInfoOpen(false);
+          if (selectedCall) {
+            const contact = getContactForCall(selectedCall);
+            navigation.navigate('Chat', { contact });
+          }
+        }}
+      />
+
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1 }]}>
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Calls</AppText>
         <TouchableOpacity activeOpacity={0.85} onPress={() => setPickerOpen(true)}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.newCallBtn}>
             <AppIcon name="call" size={16} color="#fff" fixedColor />
-            <AppText style={styles.newCallPlus}>+</AppText>
+            <AppText fixedColor style={styles.newCallPlus}>+</AppText>
           </LinearGradient>
         </TouchableOpacity>
       </View>
 
-      {/* Tab pills */}
       <View style={styles.tabRow}>
         {(['All', 'Missed', 'Voicemail'] as CallTab[]).map((t) => {
           const isActive = tab === t;
           return isActive ? (
             <TouchableOpacity key={t} onPress={() => setTab(t)} activeOpacity={0.85}>
               <LinearGradient colors={GRADIENTS.primary} style={styles.tabPill}>
-                <AppText style={styles.tabTextActive}>{t}</AppText>
+                <AppText fixedColor style={styles.tabTextActive}>{t}</AppText>
               </LinearGradient>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity key={t} onPress={() => setTab(t)}
-              style={styles.tabPillInactive} activeOpacity={0.7}>
-              <AppText style={styles.tabTextInactive}>{t}</AppText>
+              style={[styles.tabPillInactive, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} activeOpacity={0.7}>
+              <AppText style={[styles.tabTextInactive, { color: FG.secondary }]}>{t}</AppText>
             </TouchableOpacity>
           );
         })}
@@ -178,8 +295,8 @@ export default function CallsScreen() {
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <AppIcon name="call-outline" size={48} color={COLORS.sub} />
-            <AppText style={styles.emptyText}>No missed calls</AppText>
+            <AppIcon name="call-outline" size={48} color={FG.secondary} />
+            <AppText style={[styles.emptyText, { color: FG.secondary }]}>No calls yet</AppText>
           </View>
         }
       />
@@ -190,70 +307,60 @@ export default function CallsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+  root: { flex: 1 },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14,
+    paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14,
   },
-  title:      { fontSize: 26, fontWeight: '800', color: COLORS.text },
-  // New call button — horizontal pill with phone + "+" 
-  newCallBtnWrap: {},
-  newCallBtnInner: {},
+  title: { fontSize: 26, fontWeight: '800' },
   newCallBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: RADIUS.full,
-    ...SHADOW.button,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: RADIUS.full, ...SHADOW.button,
   },
-  newCallPlus: {
-    fontSize: 18,
-    fontWeight: '300',
-    color: '#fff',
-    lineHeight: 20,
-    marginTop: -1,
-  },
-  callPlusIcon: {},
-  callPlusText: {},
-  plusBadge: {},
-  plusBadgeText: {},
+  newCallPlus: { fontSize: 18, fontWeight: '300', color: '#fff', lineHeight: 20, marginTop: -1 },
 
   tabRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 14 },
-  tabPill:         { paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full, ...SHADOW.button },
-  tabPillInactive: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full, ...GLASS.card },
-  tabTextActive:   { fontSize: 13, fontWeight: '700', color: '#fff' },
-  tabTextInactive: { fontSize: 13, fontWeight: '500', color: COLORS.sub },
+  tabPill:        { paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full, ...SHADOW.button },
+  tabPillInactive:{ paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full, borderWidth: 1 },
+  tabTextActive:  { fontSize: 13, fontWeight: '700', color: '#fff' },
+  tabTextInactive:{ fontSize: 13, fontWeight: '500' },
 
-  listContent: { paddingHorizontal: 14, paddingBottom: 20 },
+  listContent: { paddingHorizontal: 14, paddingBottom: 90 },
 
+  // Call log card — full glass
   callCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    ...GLASS.card, borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.lg, borderWidth: 1,
     paddingHorizontal: 14, paddingVertical: 13, ...SHADOW.card,
   },
   callMeta:       { flex: 1 },
-  callName:       { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 3 },
+  callName:       { fontSize: 14, fontWeight: '700', marginBottom: 3 },
   callSubRow:     { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  callType:       { fontSize: 12, color: COLORS.sub },
-  callTypeMissed: { color: COLORS.missed, fontWeight: '600' },
+  callType:       { fontSize: 12 },
+  callTypeMissed: { fontWeight: '600' },
   callRight:      { alignItems: 'flex-end', gap: 6 },
-  callTime:       { fontSize: 12, color: COLORS.sub },
-  infoBtn:        { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  callTime:       { fontSize: 11 },
+
+  // Gradient pill call buttons (same family as ChatScreen)
+  callBtns:    { flexDirection: 'row', gap: 6 },
+  callBtnPill: {
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: 'center', justifyContent: 'center',
+    ...SHADOW.button,
+  },
 
   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyText: { fontSize: 15, color: COLORS.sub },
+  emptyText: { fontSize: 15 },
 
-  // ── Contact picker sheet ──────────────────────────────────────────────────
+  // Sheets
   overlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.22)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    height: '82%',
+    maxHeight: '82%',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    overflow: 'hidden',
-    ...SHADOW.glow,
+    overflow: 'hidden', ...SHADOW.glow,
   },
   handle: {
     alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
@@ -264,28 +371,62 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12, gap: 10,
   },
   iconPad:    { padding: 4 },
-  sheetTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text },
-  sheetSub:   { fontSize: 12, color: COLORS.sub, marginTop: 1 },
-  sectionHint:{
-    fontSize: 10, fontWeight: '700', color: COLORS.sub,
-    letterSpacing: 1, paddingHorizontal: 20, paddingVertical: 6,
-  },
+  sheetTitle: { fontSize: 17, fontWeight: '700' },
+  sheetSub:   { fontSize: 12, marginTop: 1 },
 
-  // Contact cards in sheet
+  // Contact picker cards
   contactCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
     marginHorizontal: 14, marginBottom: 8,
-    ...GLASS.card, borderRadius: RADIUS.lg,
+    borderRadius: RADIUS.lg, borderWidth: 1,
     paddingHorizontal: 14, paddingVertical: 12, ...SHADOW.card,
   },
   contactMeta: { flex: 1 },
-  contactName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
-  contactNum:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
-  callBtnWrap: {},
-  callBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: 'rgba(30,156,240,0.15)',
-    borderWidth: 1, borderColor: 'rgba(30,156,240,0.25)',
+  contactName: { fontSize: 14, fontWeight: '600' },
+  contactNum:  { fontSize: 12, marginTop: 2 },
+  callActionBtn: {
+    width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center',
+    ...SHADOW.button,
   },
+
+  // Call info sheet
+  infoHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 16,
+    paddingHorizontal: 20, paddingVertical: 16,
+  },
+  infoMeta:   { flex: 1 },
+  infoName:   { fontSize: 20, fontWeight: '700' },
+  infoNum:    { fontSize: 13, marginTop: 3 },
+
+  detailCard: {
+    marginHorizontal: 20, marginBottom: 24,
+    borderRadius: RADIUS.lg, borderWidth: 1,
+    paddingHorizontal: 16, paddingVertical: 12,
+    ...SHADOW.card,
+  },
+  detailRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  detailType:      { fontSize: 15, fontWeight: '600' },
+  detailTypeMissed:{ },
+  detailTime:      { fontSize: 13 },
+
+  // Action buttons row
+  actionRow: {
+    flexDirection: 'row', justifyContent: 'space-around',
+    paddingHorizontal: 20, paddingBottom: 20,
+  },
+  actionItem: { alignItems: 'center', gap: 8 },
+  actionBtn: {
+    width: 64, height: 64, borderRadius: 32,
+    alignItems: 'center', justifyContent: 'center',
+    ...SHADOW.button,
+  },
+  actionLabel: { fontSize: 12, fontWeight: '600' },
+
+  closeBtn: {
+    marginHorizontal: 20, marginBottom: 28,
+    borderRadius: RADIUS.lg, borderWidth: 1,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  closeBtnText: { fontSize: 15, fontWeight: '600' },
 });

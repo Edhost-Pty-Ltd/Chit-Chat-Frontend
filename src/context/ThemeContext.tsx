@@ -145,8 +145,8 @@ const LIGHT_FG: ForegroundTokens = {
   secondary:   '#5a7fa0',
   faint:       'rgba(90,127,160,0.55)',
   icon:        '#5a7fa0',
-  glassBg:     'rgba(255,255,255,0.22)',
-  glassBorder: 'rgba(255,255,255,0.45)',
+  glassBg:     'transparent',
+  glassBorder: 'rgba(30,156,240,0.18)',
 };
 
 const DARK_FG: ForegroundTokens = {
@@ -356,18 +356,18 @@ export function AppIcon({
         borderRadius: tileSize * 0.28,
         alignItems: 'center',
         justifyContent: 'center',
-        // Glass fill — white tint over whatever background shows through
+        // Glass fill
         backgroundColor: FG.glassBg,
         borderWidth: 1,
         borderColor: FG.glassBorder,
         // 3D depth via shadow
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.15,
+        shadowOpacity: 0.12,
         shadowRadius: 6,
         elevation: 4,
-        // Top-edge highlight (inner bevel simulation via border)
-        borderTopColor: 'rgba(255,255,255,0.60)',
+        // Top-edge highlight
+        borderTopColor: 'rgba(255,255,255,0.65)',
         borderTopWidth: 1.5,
       },
       style,

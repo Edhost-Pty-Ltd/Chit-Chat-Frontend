@@ -14,18 +14,22 @@
 import React, {
   createContext, useContext, useEffect, useState, useCallback, useRef,
 } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// expo-local-authentication requires a native build — lazy load so Expo Go doesn't crash
+let LocalAuthentication: any = null;
+try { LocalAuthentication = require('expo-local-authentication'); } catch { /* Expo Go / web */ }
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 
 const KEYS = {
-  phone:       'auth_phone',
-  signedIn:    'auth_signed_in',
-  lastActive:  'auth_last_active',
-  displayName: 'auth_display_name',
-  avatarUri:   'auth_avatar_uri',
+  phone:            'auth_phone',
+  signedIn:         'auth_signed_in',
+  lastActive:       'auth_last_active',
+  displayName:      'auth_display_name',
+  avatarUri:        'auth_avatar_uri',
+  biometricEnabled: 'auth_biometric_enabled',
 } as const;
 
 interface AuthContextValue {
@@ -35,6 +39,8 @@ interface AuthContextValue {
   setDisplayName: (name: string) => Promise<void>;
   avatarUri: string | null;
   setAvatarUri: (uri: string) => Promise<void>;
+  biometricEnabled: boolean;
+  setBiometricEnabled: (enabled: boolean) => Promise<{ success: boolean; message?: string }>;
   signIn: (phone: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshActivity: () => void;
@@ -48,6 +54,8 @@ const AuthContext = createContext<AuthContextValue>({
   setDisplayName: async () => {},
   avatarUri: null,
   setAvatarUri: async () => {},
+  biometricEnabled: false,
+  setBiometricEnabled: async () => ({ success: false }),
   signIn: async () => {},
   signOut: async () => {},
   refreshActivity: () => {},
@@ -59,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [phone, setPhone]                   = useState('');
   const [displayName, setDisplayNameState]  = useState('');
   const [avatarUri, setAvatarUriState]      = useState<string | null>(null);
+  const [biometricEnabled, setBiometricState] = useState(false);
   const [loading, setLoading]               = useState(true);
   const webTimerRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -88,16 +97,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar] = await Promise.all([
+        const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar, storedBio] = await Promise.all([
           AsyncStorage.getItem(KEYS.signedIn),
           AsyncStorage.getItem(KEYS.phone),
           AsyncStorage.getItem(KEYS.lastActive),
           AsyncStorage.getItem(KEYS.displayName),
           AsyncStorage.getItem(KEYS.avatarUri),
+          AsyncStorage.getItem(KEYS.biometricEnabled),
         ]);
 
         if (storedName)   setDisplayNameState(storedName);
         if (storedAvatar) setAvatarUriState(storedAvatar);
+        const bioOn = storedBio === 'true';
+        if (bioOn) setBiometricState(true);
 
         if (signedIn === 'true' && storedPhone) {
           if (Platform.OS === 'web') {
@@ -114,7 +126,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
             }
           } else {
-            // Mobile — no expiry
+            // Mobile — check biometric if enabled
+            if (bioOn && (Platform.OS as string) !== 'web') {
+              if (!LocalAuthentication) {
+                // Running in Expo Go — skip biometric check
+              } else {
+              const hasHw = await LocalAuthentication.hasHardwareAsync();
+              const enrolled = await LocalAuthentication.isEnrolledAsync();
+              if (hasHw && enrolled) {
+                const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+                const isFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+                const result = await LocalAuthentication.authenticateAsync({
+                  promptMessage: isFace ? 'Sign in with Face ID' : 'Sign in with fingerprint',
+                  fallbackLabel: 'Use PIN',
+                  cancelLabel: 'Cancel',
+                  disableDeviceFallback: false,
+                });
+                if (!result.success) {
+                  // Biometric failed — don't sign in, go to Sign In screen
+                  setLoading(false);
+                  return;
+                }
+              }
+              }
+            }
             setPhone(storedPhone);
             setIsSignedIn(true);
           }
@@ -173,6 +208,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(KEYS.avatarUri, uri);
   };
 
+  /** Enable or disable biometric login. When enabling, prompts biometrics first. */
+  const setBiometricEnabled = async (enabled: boolean): Promise<{ success: boolean; message?: string }> => {
+    if (Platform.OS === 'web') {
+      return { success: false, message: 'Biometrics not available on web.' };
+    }
+    if (!LocalAuthentication) {
+      return { success: false, message: 'Biometrics require a development build.' };
+    }
+    if (enabled) {
+      const hasHw   = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!hasHw)   return { success: false, message: 'This device has no biometric hardware.' };
+      if (!enrolled) return { success: false, message: 'No biometrics enrolled. Please set up fingerprint or face ID in device settings.' };
+
+      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      const isFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: isFace ? 'Confirm with Face ID to enable biometric login' : 'Confirm with fingerprint to enable biometric login',
+        fallbackLabel: 'Use PIN',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: false,
+      });
+      if (!result.success) {
+        return { success: false, message: 'Authentication failed. Biometric login not enabled.' };
+      }
+    }
+    setBiometricState(enabled);
+    await AsyncStorage.setItem(KEYS.biometricEnabled, enabled ? 'true' : 'false');
+    return { success: true };
+  };
+
   const signOut = async () => {
     await doSignOut();
   };
@@ -188,6 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       isSignedIn, phone, displayName, setDisplayName,
       avatarUri, setAvatarUri,
+      biometricEnabled, setBiometricEnabled,
       signIn, signOut, refreshActivity, loading,
     }}>
       {children}

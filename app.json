@@ -6,20 +6,93 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "updates": {
+      "enabled": false,
+      "checkAutomatically": "NEVER"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.chitchat.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "ChitChat needs camera access to take photos and make video calls.",
+        "NSMicrophoneUsageDescription": "ChitChat needs microphone access for voice messages and calls.",
+        "NSPhotoLibraryUsageDescription": "ChitChat needs photo library access to send photos and set your profile picture.",
+        "NSPhotoLibraryAddUsageDescription": "ChitChat needs permission to save photos to your library.",
+        "NSFaceIDUsageDescription": "ChitChat uses Face ID to securely sign you in.",
+        "NSCalendarsUsageDescription": "ChitChat needs calendar access to read and create events.",
+        "NSContactsUsageDescription": "ChitChat needs contacts access to help you connect with people you know."
+      }
     },
     "android": {
+      "package": "com.chitchat.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_MEDIA_AUDIO",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "READ_CALENDAR",
+        "WRITE_CALENDAR",
+        "READ_CONTACTS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ChitChat needs camera access to take photos and make video calls.",
+          "microphonePermission": "ChitChat needs microphone access for voice messages and calls.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ChitChat needs photo library access to send photos and set your profile picture.",
+          "cameraPermission": "ChitChat needs camera access to take photos."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "ChitChat needs photo library access.",
+          "savePhotosPermission": "ChitChat needs permission to save photos.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "ChitChat needs microphone access for voice messages."
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "ChitChat needs calendar access to read and create events."
+        }
+      ],
+      "expo-local-authentication",
+      "expo-video",
+      "expo-asset"
+    ]
   }
 }

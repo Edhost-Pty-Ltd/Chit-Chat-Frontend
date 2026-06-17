@@ -14,8 +14,8 @@ import {
   View, Text, TextInput, TouchableOpacity, Image,
   StyleSheet, ScrollView, KeyboardAvoidingView,
   Platform, ActivityIndicator, Modal, FlatList,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -402,8 +402,8 @@ export default function SignInScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ── Create account link — mobile only, below the card ── */}
-      {step === 'phone' && Platform.OS !== 'web' && (
+      {/* ── Create account link ── */}
+      {step === 'phone' && (
         <View style={styles.createAccountRow}>
           <Text style={styles.createAccountText}>Don't have an account? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
@@ -449,12 +449,11 @@ const styles = StyleSheet.create({
 
   // ── Card ──────────────────────────────────────────────────────────────────
   card: {
-    backgroundColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'transparent',
     borderRadius: RADIUS.xl,
     padding: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.55)',
-    borderTopColor: 'rgba(255,255,255,0.80)',
+    borderColor: 'rgba(30,156,240,0.18)',
     shadowColor: '#0e6ea8',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.20,
@@ -483,11 +482,10 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 13,
-    backgroundColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderRadius: RADIUS.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.55)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
+    borderColor: 'rgba(30,156,240,0.18)',
     shadowColor: '#0e6ea8',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.10,
@@ -498,14 +496,13 @@ const styles = StyleSheet.create({
   dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
   inputWrap: {
-    backgroundColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderRadius: RADIUS.md,
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.55)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
+    borderColor: 'rgba(30,156,240,0.18)',
     shadowColor: '#0e6ea8',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.10,
@@ -567,9 +564,9 @@ const styles = StyleSheet.create({
     lineHeight: 58,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    backgroundColor: 'rgba(255,255,255,0.30)',
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
+    borderColor: 'rgba(30,156,240,0.22)',
     shadowColor: '#0e6ea8',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
@@ -621,8 +618,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(30,156,240,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.50)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
+    borderColor: 'rgba(30,156,240,0.18)',
     shadowColor: '#1E9CF0',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,

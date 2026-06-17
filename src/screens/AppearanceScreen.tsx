@@ -57,7 +57,7 @@ export default function AppearanceScreen() {
       }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'] as any,
       allowsEditing: false,
       quality: 0.85,
     });
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: 56, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 12, paddingHorizontal: 14,
     gap: 8, ...GLASS.header,
   },
   backBtn: { width: 36, alignItems: 'flex-start' },

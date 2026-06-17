@@ -5,14 +5,17 @@ import React, { useState, useRef, useMemo } from 'react';
 import {
   View, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Image, Alert, Modal, FlatList, SafeAreaView,
+  ActivityIndicator, Image, Alert, Modal, FlatList,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as LocalAuthentication from 'expo-local-authentication';
+// expo-local-authentication requires a native build — lazy load so Expo Go doesn't crash
+let LocalAuthentication: any = null;
+try { LocalAuthentication = require('expo-local-authentication'); } catch { /* Expo Go */ }
 import { useAuth } from '../context/AuthContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
@@ -34,6 +37,7 @@ async function verifyOtp(_phone: string, code: string): Promise<boolean> {
 // ─── Biometric helper ─────────────────────────────────────────────────────────
 async function runBiometric(): Promise<{ success: boolean; message: string }> {
   try {
+    if (!LocalAuthentication) return { success: true, message: 'not_available' }; // skip in Expo Go
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     if (!hasHardware) return { success: true, message: 'no_hardware' }; // skip gracefully
 
@@ -136,7 +140,7 @@ export default function CreateAccountScreen() {
       }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'] as any,
       allowsEditing: true, aspect: [1, 1], quality: 0.85,
     });
     if (!result.canceled && result.assets[0]) setLocalAvatar(result.assets[0].uri);
@@ -394,36 +398,36 @@ export default function CreateAccountScreen() {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 56, paddingBottom: 48 },
+  scroll: { flexGrow: 1, paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 24 : 56, paddingBottom: 48 },
 
   backRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   backText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
-  card: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', borderTopColor: 'rgba(255,255,255,0.80)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.20, shadowRadius: 20, elevation: 8 },
+  card: { backgroundColor: 'transparent', borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: 'rgba(30,156,240,0.18)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.20, shadowRadius: 20, elevation: 8 },
   cardTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text, marginBottom: 6 },
   cardSub:   { fontSize: 13, color: COLORS.sub, marginBottom: 20, lineHeight: 19 },
 
   // Avatar
   avatarWrap: { alignItems: 'center', marginBottom: 20, gap: 6 },
-  avatarImg: { width: 90, height: 90, borderRadius: 45, borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)' },
-  avatarPlaceholder: { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.40)' },
+  avatarImg: { width: 90, height: 90, borderRadius: 45, borderWidth: 2, borderColor: 'rgba(30,156,240,0.30)' },
+  avatarPlaceholder: { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(30,156,240,0.25)' },
   avatarInitials: { fontSize: 30, fontWeight: '800', color: '#fff' },
   cameraBadge: {
     width: 28, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.90)',
-    borderWidth: 1, borderColor: COLORS.blue,
+    backgroundColor: COLORS.blue,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.30)',
     alignItems: 'center', justifyContent: 'center',
     marginTop: -14,
   },
   avatarHint: { fontSize: 11, color: COLORS.sub, marginTop: 2 },
 
-  inputWrap: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: RADIUS.md, flexDirection: 'row', alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', borderTopColor: 'rgba(255,255,255,0.75)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.10, shadowRadius: 6, elevation: 2 },
+  inputWrap: { backgroundColor: 'rgba(30,156,240,0.06)', borderRadius: RADIUS.md, flexDirection: 'row', alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: 'rgba(30,156,240,0.18)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.10, shadowRadius: 6, elevation: 2 },
   inputIcon: { paddingLeft: 14 },
   inputFlex: { flex: 1, marginBottom: 0 },
   input:     { flex: 1, paddingHorizontal: 12, paddingVertical: 13, fontSize: 15, color: COLORS.text },
 
   phoneRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  dialBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 13, backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: RADIUS.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', borderTopColor: 'rgba(255,255,255,0.75)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.10, shadowRadius: 6, elevation: 2 },
+  dialBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 13, backgroundColor: 'rgba(30,156,240,0.06)', borderRadius: RADIUS.md, borderWidth: 1, borderColor: 'rgba(30,156,240,0.18)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.10, shadowRadius: 6, elevation: 2 },
   dialFlag: { fontSize: 20 },
   dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
@@ -447,9 +451,9 @@ const styles = StyleSheet.create({
     lineHeight: 58,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    backgroundColor: 'rgba(255,255,255,0.30)',
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
+    borderColor: 'rgba(30,156,240,0.22)',
     shadowColor: '#0e6ea8',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
@@ -480,8 +484,8 @@ const styles = StyleSheet.create({
     borderRadius: 55,
     backgroundColor: 'rgba(30,156,240,0.12)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
-    borderTopColor: 'rgba(255,255,255,0.80)',
+    borderColor: 'rgba(30,156,240,0.22)',
+    borderTopColor: 'rgba(30,156,240,0.30)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
@@ -500,8 +504,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(30,156,240,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.50)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
+    borderColor: 'rgba(30,156,240,0.18)',
     shadowColor: '#1E9CF0',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,

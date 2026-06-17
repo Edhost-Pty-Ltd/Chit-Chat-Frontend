@@ -1,6 +1,6 @@
 ﻿// ─── Screen: Settings ────────────────────────────────────────────────────────
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,9 +20,8 @@ const SETTINGS_SECTIONS: {
   {
     label: 'APPS',
     items: [
-      { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar'     },
-      { id: 'notes',    icon: 'document-text-outline', label: 'Notes'        },
-      { id: 'backup',   icon: 'cloud-upload-outline',  label: 'Cloud Backup' },
+      { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar' },
+      { id: 'notes',    icon: 'document-text-outline', label: 'Notes'    },
     ],
   },
   {
@@ -35,9 +34,8 @@ const SETTINGS_SECTIONS: {
   },
   {
     items: [
-      { id: 'storage',    icon: 'server-outline',         label: 'Data and Storage' },
-      { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices'  },
-      { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'      },
+      { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices' },
+      { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'     },
     ],
   },
   {
@@ -58,18 +56,21 @@ export default function SettingsScreen() {
   const { fontFamily, textColor, iconColor } = useTypography();
 
   const handleItem = (id: string) => {
-    if (id === 'signout')    { signOut(); return; }
-    if (id === 'backup')     navigation.navigate('CloudBackup');
-    if (id === 'calendar')   navigation.navigate('Calendar');
-    if (id === 'notes')      navigation.navigate('Notes');
-    if (id === 'appearance') navigation.navigate('Appearance');
+    if (id === 'signout')       { signOut(); return; }
+    if (id === 'calendar')      navigation.navigate('Calendar');
+    if (id === 'notes')         navigation.navigate('Notes');
+    if (id === 'appearance')    navigation.navigate('Appearance');
+    if (id === 'account')       navigation.navigate('AccountSettings');
+    if (id === 'privacy')       navigation.navigate('PrivacySettings');
+    if (id === 'notifications') navigation.navigate('NotificationSettings');
+    if (id === 'devices')       navigation.navigate('LinkedDevices');
   };
 
   return (
     <View style={styles.root}>
       <AppBg />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1 }]}>
         <AppText style={[styles.title, { color: textColor, fontFamily }]}>Settings</AppText>
       </View>
 
@@ -124,9 +125,9 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+  root: { flex: 1 },
 
-  header: { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14 },
+  header: { paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14 },
   title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
 
   scroll: { paddingHorizontal: 14, paddingBottom: 20, gap: 6 },

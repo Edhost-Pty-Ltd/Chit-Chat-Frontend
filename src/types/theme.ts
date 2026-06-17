@@ -14,11 +14,11 @@ export const COLORS = {
   blueDeep:  '#0a72c4',
   blueGlow:  'rgba(30,156,240,0.30)',
 
-  // ── Glass surfaces — clear, not white ─────────────────────────────────
-  glass:         'rgba(255,255,255,0.18)',
-  glassMid:      'rgba(255,255,255,0.24)',
-  glassHigh:     'rgba(255,255,255,0.30)',
-  glassBorder:   'rgba(255,255,255,0.45)',
+  // ── Glass surfaces — sky-blue tint, truly transparent ────────────────────
+  glass:         'rgba(135,206,235,0.25)',
+  glassMid:      'rgba(135,206,235,0.32)',
+  glassHigh:     'rgba(135,206,235,0.40)',
+  glassBorder:   'rgba(255,255,255,0.55)',
   glassBorderSub:'rgba(30,156,240,0.20)',
 
   // ── Text ───────────────────────────────────────────────────────────────
@@ -33,8 +33,8 @@ export const COLORS = {
   green:     '#22c55e',
   amber:     '#f59e0b',
   border:    'rgba(30,156,240,0.14)',
-  cardBg:    'rgba(255,255,255,0.18)',
-  inputBg:   'rgba(255,255,255,0.22)',
+  cardBg:    'rgba(135,206,235,0.25)',
+  inputBg:   'rgba(135,206,235,0.20)',
 
   // ── Bg gradient aliases ────────────────────────────────────────────────
   bgGrad1:   '#87CEEB',
@@ -46,39 +46,38 @@ export const GRADIENTS = {
   primary:  ['#1E9CF0', '#0a72c4']                               as [string, string],
   sky:      ['#0a72c4', '#1E9CF0', '#87CEEB']                    as [string, string, string],
   bg:       ['#87CEEB', '#C5E8F7', '#E8F6FF']                    as [string, string, string],
-  card:     ['rgba(255,255,255,0.28)', 'rgba(255,255,255,0.14)'] as [string, string],
+  card:     ['rgba(135,206,235,0.30)', 'rgba(135,206,235,0.15)'] as [string, string],
   glow:     ['rgba(30,156,240,0.35)',  'rgba(30,156,240,0.0)']   as [string, string],
   chatSent: ['#1E9CF0', '#0a72c4']                               as [string, string],
-  chatRecv: ['rgba(255,255,255,0.30)', 'rgba(255,255,255,0.18)'] as [string, string],
+  chatRecv: ['rgba(135,206,235,0.35)', 'rgba(135,206,235,0.20)'] as [string, string],
 } as const;
 
 export const GLASS = {
-  // 3D glass card — top edge catches light, bottom has depth
+  // Fully transparent glass — only a subtle border, gradient shows through 100%
   card: {
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    // Simulated inner bevel via shadow
+    borderColor: 'rgba(30,156,240,0.18)',
   },
   elevated: {
-    backgroundColor: 'rgba(180,225,245,0.28)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.50)',
+    borderColor: 'rgba(30,156,240,0.22)',
   },
   input: {
-    backgroundColor: 'rgba(180,225,245,0.18)',
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.42)',
+    borderColor: 'rgba(30,156,240,0.18)',
   },
   nav: {
-    backgroundColor: 'rgba(160,215,240,0.50)',
+    backgroundColor: 'transparent',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.55)',
+    borderTopColor: 'rgba(30,156,240,0.18)',
   },
   header: {
-    backgroundColor: 'rgba(160,215,240,0.35)',
+    backgroundColor: 'transparent',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.40)',
+    borderBottomColor: 'rgba(30,156,240,0.18)',
   },
 } as const;
 
