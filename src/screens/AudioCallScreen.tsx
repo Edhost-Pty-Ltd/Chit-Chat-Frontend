@@ -25,7 +25,7 @@ export default function AudioCallScreen() {
   const route = useRoute<RouteP>();
   const { callId, isOutgoing, otherParty } = route.params;
 
-  const { callStatus, isMuted, isSpeakerOn, callDuration, setMuted, setSpeakerOn, incrementCallDuration } = useCallContext();
+  const { callStatus, isMuted, isSpeakerOn, callDuration, activeCallId, setMuted, setSpeakerOn, incrementCallDuration, setCallDuration } = useCallContext();
   const outgoingCall = useOutgoingCall();
   const incomingCallAnswer = useIncomingCallAnswer();
   const audioRouting = useAudioRouting();
@@ -37,6 +37,29 @@ export default function AudioCallScreen() {
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>('unknown');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartTimeRef = useRef<number>(0);
+
+  // Store callId in a ref so it's accessible during hangup
+  // Use activeCallId from context as fallback
+  const callIdRef = useRef<string>(callId || activeCallId || '');
+  
+  // Reset call duration when screen mounts
+  useEffect(() => {
+    setCallDuration(0);
+    console.log('[AudioCallScreen] Call duration reset to 0');
+    
+    // Set the callId in the appropriate hook
+    const effectiveCallId = callId || activeCallId;
+    if (effectiveCallId) {
+      callIdRef.current = effectiveCallId; // Store in ref
+      if (isOutgoing) {
+        console.log('[AudioCallScreen] Setting callId in outgoingCall hook:', effectiveCallId);
+        outgoingCall.setCallId(effectiveCallId);
+      } else {
+        console.log('[AudioCallScreen] Setting callId in incomingCallAnswer hook:', effectiveCallId);
+        incomingCallAnswer.setCallId(effectiveCallId);
+      }
+    }
+  }, [setCallDuration, isOutgoing, callId, activeCallId, outgoingCall, incomingCallAnswer]);
 
   // Initialize audio routing when screen mounts
   useEffect(() => {
@@ -70,12 +93,25 @@ export default function AudioCallScreen() {
         timerRef.current = null;
       }
     };
-  }, [callStatus, incrementCallDuration]);
+  }, [callStatus]); // Remove incrementCallDuration from dependencies
 
   // Handle call status changes
   useEffect(() => {
     if (callStatus === 'ended' || callStatus === 'rejected' || callStatus === 'missed' || callStatus === 'failed') {
       console.log('[AudioCallScreen] Call ended with status:', callStatus);
+      
+      // Stop timer immediately
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
+      // Navigate back immediately for ended status
+      if (callStatus === 'ended') {
+        console.log('[AudioCallScreen] Navigating back immediately');
+        navigation.goBack();
+        return;
+      }
       
       // Show alert for non-normal endings
       if (callStatus === 'rejected') {
@@ -90,9 +126,6 @@ export default function AudioCallScreen() {
         Alert.alert('Call Failed', 'Unable to establish connection.', [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);
-      } else {
-        // Normal end
-        navigation.goBack();
       }
     }
   }, [callStatus, navigation]);
@@ -126,15 +159,31 @@ export default function AudioCallScreen() {
 
   const handleHangUp = async () => {
     console.log('[AudioCallScreen] Hanging up...');
+    console.log('[AudioCallScreen] Current call status:', callStatus);
+    console.log('[AudioCallScreen] Call ID from ref:', callIdRef.current);
+    console.log('[AudioCallScreen] Is outgoing:', isOutgoing);
+    
+    // Ensure the hook has the callId before ending
+    if (callIdRef.current) {
+      if (isOutgoing) {
+        outgoingCall.setCallId(callIdRef.current);
+      } else {
+        incomingCallAnswer.setCallId(callIdRef.current);
+      }
+    }
     
     // Calculate duration if call was connected
     const duration = callStatus === 'connected' 
       ? Math.floor((Date.now() - callStartTimeRef.current) / 1000)
       : 0;
 
+    console.log('[AudioCallScreen] Calculated duration:', duration);
+    console.log('[AudioCallScreen] Calling endCall on', isOutgoing ? 'outgoingCall' : 'incomingCallAnswer');
+
     // End the call using the appropriate manager
     await callManager.endCall(duration);
 
+    console.log('[AudioCallScreen] endCall completed, navigating back...');
     navigation.goBack();
   };
 

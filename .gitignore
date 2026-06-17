@@ -80,11 +80,18 @@ PHASE_*_CRASH_FIX.md
 *_ENHANCEMENTS.md
 *_TODO.md
 *_FIXES.md
+*_SUMMARY.md
+*_FIX.md
 HYBRID_*.md
 IMPORT_*.md
 PERMISSION_*.md
 TEST_PHONE_NUMBERS.md
 WEBRTC_SETUP_NOTE.md
+CALL_FIXES_SUMMARY.md
+CALL_CONNECTION_FIX.md
+DUPLICATE_ANSWER_FIX.md
+IMMEDIATE_CLEANUP_FIX.md
+CALLER_INFO_FIX.md
 
 # Kiro spec folders (keep if collaborators use Kiro, otherwise uncomment)
 .kiro/specs/user-registration/

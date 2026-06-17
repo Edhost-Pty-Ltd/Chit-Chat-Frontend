@@ -138,8 +138,8 @@ export class SignalingService {
         answer: data.answer ?? null,
         callerIceCandidates: data.callerIceCandidates ?? [],
         calleeIceCandidates: data.calleeIceCandidates ?? [],
-        createdAt: (data.createdAt as Timestamp).toDate(),
-        updatedAt: (data.updatedAt as Timestamp).toDate(),
+        createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : new Date(),
+        updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : new Date(),
       };
       
       callback(call);
@@ -169,8 +169,8 @@ export class SignalingService {
       answer: data.answer ?? null,
       callerIceCandidates: data.callerIceCandidates ?? [],
       calleeIceCandidates: data.calleeIceCandidates ?? [],
-      createdAt: (data.createdAt as Timestamp).toDate(),
-      updatedAt: (data.updatedAt as Timestamp).toDate(),
+      createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : new Date(),
+      updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : new Date(),
     };
   }
   

@@ -3,49 +3,28 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { SignalingService } from '../services/signalingService';
-import { useWebRTC } from './useWebRTC';
 import { useCallContext } from '../context/CallContext';
 import type { CallParticipant } from '../types/call';
 
 export function useOutgoingCall() {
-  const { setActiveCallId, setCallStatus, resetCallState } = useCallContext();
+  const { 
+    setActiveCallId, setCallStatus, resetCallState, setIsCaller,
+    localStream, remoteStream, streamVersion, connectionState, networkQuality,
+    initializePeerConnection, createOffer, setRemoteAnswer, addIceCandidate,
+    toggleMute, toggleVideo, startNetworkMonitoring, stopNetworkMonitoring, cleanup
+  } = useCallContext();
+  
   const [isInitiating, setIsInitiating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const callIdRef = useRef<string | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const answerProcessedRef = useRef<boolean>(false); // Track if answer has been processed
+  const iceCandidatesProcessedRef = useRef<Set<string>>(new Set()); // Track processed ICE candidates
 
-  // WebRTC handlers
-  const webrtcHandlers = {
-    onIceCandidate: useCallback(async (candidate: RTCIceCandidateInit) => {
-      const callId = callIdRef.current;
-      if (!callId) return;
-      
-      try {
-        await SignalingService.addIceCandidate(callId, candidate, false); // false = caller
-        console.log('[useOutgoingCall] ICE candidate sent to Firestore');
-      } catch (err) {
-        console.error('[useOutgoingCall] Failed to add ICE candidate:', err);
-      }
-    }, []),
-
-    onConnectionStateChange: useCallback((state: string) => {
-      console.log('[useOutgoingCall] Connection state:', state);
-      
-      if (state === 'connected') {
-        setCallStatus('connected');
-        // Start monitoring network quality once connected
-        webrtc.startNetworkMonitoring();
-      } else if (state === 'failed' || state === 'disconnected') {
-        setCallStatus('failed');
-      }
-    }, [setCallStatus]),
-
-    onNetworkQualityChange: useCallback((quality: string) => {
-      console.log('[useOutgoingCall] Network quality changed:', quality);
-    }, []),
-  };
-
-  const webrtc = useWebRTC(webrtcHandlers);
+  // Mark this hook as caller when initialized
+  useEffect(() => {
+    setIsCaller(true);
+  }, [setIsCaller]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -63,13 +42,18 @@ export function useOutgoingCall() {
       callerId: string,
       calleeId: string,
       callerInfo: CallParticipant,
-      calleeInfo: CallParticipant
+      calleeInfo: CallParticipant,
+      callType: 'audio' | 'video' = 'audio'
     ): Promise<string | null> => {
       setIsInitiating(true);
       setError(null);
+      
+      // Reset processing flags for new call
+      answerProcessedRef.current = false;
+      iceCandidatesProcessedRef.current.clear();
 
       try {
-        console.log('[useOutgoingCall] Creating call document...');
+        console.log('[useOutgoingCall] Creating call document...', 'Type:', callType);
         
         // Step 1: Create call document in Firestore
         const callId = await SignalingService.createCall(
@@ -77,7 +61,7 @@ export function useOutgoingCall() {
           calleeId,
           callerInfo,
           calleeInfo,
-          'audio'
+          callType
         );
         
         callIdRef.current = callId;
@@ -85,56 +69,99 @@ export function useOutgoingCall() {
         setCallStatus('ringing');
 
         // Step 2: Initialize WebRTC peer connection
-        console.log('[useOutgoingCall] Initializing peer connection...');
-        await webrtc.initializePeerConnection();
+        const isVideo = callType === 'video';
+        console.log('[useOutgoingCall] Initializing peer connection... Video:', isVideo);
+        await initializePeerConnection(isVideo);
 
         // Step 3: Create WebRTC offer
-        console.log('[useOutgoingCall] Creating offer...');
-        const offer = await webrtc.createOffer();
+        console.log('[useOutgoingCall] Creating offer... Video:', isVideo);
+        const offer = await createOffer(isVideo);
 
         // Step 4: Save offer to Firestore
         console.log('[useOutgoingCall] Saving offer to Firestore...');
         await SignalingService.saveOffer(callId, offer);
 
-        // Step 5: Listen for answer from callee
-        console.log('[useOutgoingCall] Listening for answer...');
+        // Step 5: Listen for answer from callee and status changes
+        console.log('[useOutgoingCall] Listening for answer and status changes...');
         unsubscribeRef.current = SignalingService.onCallUpdated(callId, async (call) => {
           if (!call) return;
 
-          // When callee answers
-          if (call.answer && call.status === 'accepted') {
-            console.log('[useOutgoingCall] Answer received, setting remote description...');
+          console.log('[useOutgoingCall] Firestore update - status:', call.status, 'hasAnswer:', !!call.answer, 'answerProcessed:', answerProcessedRef.current);
+
+          // Handle call rejected/missed/ended FIRST before processing answer - IMMEDIATE cleanup
+          if (call.status === 'rejected') {
+            console.log('[useOutgoingCall] Call rejected - immediate cleanup');
+            cleanup(); // Cleanup FIRST
+            setCallStatus('rejected');
+            setError('Call rejected');
+            if (unsubscribeRef.current) {
+              unsubscribeRef.current();
+              unsubscribeRef.current = null;
+            }
+            return; // Stop processing
+          } else if (call.status === 'missed') {
+            console.log('[useOutgoingCall] Call missed - immediate cleanup');
+            cleanup(); // Cleanup FIRST
+            setCallStatus('missed');
+            setError('Call not answered');
+            if (unsubscribeRef.current) {
+              unsubscribeRef.current();
+              unsubscribeRef.current = null;
+            }
+            return; // Stop processing
+          } else if (call.status === 'ended') {
+            console.log('[useOutgoingCall] Call ended by remote party - immediate cleanup');
             
-            try {
-              await webrtc.setRemoteAnswer(call.answer);
-              setCallStatus('connected');
-              console.log('[useOutgoingCall] Call connected!');
-            } catch (err) {
-              console.error('[useOutgoingCall] Failed to set remote answer:', err);
-              setError('Failed to establish connection');
-              setCallStatus('failed');
+            // Cleanup WebRTC FIRST to stop audio immediately
+            cleanup();
+            
+            // Then update status
+            setCallStatus('ended');
+            
+            // Unsubscribe from further updates
+            if (unsubscribeRef.current) {
+              unsubscribeRef.current();
+              unsubscribeRef.current = null;
+            }
+            return; // Stop processing
+          }
+
+          // When callee answers (only process if not already processed)
+          if (call.answer && call.status === 'accepted') {
+            if (answerProcessedRef.current) {
+              console.log('[useOutgoingCall] Answer already processed, skipping...');
+              // Don't process answer again, but continue to ICE candidates
+            } else {
+              console.log('[useOutgoingCall] Answer received, setting remote description...');
+              
+              // Mark as processed immediately to prevent duplicate processing
+              answerProcessedRef.current = true;
+              
+              try {
+                await setRemoteAnswer(call.answer);
+                setCallStatus('connected');
+                console.log('[useOutgoingCall] Call connected!');
+              } catch (err) {
+                console.error('[useOutgoingCall] Failed to set remote answer:', err);
+                setError('Failed to establish connection');
+                setCallStatus('failed');
+                // Reset flag on error so it can be retried
+                answerProcessedRef.current = false;
+              }
             }
           }
 
-          // Handle call rejected/missed/ended
-          if (call.status === 'rejected') {
-            console.log('[useOutgoingCall] Call rejected');
-            setCallStatus('rejected');
-            setError('Call rejected');
-          } else if (call.status === 'missed') {
-            console.log('[useOutgoingCall] Call missed');
-            setCallStatus('missed');
-            setError('Call not answered');
-          } else if (call.status === 'ended') {
-            console.log('[useOutgoingCall] Call ended');
-            setCallStatus('ended');
-          }
-
-          // Add ICE candidates from callee
+          // Add ICE candidates from callee (only new ones)
           if (call.calleeIceCandidates.length > 0) {
-            console.log('[useOutgoingCall] Adding', call.calleeIceCandidates.length, 'ICE candidates');
             for (const candidate of call.calleeIceCandidates) {
-              await webrtc.addIceCandidate(candidate);
+              // Create a unique key for this candidate
+              const candidateKey = `${candidate.candidate}-${candidate.sdpMLineIndex}-${candidate.sdpMid}`;
+              
+              if (!iceCandidatesProcessedRef.current.has(candidateKey)) {
+                iceCandidatesProcessedRef.current.add(candidateKey);
+                console.log('[useOutgoingCall] Adding ICE candidate');
+                await addIceCandidate(candidate);
+              }
             }
           }
         });
@@ -149,25 +176,40 @@ export function useOutgoingCall() {
         return null;
       }
     },
-    [webrtc, setActiveCallId, setCallStatus]
+    [initializePeerConnection, createOffer, setRemoteAnswer, addIceCandidate, setActiveCallId, setCallStatus]
   );
 
   // ── End call ───────────────────────────────────────────────────────────────
   const endCall = useCallback(
     async (duration?: number) => {
+      // Get callId from context instead of ref
       const callId = callIdRef.current;
-      if (!callId) return;
+      console.log('[useOutgoingCall] ===== END CALL STARTED =====');
+      console.log('[useOutgoingCall] Call ID from ref:', callId);
+      console.log('[useOutgoingCall] Duration:', duration);
+      
+      if (!callId) {
+        console.error('[useOutgoingCall] ❌ No callId in ref, cannot end call!');
+        console.log('[useOutgoingCall] This means the hook was recreated and lost the callId');
+        return;
+      }
 
       console.log('[useOutgoingCall] Ending call...');
 
       try {
         // Update call status in Firestore
+        console.log('[useOutgoingCall] Step 1: Updating Firestore status to ended...');
         await SignalingService.updateCallStatus(callId, 'ended', duration);
+        console.log('[useOutgoingCall] Step 2: Firestore updated successfully');
 
         // Save to call history
+        console.log('[useOutgoingCall] Step 3: Fetching call document...');
         const call = await SignalingService.getCall(callId);
+        console.log('[useOutgoingCall] Step 4: Call document fetched:', !!call);
+        
         if (call) {
           // Save for caller (outgoing)
+          console.log('[useOutgoingCall] Step 5: Saving to caller history...');
           await SignalingService.saveToCallHistory(
             call.caller.userId,
             callId,
@@ -177,8 +219,10 @@ export function useOutgoingCall() {
             duration && duration > 0 ? 'completed' : 'missed',
             duration || null
           );
+          console.log('[useOutgoingCall] Step 6: Caller history saved');
 
           // Save for callee (incoming)
+          console.log('[useOutgoingCall] Step 7: Saving to callee history...');
           await SignalingService.saveToCallHistory(
             call.callee.userId,
             callId,
@@ -188,28 +232,39 @@ export function useOutgoingCall() {
             duration && duration > 0 ? 'completed' : 'missed',
             duration || null
           );
+          console.log('[useOutgoingCall] Step 8: Callee history saved');
         }
 
         // Cleanup WebRTC
-        webrtc.cleanup();
+        console.log('[useOutgoingCall] Step 9: Cleaning up WebRTC...');
+        cleanup();
+        console.log('[useOutgoingCall] Step 10: WebRTC cleaned up');
 
         // Cleanup listener
         if (unsubscribeRef.current) {
+          console.log('[useOutgoingCall] Step 11: Unsubscribing listener...');
           unsubscribeRef.current();
           unsubscribeRef.current = null;
+          console.log('[useOutgoingCall] Step 12: Listener unsubscribed');
         }
 
         // Reset state
         callIdRef.current = null;
         resetCallState();
 
-        console.log('[useOutgoingCall] Call ended successfully');
+        console.log('[useOutgoingCall] ===== END CALL COMPLETED =====');
       } catch (err) {
-        console.error('[useOutgoingCall] Error ending call:', err);
+        console.error('[useOutgoingCall] ❌ Error ending call:', err);
       }
     },
-    [webrtc, resetCallState]
+    [cleanup, resetCallState]
   );
+
+  // Add method to accept a callId from outside (for when the hook is recreated)
+  const setCallId = useCallback((id: string) => {
+    console.log('[useOutgoingCall] Setting callId to:', id);
+    callIdRef.current = id;
+  }, []);
 
   // ── Cancel call (before answered) ──────────────────────────────────────────
   const cancelCall = useCallback(async () => {
@@ -220,7 +275,7 @@ export function useOutgoingCall() {
 
     try {
       await SignalingService.updateCallStatus(callId, 'ended');
-      webrtc.cleanup();
+      cleanup();
 
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
@@ -234,18 +289,21 @@ export function useOutgoingCall() {
     } catch (err) {
       console.error('[useOutgoingCall] Error cancelling call:', err);
     }
-  }, [webrtc, resetCallState]);
+  }, [cleanup, resetCallState]);
 
   return {
     initiateCall,
     endCall,
     cancelCall,
+    setCallId,
     isInitiating,
     error,
-    localStream: webrtc.localStream,
-    remoteStream: webrtc.remoteStream,
-    connectionState: webrtc.connectionState,
-    networkQuality: webrtc.networkQuality,
-    toggleMute: webrtc.toggleMute,
+    localStream,
+    remoteStream,
+    streamVersion,
+    connectionState,
+    networkQuality,
+    toggleMute,
+    toggleVideo,
   };
 }

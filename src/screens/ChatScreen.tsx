@@ -13,7 +13,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { usePermissions as useMediaLibraryPermissions } from 'expo-media-library';
-import { collection, doc } from 'firebase/firestore';
+import { collection, doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Avatar } from '../components';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
@@ -236,11 +236,17 @@ export default function ChatScreen() {
     try {
       console.log('[ChatScreen] Initiating voice call to:', otherUserId);
 
+      // Fetch current user's profile from Firestore for accurate caller info
+      const userProfileRef = doc(db, 'users', userId);
+      const userProfileSnap = await getDoc(userProfileRef);
+      
+      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
+
       // Get current user's profile data
       const callerInfo = {
         userId: userId,
-        displayName: user?.displayName || 'Unknown',
-        photoUrl: user?.photoURL || null,
+        displayName: userProfile?.displayName || user?.phoneNumber || 'Unknown',
+        photoUrl: userProfile?.photoURL || null,
       };
 
       const calleeInfo = {
@@ -269,6 +275,64 @@ export default function ChatScreen() {
       }
     } catch (error) {
       console.error('[ChatScreen] Error initiating call:', error);
+      Alert.alert('Call Failed', 'An error occurred while trying to start the call');
+    }
+  }, [userId, otherUserId, isGroup, displayName, otherUserPhoto, user, outgoingCall, navigation]);
+
+  // ── Video call handler ──────────────────────────────────────────────────────
+  const handleVideoCall = useCallback(async () => {
+    if (!userId || !otherUserId || isGroup) {
+      Alert.alert('Cannot make call', isGroup ? 'Group calls are not supported yet.' : 'User information not available.');
+      return;
+    }
+
+    if (outgoingCall.isInitiating) {
+      return; // Already initiating a call
+    }
+
+    try {
+      console.log('[ChatScreen] Initiating video call to:', otherUserId);
+
+      // Fetch current user's profile from Firestore for accurate caller info
+      const userProfileRef = doc(db, 'users', userId);
+      const userProfileSnap = await getDoc(userProfileRef);
+      
+      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
+
+      // Get current user's profile data
+      const callerInfo = {
+        userId: userId,
+        displayName: userProfile?.displayName || user?.phoneNumber || 'Unknown',
+        photoUrl: userProfile?.photoURL || null,
+      };
+
+      const calleeInfo = {
+        userId: otherUserId,
+        displayName: displayName,
+        photoUrl: otherUserPhoto || null,
+      };
+
+      // Initiate the video call
+      const callId = await outgoingCall.initiateCall(
+        userId,
+        otherUserId,
+        callerInfo,
+        calleeInfo,
+        'video'
+      );
+
+      if (callId) {
+        // Navigate to VideoCallScreen
+        navigation.navigate('VideoCall', {
+          callId,
+          isOutgoing: true,
+          otherParty: calleeInfo,
+        });
+      } else {
+        Alert.alert('Call Failed', outgoingCall.error || 'Failed to initiate call');
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Error initiating video call:', error);
       Alert.alert('Call Failed', 'An error occurred while trying to start the call');
     }
   }, [userId, otherUserId, isGroup, displayName, otherUserPhoto, user, outgoingCall, navigation]);
@@ -766,17 +830,15 @@ export default function ChatScreen() {
             </View>
 
             <TouchableOpacity style={styles.iconBtn} onPress={handleVoiceCall} disabled={isGroup || outgoingCall.isInitiating}>
-              <AppIcon name="call-outline" size={20} color={COLORS.blue} fixedColor />
+              <AppIcon name="call" size={20} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn}>
-              <AppIcon name="videocam-outline" size={20} color={COLORS.blue} fixedColor />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn}>
-              <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} />
+
+            <TouchableOpacity style={styles.iconBtn} onPress={handleVideoCall} disabled={isGroup || outgoingCall.isInitiating}>
+              <AppIcon name="videocam" size={20} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
           </View>
 
-          {/* ── Messages ── */}
+          {/* ── Messages list ── */}
           {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
             <FlatList
               ref={listRef}

@@ -31,8 +31,13 @@ export interface WebRTCHandlers {
 export type NetworkQuality = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
 
 export function useWebRTC(handlers?: WebRTCHandlers) {
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  // Use refs for stream storage to persist across parent hook re-renders
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  
+  // State trigger for UI updates when streams change
+  const [streamVersion, setStreamVersion] = useState(0);
+  
   const [connectionState, setConnectionState] = useState<string>('new');
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>('unknown');
   
@@ -40,23 +45,27 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Initialize peer connection ────────────────────────────────────────────
-  const initializePeerConnection = useCallback(async () => {
+  const initializePeerConnection = useCallback(async (isVideo: boolean = false) => {
     try {
-      console.log('[useWebRTC] Initializing peer connection...');
+      console.log('[useWebRTC] Initializing peer connection... Video:', isVideo);
       
       // Create peer connection
       const pc = new RTCPeerConnection(ICE_SERVERS);
       peerConnectionRef.current = pc;
 
-      // Get local audio stream
+      // Get local stream (audio + video if requested)
       const stream = await mediaDevices.getUserMedia({
         audio: true,
-        video: false,
+        video: isVideo ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+          facingMode: 'user',
+        } : false,
       });
       
-      setLocalStream(stream);
-      handlers?.onLocalStream?.(stream);
       console.log('[useWebRTC] Local stream obtained');
+      handlers?.onLocalStream?.(stream);
 
       // Add local stream tracks to peer connection
       stream.getTracks().forEach((track) => {
@@ -64,11 +73,17 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
         console.log('[useWebRTC] Added track:', track.kind);
       });
 
+      // Assign local stream to ref and trigger UI update
+      localStreamRef.current = stream;
+      setStreamVersion(v => v + 1);
+
       // Handle remote stream
       pc.ontrack = (event) => {
         console.log('[useWebRTC] Remote track received:', event.track.kind);
         if (event.streams && event.streams[0]) {
-          setRemoteStream(event.streams[0]);
+          // Assign remote stream to ref and trigger UI update
+          remoteStreamRef.current = event.streams[0];
+          setStreamVersion(v => v + 1);
           handlers?.onRemoteStream?.(event.streams[0]);
         }
       };
@@ -109,15 +124,15 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
   }, [handlers]);
 
   // ── Create offer ───────────────────────────────────────────────────────────
-  const createOffer = useCallback(async (): Promise<RTCSessionDescriptionInit> => {
+  const createOffer = useCallback(async (isVideo: boolean = false): Promise<RTCSessionDescriptionInit> => {
     try {
       const pc = peerConnectionRef.current;
       if (!pc) throw new Error('Peer connection not initialized');
 
-      console.log('[useWebRTC] Creating offer...');
+      console.log('[useWebRTC] Creating offer... Video:', isVideo);
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
-        offerToReceiveVideo: false,
+        offerToReceiveVideo: isVideo,
       });
 
       await pc.setLocalDescription(offer);
@@ -170,6 +185,12 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
         const pc = peerConnectionRef.current;
         if (!pc) throw new Error('Peer connection not initialized');
 
+        // Check if we can set remote description
+        if (pc.signalingState !== 'have-local-offer') {
+          console.warn('[useWebRTC] Cannot set remote answer. Current state:', pc.signalingState);
+          throw new Error(`Cannot set remote answer in state: ${pc.signalingState}`);
+        }
+
         console.log('[useWebRTC] Setting remote description (answer)...');
         await pc.setRemoteDescription(new RTCSessionDescription(answer as any));
         console.log('[useWebRTC] Remote answer set successfully');
@@ -209,13 +230,23 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
 
   // ── Toggle mute ────────────────────────────────────────────────────────────
   const toggleMute = useCallback((muted: boolean) => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach((track) => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach((track) => {
         track.enabled = !muted;
       });
       console.log('[useWebRTC] Microphone muted:', muted);
     }
-  }, [localStream]);
+  }, []);
+
+  // ── Toggle video ───────────────────────────────────────────────────────────
+  const toggleVideo = useCallback((enabled: boolean) => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach((track) => {
+        track.enabled = enabled;
+      });
+      console.log('[useWebRTC] Camera enabled:', enabled);
+    }
+  }, []);
 
   // ── Monitor network quality ────────────────────────────────────────────────
   const startNetworkMonitoring = useCallback(() => {
@@ -282,16 +313,31 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
   const cleanup = useCallback(() => {
     console.log('[useWebRTC] Cleaning up...');
 
-    // Stop network monitoring
-    stopNetworkMonitoring();
+    // Stop network monitoring first
+    if (statsIntervalRef.current) {
+      clearInterval(statsIntervalRef.current);
+      statsIntervalRef.current = null;
+      console.log('[useWebRTC] Network monitoring stopped');
+    }
 
-    // Stop local stream
-    if (localStream) {
-      localStream.getTracks().forEach((track) => {
+    // Stop and remove local stream tracks immediately
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
         track.stop();
         console.log('[useWebRTC] Stopped local track:', track.kind);
       });
-      setLocalStream(null);
+      localStreamRef.current = null;
+      setStreamVersion(v => v + 1);
+    }
+
+    // Remove remote stream immediately
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((track) => {
+        track.stop();
+        console.log('[useWebRTC] Stopped remote track:', track.kind);
+      });
+      remoteStreamRef.current = null;
+      setStreamVersion(v => v + 1);
     }
 
     // Close peer connection
@@ -301,21 +347,40 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
       console.log('[useWebRTC] Peer connection closed');
     }
 
-    setRemoteStream(null);
     setConnectionState('closed');
     setNetworkQuality('unknown');
-  }, [localStream, stopNetworkMonitoring]);
+  }, []); // No dependencies needed as we use refs
 
-  // Cleanup on unmount
+  // Cleanup on unmount only
   useEffect(() => {
     return () => {
-      cleanup();
+      console.log('[useWebRTC] Component unmounting, cleaning up...');
+      
+      // Stop network monitoring
+      if (statsIntervalRef.current) {
+        clearInterval(statsIntervalRef.current);
+        statsIntervalRef.current = null;
+      }
+
+      // Stop local stream
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          track.stop();
+        });
+      }
+
+      // Close peer connection
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
     };
-  }, [cleanup]);
+  }, []); // Empty deps - only run on unmount
 
   return {
-    localStream,
-    remoteStream,
+    localStream: localStreamRef.current,
+    remoteStream: remoteStreamRef.current,
+    streamVersion,
     connectionState,
     networkQuality,
     initializePeerConnection,
@@ -324,6 +389,7 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
     setRemoteAnswer,
     addIceCandidate,
     toggleMute,
+    toggleVideo,
     startNetworkMonitoring,
     stopNetworkMonitoring,
     cleanup,

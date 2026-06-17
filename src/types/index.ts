@@ -107,8 +107,16 @@ export type RootStackParamList = {
   Appearance: undefined;
   Profile: undefined;
   CreateAccount: undefined;
-  VideoCall: { contact: Contact };
   AudioCall: { 
+    callId: string;
+    isOutgoing: boolean;
+    otherParty: {
+      userId: string;
+      displayName: string;
+      photoUrl: string | null;
+    };
+  };
+  VideoCall: { 
     callId: string;
     isOutgoing: boolean;
     otherParty: {

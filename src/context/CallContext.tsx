@@ -1,10 +1,14 @@
 // ─── Context: Call ───────────────────────────────────────────────────────────
 // Global call state management for WebRTC calls
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import type { CallState, IncomingCallData, CallStatus } from '../types/call';
+import { useWebRTC, type NetworkQuality, type WebRTCHandlers } from '../hooks/useWebRTC';
+import type { MediaStream } from 'react-native-webrtc';
+import { SignalingService } from '../services/signalingService';
 
 interface CallContextValue extends CallState {
+  // Call state setters
   setActiveCallId: (callId: string | null) => void;
   setIncomingCall: (call: IncomingCallData | null) => void;
   setCallStatus: (status: CallStatus | null) => void;
@@ -13,6 +17,26 @@ interface CallContextValue extends CallState {
   setCallDuration: (duration: number) => void;
   incrementCallDuration: () => void;
   resetCallState: () => void;
+  setIsCaller: (isCaller: boolean) => void;
+
+  // WebRTC instance properties
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  streamVersion: number;
+  connectionState: string;
+  networkQuality: NetworkQuality;
+
+  // WebRTC instance methods
+  initializePeerConnection: (isVideo: boolean) => Promise<import('react-native-webrtc').RTCPeerConnection>;
+  createOffer: (isVideo: boolean) => Promise<RTCSessionDescriptionInit>;
+  createAnswer: (offer: RTCSessionDescriptionInit) => Promise<RTCSessionDescriptionInit>;
+  setRemoteAnswer: (answer: RTCSessionDescriptionInit) => Promise<void>;
+  addIceCandidate: (candidate: RTCIceCandidateInit) => Promise<void>;
+  toggleMute: (muted: boolean) => void;
+  toggleVideo: (enabled: boolean) => void;
+  startNetworkMonitoring: () => void;
+  stopNetworkMonitoring: () => void;
+  cleanup: () => void;
 }
 
 const CallContext = createContext<CallContextValue | undefined>(undefined);
@@ -28,9 +52,42 @@ const INITIAL_STATE: CallState = {
 
 export function CallProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CallState>(INITIAL_STATE);
+  
+  // Track active call ID for WebRTC handlers
+  const activeCallIdRef = useRef<string | null>(null);
+  const isCallerRef = useRef<boolean>(false);
+
+  // WebRTC handlers
+  const handlersRef = useRef<WebRTCHandlers>({
+    onIceCandidate: (candidate) => {
+      const callId = activeCallIdRef.current;
+      if (!callId) return;
+
+      console.log('[CallContext] ICE candidate generated, saving to Firestore');
+      SignalingService.addIceCandidate(callId, candidate, isCallerRef.current === false);
+    },
+
+    onConnectionStateChange: (connectionState) => {
+      console.log('[CallContext] Connection state changed:', connectionState);
+      
+      if (connectionState === 'connected') {
+        setState((prev) => ({ ...prev, callStatus: 'connected' }));
+      } else if (connectionState === 'failed' || connectionState === 'closed') {
+        setState((prev) => ({ ...prev, callStatus: 'ended' }));
+      }
+    },
+
+    onNetworkQualityChange: (quality) => {
+      console.log('[CallContext] Network quality changed:', quality);
+    },
+  });
+
+  // Create shared WebRTC instance
+  const webrtc = useWebRTC(handlersRef.current);
 
   const setActiveCallId = useCallback((callId: string | null) => {
     setState((prev) => ({ ...prev, activeCallId: callId }));
+    activeCallIdRef.current = callId;
   }, []);
 
   const setIncomingCall = useCallback((call: IncomingCallData | null) => {
@@ -59,7 +116,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const resetCallState = useCallback(() => {
     console.log('[CallContext] Resetting call state');
-    setState(INITIAL_STATE);
+    setState({
+      activeCallId: null,
+      incomingCall: null,
+      callStatus: null,
+      isMuted: false,
+      isSpeakerOn: false,
+      callDuration: 0,
+    });
+    isCallerRef.current = false;
+  }, []);
+
+  const setIsCaller = useCallback((isCaller: boolean) => {
+    isCallerRef.current = isCaller;
   }, []);
 
   const value: CallContextValue = {
@@ -72,6 +141,26 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setCallDuration,
     incrementCallDuration,
     resetCallState,
+    setIsCaller,
+
+    // WebRTC instance properties
+    localStream: webrtc.localStream,
+    remoteStream: webrtc.remoteStream,
+    streamVersion: webrtc.streamVersion,
+    connectionState: webrtc.connectionState,
+    networkQuality: webrtc.networkQuality,
+
+    // WebRTC instance methods
+    initializePeerConnection: webrtc.initializePeerConnection,
+    createOffer: webrtc.createOffer,
+    createAnswer: webrtc.createAnswer,
+    setRemoteAnswer: webrtc.setRemoteAnswer,
+    addIceCandidate: webrtc.addIceCandidate,
+    toggleMute: webrtc.toggleMute,
+    toggleVideo: webrtc.toggleVideo,
+    startNetworkMonitoring: webrtc.startNetworkMonitoring,
+    stopNetworkMonitoring: webrtc.stopNetworkMonitoring,
+    cleanup: webrtc.cleanup,
   };
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>;

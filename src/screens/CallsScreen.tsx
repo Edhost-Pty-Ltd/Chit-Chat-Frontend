@@ -7,10 +7,10 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { Avatar, BottomNav } from '../components';
-import { CONTACTS } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
-import { Contact } from '../types';
 import type { CallHistoryItem } from '../types/call';
 import type { RootStackParamList } from '../types';
 import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
@@ -18,6 +18,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useCallContext } from '../context/CallContext';
+import { useContacts } from '../hooks/useContacts';
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -72,11 +73,17 @@ function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'out
 function ContactPickerSheet({
   visible,
   onClose,
-  onSelect,
+  onSelectAudio,
+  onSelectVideo,
+  contacts,
+  loading,
 }: {
   visible: boolean;
   onClose: () => void;
-  onSelect: (userId: string, displayName: string) => void;
+  onSelectAudio: (userId: string, displayName: string, photoUrl: string | null) => void;
+  onSelectVideo: (userId: string, displayName: string, photoUrl: string | null) => void;
+  contacts: any[];
+  loading: boolean;
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide"
@@ -93,29 +100,49 @@ function ContactPickerSheet({
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <AppText style={styles.sheetTitle}>Call a contact</AppText>
-            <AppText style={styles.sheetSub}>{CONTACTS.length} contacts</AppText>
+            <AppText style={styles.sheetSub}>{contacts.length} contacts</AppText>
           </View>
           <AppIcon name="search-outline" size={22} color={COLORS.sub} style={styles.iconPad} />
         </View>
 
         <AppText style={styles.sectionHint}>SELECT CONTACT TO CALL</AppText>
 
-        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-          {CONTACTS.map((c) => (
-            <TouchableOpacity key={c.id} style={styles.contactCard}
-              activeOpacity={0.75} onPress={() => onSelect(c.id, c.name)}>
-              <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
-              <View style={styles.contactMeta}>
-                <AppText style={styles.contactName}>{c.name}</AppText>
-                <AppText style={styles.contactNum}>Tap to call</AppText>
-              </View>
-              {/* Light blue call button */}
-              <TouchableOpacity onPress={() => onSelect(c.id, c.name)} activeOpacity={0.8}>
-                <AppIcon glass tileSize={38} name="call" size={17} color={COLORS.blue} />
+        {loading ? (
+          <View style={styles.centerWrap}>
+            <ActivityIndicator size="large" color={COLORS.blue} />
+          </View>
+        ) : contacts.length === 0 ? (
+          <View style={styles.centerWrap}>
+            <AppIcon name="people-outline" size={48} color={COLORS.sub} />
+            <AppText style={styles.emptyText}>No contacts yet</AppText>
+          </View>
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            {contacts.map((c) => (
+              <TouchableOpacity key={c.userId} style={styles.contactCard}
+                activeOpacity={0.75} onPress={() => onSelectAudio(c.userId, c.displayName, c.photoURL)}>
+                <Avatar 
+                  initials={getInitials(c.displayName)} 
+                  color={COLORS.blue} 
+                  size={46} 
+                  imageUrl={c.photoURL}
+                />
+                <View style={styles.contactMeta}>
+                  <AppText style={styles.contactName}>{c.displayName}</AppText>
+                  <AppText style={styles.contactNum}>Tap to call</AppText>
+                </View>
+                {/* Audio call button */}
+                <TouchableOpacity onPress={() => onSelectAudio(c.userId, c.displayName, c.photoURL)} activeOpacity={0.8} style={{ marginRight: 8 }}>
+                  <AppIcon glass tileSize={38} name="call" size={17} color={COLORS.blue} />
+                </TouchableOpacity>
+                {/* Video call button */}
+                <TouchableOpacity onPress={() => onSelectVideo(c.userId, c.displayName, c.photoURL)} activeOpacity={0.8}>
+                  <AppIcon glass tileSize={38} name="videocam" size={17} color={COLORS.blue} />
+                </TouchableOpacity>
               </TouchableOpacity>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -126,6 +153,7 @@ export default function CallsScreen() {
   const navigation = useNavigation<NavProp>();
   const { user } = useAuth();
   const { callHistory, loading, error } = useCallHistory(user?.uid ?? null);
+  const { contacts, loading: contactsLoading } = useContacts(user?.uid ?? null);
   const { setCallStatus, setActiveCallId } = useCallContext();
   const outgoingCall = useOutgoingCall();
   
@@ -140,8 +168,8 @@ export default function CallsScreen() {
     ? callHistory.filter((c) => c.status === 'missed') 
     : callHistory;
 
-  // Handle initiating a call from contact picker
-  const handleSelectContact = async (userId: string, displayName: string) => {
+  // Handle initiating an audio call from contact picker
+  const handleSelectAudioContact = async (userId: string, displayName: string, photoUrl: string | null) => {
     if (!user) {
       Alert.alert('Error', 'You must be logged in to make calls');
       return;
@@ -151,39 +179,101 @@ export default function CallsScreen() {
     setCalling(true);
 
     try {
-      console.log('[CallsScreen] Initiating call to:', displayName);
+      console.log('[CallsScreen] Initiating audio call to:', displayName);
+      
+      // Fetch current user's profile from Firestore
+      const userProfileRef = doc(db, 'users', user.uid);
+      const userProfileSnap = await getDoc(userProfileRef);
+      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
       
       const callId = await outgoingCall.initiateCall(
         user.uid,
         userId,
         { 
           userId: user.uid, 
-          displayName: user.displayName || 'You', 
-          photoUrl: user.photoURL 
+          displayName: userProfile?.displayName || user.phoneNumber || 'Unknown', 
+          photoUrl: userProfile?.photoURL || null 
         },
         { 
           userId, 
           displayName, 
-          photoUrl: null 
-        }
+          photoUrl 
+        },
+        'audio'
       );
 
       if (callId) {
-        // Navigate to call screen
+        // Navigate to audio call screen
         navigation.navigate('AudioCall', {
           callId,
           isOutgoing: true,
           otherParty: {
             userId,
             displayName,
-            photoUrl: null,
+            photoUrl,
           },
         });
       } else {
         Alert.alert('Call Failed', 'Unable to initiate call');
       }
     } catch (err) {
-      console.error('[CallsScreen] Call failed:', err);
+      console.error('[CallsScreen] Audio call failed:', err);
+      Alert.alert('Call Failed', 'Unable to start call. Please try again.');
+    } finally {
+      setCalling(false);
+    }
+  };
+
+  // Handle initiating a video call from contact picker
+  const handleSelectVideoContact = async (userId: string, displayName: string, photoUrl: string | null) => {
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in to make calls');
+      return;
+    }
+    
+    setPickerOpen(false);
+    setCalling(true);
+
+    try {
+      console.log('[CallsScreen] Initiating video call to:', displayName);
+      
+      // Fetch current user's profile from Firestore
+      const userProfileRef = doc(db, 'users', user.uid);
+      const userProfileSnap = await getDoc(userProfileRef);
+      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
+      
+      const callId = await outgoingCall.initiateCall(
+        user.uid,
+        userId,
+        { 
+          userId: user.uid, 
+          displayName: userProfile?.displayName || user.phoneNumber || 'Unknown', 
+          photoUrl: userProfile?.photoURL || null 
+        },
+        { 
+          userId, 
+          displayName, 
+          photoUrl 
+        },
+        'video'
+      );
+
+      if (callId) {
+        // Navigate to video call screen
+        navigation.navigate('VideoCall', {
+          callId,
+          isOutgoing: true,
+          otherParty: {
+            userId,
+            displayName,
+            photoUrl,
+          },
+        });
+      } else {
+        Alert.alert('Call Failed', 'Unable to initiate call');
+      }
+    } catch (err) {
+      console.error('[CallsScreen] Video call failed:', err);
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
     } finally {
       setCalling(false);
@@ -200,26 +290,40 @@ export default function CallsScreen() {
     setCalling(true);
 
     try {
-      console.log('[CallsScreen] Calling back:', item.otherParty.displayName);
+      console.log('[CallsScreen] Calling back:', item.otherParty.displayName, 'Type:', item.type);
+      
+      // Fetch current user's profile from Firestore
+      const userProfileRef = doc(db, 'users', user.uid);
+      const userProfileSnap = await getDoc(userProfileRef);
+      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
       
       const callId = await outgoingCall.initiateCall(
         user.uid,
         item.otherParty.userId,
         { 
           userId: user.uid, 
-          displayName: user.displayName || 'You', 
-          photoUrl: user.photoURL 
+          displayName: userProfile?.displayName || user.phoneNumber || 'Unknown', 
+          photoUrl: userProfile?.photoURL || null 
         },
-        item.otherParty
+        item.otherParty,
+        item.type // Use the same type as the original call
       );
 
       if (callId) {
-        // Navigate to call screen
-        navigation.navigate('AudioCall', {
-          callId,
-          isOutgoing: true,
-          otherParty: item.otherParty,
-        });
+        // Navigate to appropriate call screen based on type
+        if (item.type === 'video') {
+          navigation.navigate('VideoCall', {
+            callId,
+            isOutgoing: true,
+            otherParty: item.otherParty,
+          });
+        } else {
+          navigation.navigate('AudioCall', {
+            callId,
+            isOutgoing: true,
+            otherParty: item.otherParty,
+          });
+        }
       } else {
         Alert.alert('Call Failed', 'Unable to initiate call');
       }
@@ -268,7 +372,12 @@ export default function CallsScreen() {
         onPress={() => handleCallBack(item)}
         activeOpacity={0.7}
       >
-        <Avatar initials={getInitials(item.otherParty.displayName)} color={COLORS.blue} size={48} />
+        <Avatar 
+          initials={getInitials(item.otherParty.displayName)} 
+          color={COLORS.blue} 
+          size={48} 
+          imageUrl={item.otherParty.photoUrl}
+        />
         <View style={styles.callMeta}>
           <AppText style={[styles.callName, { color: FG.primary }]}>{item.otherParty.displayName}</AppText>
           <View style={styles.callSubRow}>
@@ -300,7 +409,10 @@ export default function CallsScreen() {
       <ContactPickerSheet
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onSelect={handleSelectContact}
+        onSelectAudio={handleSelectAudioContact}
+        onSelectVideo={handleSelectVideoContact}
+        contacts={contacts}
+        loading={contactsLoading}
       />
 
       <View style={styles.header}>

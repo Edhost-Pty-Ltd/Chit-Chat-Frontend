@@ -28,7 +28,7 @@ export function IncomingCallManager() {
   const handleAnswer = async () => {
     if (!incomingCall) return;
 
-    console.log('[IncomingCallManager] Answering call:', incomingCall.callId);
+    console.log('[IncomingCallManager] Answering call:', incomingCall.callId, 'Type:', incomingCall.type);
 
     try {
       // Get the full call document to retrieve the offer
@@ -40,19 +40,34 @@ export function IncomingCallManager() {
         return;
       }
 
-      // Answer the call
-      const success = await incomingCallAnswer.answerCall(incomingCall.callId, callDoc.offer);
+      // Answer the call with the correct type - wait for completion before navigation
+      const success = await incomingCallAnswer.answerCall(
+        incomingCall.callId, 
+        callDoc.offer,
+        incomingCall.type // Pass the call type (audio or video)
+      );
 
       if (success) {
-        // Navigate to AudioCallScreen
-        navigation.navigate('AudioCall', {
-          callId: incomingCall.callId,
-          isOutgoing: false,
-          otherParty: incomingCall.caller,
-        });
+        // Small delay to ensure answer is fully processed
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Navigate to appropriate call screen based on type
+        if (incomingCall.type === 'video') {
+          navigation.navigate('VideoCall', {
+            callId: incomingCall.callId,
+            isOutgoing: false,
+            otherParty: incomingCall.caller,
+          });
+        } else {
+          navigation.navigate('AudioCall', {
+            callId: incomingCall.callId,
+            isOutgoing: false,
+            otherParty: incomingCall.caller,
+          });
+        }
 
-        // Clear incoming call from context
-        setIncomingCall(null);
+        // Clear incoming call from context after navigation starts
+        setTimeout(() => setIncomingCall(null), 200);
       }
     } catch (error) {
       console.error('[IncomingCallManager] Error answering call:', error);

@@ -39,7 +39,7 @@ export function useCallHistory(userId: string | null) {
             direction: data.direction,
             status: data.status,
             duration: data.duration ?? null,
-            timestamp: (data.timestamp as Timestamp).toDate(),
+            timestamp: data.timestamp ? (data.timestamp as Timestamp).toDate() : new Date(),
           };
         });
 

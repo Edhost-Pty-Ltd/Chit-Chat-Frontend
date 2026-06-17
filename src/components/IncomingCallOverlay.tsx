@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { Audio } from 'expo-audio';
+import { setAudioModeAsync, AudioMode } from 'expo-audio';
 import { AppText, AppIcon } from '../context/ThemeContext';
 import { Avatar } from '.';
 import { COLORS, RADIUS, SHADOW } from '../types/theme';
@@ -22,7 +22,6 @@ interface IncomingCallOverlayProps {
 
 export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: IncomingCallOverlayProps) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const soundRef = useRef<Audio.Sound | null>(null);
 
   // Pulse animation for avatar
   useEffect(() => {
@@ -48,47 +47,38 @@ export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: Incom
 
   // Play ringtone
   useEffect(() => {
-    let sound: Audio.Sound | null = null;
-
-    const playRingtone = async () => {
+    const setupAudio = async () => {
       if (!visible) return;
 
       try {
-        console.log('[IncomingCallOverlay] Setting up ringtone...');
+        console.log('[IncomingCallOverlay] Setting up audio mode...');
         
-        // Set audio mode
-        await Audio.setAudioModeAsync({
+        // Set audio mode for phone calls using expo-audio
+        await setAudioModeAsync({
           playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-        });
+          allowsRecordingIOS: false,
+          shouldPlayInBackground: true,
+        } as AudioMode);
 
         // For now, just log that we'd play a ringtone
         // You can add a custom ringtone file to assets later
-        console.log('[IncomingCallOverlay] Ringtone would play here');
+        console.log('[IncomingCallOverlay] Audio mode configured for incoming call');
         
-        // TODO: Add custom ringtone
-        // const { sound: newSound } = await Audio.Sound.createAsync(
-        //   require('../../assets/ringtone.mp3'),
-        //   { shouldPlay: true, isLooping: true, volume: 1.0 }
-        // );
-        // sound = newSound;
-        // soundRef.current = sound;
+        // TODO: Add custom ringtone with expo-audio's useAudioPlayer hook
+        // This would be implemented in a future update
       } catch (error) {
-        console.error('[IncomingCallOverlay] Error with ringtone:', error);
-        // Don't crash the app if ringtone fails
+        console.error('[IncomingCallOverlay] Error setting audio mode:', error);
+        // Don't crash the app if audio setup fails
       }
     };
 
     if (visible) {
-      playRingtone();
+      setupAudio();
     }
 
     return () => {
-      if (sound) {
-        console.log('[IncomingCallOverlay] Stopping ringtone...');
-        sound.stopAsync().catch(() => {}).then(() => sound?.unloadAsync().catch(() => {}));
-        soundRef.current = null;
-      }
+      // Cleanup if needed
+      console.log('[IncomingCallOverlay] Cleaning up audio...');
     };
   }, [visible]);
 
