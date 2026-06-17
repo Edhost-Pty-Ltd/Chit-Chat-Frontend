@@ -1093,7 +1093,7 @@ const styles = StyleSheet.create({
   bubbleTextIn: { fontSize: 14, color: '#fff', lineHeight: 20 },
   timeIn: { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
 
-  bubbleOut: { backgroundColor: 'rgba(255,255,255,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.50)', borderBottomRightRadius: 4, ...SHADOW.card },
+  bubbleOut: { backgroundColor: 'rgba(180,225,245,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', borderBottomRightRadius: 4, ...SHADOW.card },
   bubbleTextOut: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
   timeOutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
   timeOut: { fontSize: 10, color: COLORS.sub },
@@ -1118,7 +1118,17 @@ const styles = StyleSheet.create({
     gap: 4, ...GLASS.header,
   },
   inputSideBtn: { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
-  inputFieldWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', ...GLASS.card, borderRadius: RADIUS.xl, paddingHorizontal: 14, height: 42 },
+  inputFieldWrap: { 
+    flex: 1, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(30,156,240,0.06)', 
+    borderRadius: RADIUS.xl, 
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
+    paddingHorizontal: 14, 
+    height: 42 
+  },
   inputField: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0, margin: 0, height: 42 },
   emojiBtn: { paddingLeft: 8, alignSelf: 'center' },
   sendBtn: { width: 42, height: 42, borderRadius: 21, ...SHADOW.button },

@@ -468,14 +468,16 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOW.card,
   },
 
   controlBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(30,156,240,0.28)',
   },
 
   hangUpBtn: {

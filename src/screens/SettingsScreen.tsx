@@ -64,6 +64,10 @@ export default function SettingsScreen() {
     if (id === 'calendar')   navigation.navigate('Calendar');
     if (id === 'notes')      navigation.navigate('Notes');
     if (id === 'appearance') navigation.navigate('Appearance');
+    if (id === 'account')       navigation.navigate('AccountSettings');
+    if (id === 'privacy')       navigation.navigate('PrivacySettings');
+    if (id === 'notifications') navigation.navigate('NotificationSettings');
+    if (id === 'devices')       navigation.navigate('LinkedDevices');
   };
 
   return (

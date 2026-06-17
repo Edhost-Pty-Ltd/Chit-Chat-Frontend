@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
   backRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   backText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
-  card: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', borderTopColor: 'rgba(255,255,255,0.80)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.20, shadowRadius: 20, elevation: 8 },
+  card: { backgroundColor: 'rgba(180,225,245,0.22)', borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', ...SHADOW.card },
   cardTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text, marginBottom: 6 },
   cardSub:   { fontSize: 13, color: COLORS.sub, marginBottom: 20, lineHeight: 19 },
 
@@ -518,13 +518,13 @@ const styles = StyleSheet.create({
   },
   avatarHint: { fontSize: 11, color: COLORS.sub, marginTop: 2 },
 
-  inputWrap: { backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: RADIUS.md, flexDirection: 'row', alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', borderTopColor: 'rgba(255,255,255,0.75)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.10, shadowRadius: 6, elevation: 2 },
+  inputWrap: { ...GLASS.input, borderRadius: RADIUS.md, flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   inputIcon: { paddingLeft: 14 },
   inputFlex: { flex: 1, marginBottom: 0 },
   input:     { flex: 1, paddingHorizontal: 12, paddingVertical: 13, fontSize: 15, color: COLORS.text },
 
   phoneRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  dialBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 13, backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: RADIUS.md, borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)', borderTopColor: 'rgba(255,255,255,0.75)', shadowColor: '#0e6ea8', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.10, shadowRadius: 6, elevation: 2 },
+  dialBtn:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 13, ...GLASS.input, borderRadius: RADIUS.md },
   dialFlag: { fontSize: 20 },
   dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
@@ -551,14 +551,7 @@ const styles = StyleSheet.create({
     lineHeight: 58,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    backgroundColor: 'rgba(255,255,255,0.30)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 3,
+    ...GLASS.input,
   },
   otpBoxFilled: {
     borderColor: COLORS.blue,
@@ -581,16 +574,11 @@ const styles = StyleSheet.create({
     borderRadius: 55,
     backgroundColor: 'rgba(30,156,240,0.12)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
-    borderTopColor: 'rgba(255,255,255,0.80)',
+    borderColor: 'rgba(255,255,255,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
-    shadowColor: '#1E9CF0',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.50,
-    shadowRadius: 24,
-    elevation: 16,
+    ...SHADOW.glow,
   },
 
   iconTile: {

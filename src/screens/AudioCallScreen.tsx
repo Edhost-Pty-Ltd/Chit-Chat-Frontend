@@ -364,12 +364,12 @@ const styles = StyleSheet.create({
   controlLabelDisabled: { fontSize: 12, color: 'rgba(255,255,255,0.40)' },
   controlBtn: {
     width: 64, height: 64, borderRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)',
     alignItems: 'center', justifyContent: 'center',
     ...SHADOW.card,
   },
-  controlBtnOn: { backgroundColor: 'rgba(255,255,255,0.35)' },
+  controlBtnOn: { backgroundColor: 'rgba(30,156,240,0.28)' },
   controlBtnDisabled: { opacity: 0.5 },
 
   hangUpRow: { position: 'absolute', bottom: Platform.OS === 'ios' ? 60 : 44, alignItems: 'center', gap: 10 },

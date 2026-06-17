@@ -107,6 +107,12 @@ export type RootStackParamList = {
   Appearance: undefined;
   Profile: undefined;
   CreateAccount: undefined;
+  AccountSettings: undefined;
+  PrivacySettings: undefined;
+  NotificationSettings: undefined;
+  ChangeNumber: undefined;
+  Notifications: undefined;
+  LinkedDevices: undefined;
   AudioCall: { 
     callId: string;
     isOutgoing: boolean;

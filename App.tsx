@@ -6,7 +6,9 @@ import { enableScreens } from 'react-native-screens';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { CallProvider } from './src/context/CallContext';
+import { NotificationProvider } from './src/context/NotificationContext';
 import AppNavigator from './src/navigation/AppNavigator';
+import ToastOverlay from './src/components/ToastNotification';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -44,11 +46,14 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <CallProvider>
-          <ActivityWatcher />
-          <NavigationContainer>
-            <StatusBar style="auto" />
-            <AppNavigator />
-          </NavigationContainer>
+          <NotificationProvider>
+            <ActivityWatcher />
+            <NavigationContainer>
+              <StatusBar style="auto" />
+              <AppNavigator />
+              <ToastOverlay />
+            </NavigationContainer>
+          </NotificationProvider>
         </CallProvider>
       </AuthProvider>
     </ThemeProvider>
