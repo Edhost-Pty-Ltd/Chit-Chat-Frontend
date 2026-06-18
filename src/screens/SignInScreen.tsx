@@ -9,7 +9,7 @@
 //   • Any phone number is accepted
 //   • Code "123456" always passes
 //
-import React, { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Image,
   StyleSheet, ScrollView, KeyboardAvoidingView,
@@ -19,12 +19,12 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
+import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { useAuth as useAuthContext } from '../context/AuthContext';
 import { useAuth } from '../hooks/useAuth';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // ─── Stub API helpers ─────────────────────────────────────────────────────────
 // Removed - now using Firebase Phone Authentication via useAuth hook
@@ -121,7 +121,7 @@ type Step = 'phone' | 'otp';
 
 export default function SignInScreen() {
   const { signIn: signInToContext } = useAuthContext();
-  const { sendOTP, verifyOTP, step: authStep, error: authError } = useAuth();
+  const { sendOTP, verifyOTP, error: authError } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'SignIn'>>();
 
   const [step, setStep] = useState<Step>('phone');
@@ -495,14 +495,18 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 13,
-    ...GLASS.input,
+    backgroundColor: 'rgba(30,156,240,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
     borderRadius: RADIUS.md,
   },
   dialFlag: { fontSize: 20 },
   dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
 
   inputWrap: {
-    ...GLASS.input,
+    backgroundColor: 'rgba(30,156,240,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
     borderRadius: RADIUS.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -563,7 +567,9 @@ const styles = StyleSheet.create({
     lineHeight: 58,
     paddingVertical: 0,
     paddingHorizontal: 0,
-    ...GLASS.input,
+    backgroundColor: 'rgba(30,156,240,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
   },
   otpBoxFilled: {
     borderColor: COLORS.blue,
@@ -641,7 +647,9 @@ const picker = StyleSheet.create({
     alignItems: 'center',
     margin: 12,
     marginBottom: 6,
-    ...GLASS.input,
+    backgroundColor: 'rgba(30,156,240,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
     borderRadius: RADIUS.md,
     paddingHorizontal: 10,
   },

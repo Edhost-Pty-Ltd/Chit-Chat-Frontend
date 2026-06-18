@@ -325,7 +325,18 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 48, gap: 20 },
 
   // ── Preview ──────────────────────────────────────────────────────────────
-  previewCard:  { ...GLASS.elevated, borderRadius: RADIUS.xl, overflow: 'hidden', ...SHADOW.card },
+  previewCard:  { 
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.xl, 
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
+  },
   previewBg:    { height: 180, overflow: 'hidden' },
   previewImg:   { ...StyleSheet.absoluteFill },
   previewLabel: { textAlign: 'center', fontSize: 11, fontWeight: '600', color: COLORS.sub, paddingVertical: 8 },
@@ -333,7 +344,8 @@ const styles = StyleSheet.create({
   iconPreviewRow: {
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
     gap: 14, paddingHorizontal: 14, marginTop: 10, marginBottom: 8,
-  },  bubbleIn: {
+  },
+  bubbleIn: {
     backgroundColor: COLORS.blue, borderRadius: 14, borderBottomLeftRadius: 4,
     paddingHorizontal: 12, paddingVertical: 7, maxWidth: '60%',
   },
@@ -353,10 +365,24 @@ const styles = StyleSheet.create({
   fontTile: {
     width: 90, paddingVertical: 12, paddingHorizontal: 8,
     alignItems: 'center', gap: 4,
-    ...GLASS.card, borderRadius: RADIUS.md, ...SHADOW.card,
-    borderWidth: 2, borderColor: 'transparent',
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.md,
+    borderWidth: 2, 
+    borderColor: 'rgba(30,156,240,0.18)',
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  fontTileActive: { borderColor: COLORS.blue, ...SHADOW.button },
+  fontTileActive: { 
+    borderColor: COLORS.blue,
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.40,
+    shadowRadius: 12,
+    elevation: 10,
+  },
   fontTilePreview:{ fontSize: 26, color: COLORS.text },
   fontTileLabel:  { fontSize: 9, fontWeight: '600', color: COLORS.sub, textAlign: 'center' },
 
@@ -380,8 +406,16 @@ const styles = StyleSheet.create({
   // ── Photo picker ──────────────────────────────────────────────────────────
   photoPickerBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg,
-    paddingHorizontal: 14, paddingVertical: 14, ...SHADOW.card,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
+    paddingHorizontal: 14, paddingVertical: 14,
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
   },
   photoPickerIcon: {
     width: 46, height: 46, borderRadius: RADIUS.md,
@@ -395,12 +429,25 @@ const styles = StyleSheet.create({
   // ── Swatches ──────────────────────────────────────────────────────────────
   swatchGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   swatch:       { width: 72, alignItems: 'center', gap: 5, padding: 3, borderRadius: RADIUS.md, borderWidth: 2, borderColor: 'transparent' },
-  swatchActive: { borderColor: COLORS.blue, ...SHADOW.button },
+  swatchActive: { 
+    borderColor: COLORS.blue,
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.40,
+    shadowRadius: 12,
+    elevation: 10,
+  },
   swatchGrad:   { width: 66, height: 50, borderRadius: RADIUS.sm, overflow: 'hidden' },
   swatchCheck: {
     position: 'absolute', top: 18, right: 6,
     width: 20, height: 20, borderRadius: 10,
-    backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', ...SHADOW.button,
+    backgroundColor: COLORS.blue, 
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.40,
+    shadowRadius: 12,
+    elevation: 10,
   },
   swatchLabel: { fontSize: 10, fontWeight: '500', color: COLORS.sub, textAlign: 'center' },
 });

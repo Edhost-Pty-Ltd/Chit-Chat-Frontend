@@ -73,39 +73,37 @@ export function BottomNav({ active }: BottomNavProps) {
   const { fontFamily, textColor } = useTypography();
 
   return (
-    <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
-      {TABS.map((t) => {
-        const isActive = active === t.id;
-        return (
-          <TouchableOpacity
-            key={t.id}
-            style={styles.navItem}
-            activeOpacity={0.75}
-            onPress={() => navigation.navigate(t.screen as any)}
-          >
-            {isActive ? (
-              <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
-                <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
-              </LinearGradient>
-            ) : (
-              <AppIcon
-                glass
-                tileSize={46}
-                name={t.icon}
-                size={20}
-                color={FG.icon}
-              />
-            )}
-            <AppText style={[
-              styles.navLabel,
-              { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
-              isActive && styles.navLabelActive,
-            ]}>
-              {t.label}
-            </AppText>
-          </TouchableOpacity>
-        );
-      })}
+    <View style={styles.navBarWrapper}>
+      <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+        {TABS.map((t) => {
+          const isActive = active === t.id;
+          return (
+            <TouchableOpacity
+              key={t.id}
+              style={styles.navItem}
+              activeOpacity={0.75}
+              onPress={() => navigation.navigate(t.screen as any)}
+            >
+              {isActive ? (
+                <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
+                  <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
+                </LinearGradient>
+              ) : (
+                <View style={styles.iconTileInactive}>
+                  <AppIcon name={t.icon} size={20} color={FG.secondary} />
+                </View>
+              )}
+              <AppText style={[
+                styles.navLabel,
+                { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
+                isActive && styles.navLabelActive,
+              ]}>
+                {t.label}
+              </AppText>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -172,11 +170,16 @@ const styles = StyleSheet.create({
   avatarText: { color: '#fff', fontWeight: '700' },
   statusDot:  { position: 'absolute', borderWidth: 2, borderColor: COLORS.sky1 },
 
+  navBarWrapper: {
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+    paddingTop: 6,
+  },
   navBar: {
     flexDirection: 'row',
-    borderTopWidth: 1,
-    paddingBottom: 24,
-    paddingTop: 10,
+    borderWidth: 1,
+    borderRadius: 50,
+    paddingVertical: 10,
     paddingHorizontal: 8,
   },
   navItem: {
@@ -194,6 +197,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOW.button,
+  },
+
+  // Inactive — plain container, no glass tile (avoids Android overflow artifacts)
+  iconTileInactive: {
+    width: 46,
+    height: 40,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   navLabel:       { fontSize: 10, fontWeight: '500' },

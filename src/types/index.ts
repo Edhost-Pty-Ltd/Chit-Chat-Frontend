@@ -83,12 +83,26 @@ export interface CalendarEvent {
 }
 
 // ─── Notes ────────────────────────────────────────────────────────────────
+export interface DrawStroke {
+  points: { x: number; y: number }[];
+  color: string;
+  width: number;
+}
+
+export interface NoteAttachment {
+  uri: string;
+  name: string;
+  type: 'image' | 'document';
+}
+
 export interface Note {
   id: number;
   title: string;
   preview: string;
   date: string;
   checked?: boolean;
+  strokes?: DrawStroke[];
+  attachments?: NoteAttachment[];
 }
 
 // ─── Navigation param list ─────────────────────────────────────────────────

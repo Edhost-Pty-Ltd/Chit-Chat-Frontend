@@ -10,6 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getAuth } from '@react-native-firebase/auth';
 import { db } from '../config/firebase';
+import { uploadFile, generateFileName } from '../config/storage';
 import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
@@ -84,7 +85,6 @@ export default function ProfileScreen() {
         
         // Upload to Firebase Storage first
         console.log('[ProfileScreen] Uploading profile picture to Firebase Storage...');
-        const { uploadFile, generateFileName } = await import('../config/storage');
         
         const fileName = generateFileName('jpg');
         const downloadURL = await uploadFile(uri, 'avatar', {
@@ -119,7 +119,7 @@ export default function ProfileScreen() {
       <AppBg />
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <AppIcon glass tileSize={36} name="chevron-back" size={20} />
         </TouchableOpacity>
@@ -143,7 +143,7 @@ export default function ProfileScreen() {
                 <AppText fixedColor style={styles.avatarInitials}>{initials}</AppText>
               </LinearGradient>
             )}
-            <View style={[styles.cameraBadge, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+            <View style={styles.cameraBadge}>
               <AppIcon name="camera" size={16} fixedColor color={COLORS.blue} />
             </View>
           </TouchableOpacity>
@@ -157,7 +157,7 @@ export default function ProfileScreen() {
 
           {/* Name — tap anywhere on the card to edit */}
           <TouchableOpacity
-            style={[styles.infoCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            style={styles.infoCard}
             activeOpacity={0.8}
             onPress={() => {
               setDraftName(shownName);
@@ -171,7 +171,7 @@ export default function ProfileScreen() {
               {editingName ? (
                 <TextInput
                   ref={nameInputRef}
-                  style={[styles.infoInput, { color: textColor, fontFamily, borderBottomColor: COLORS.blue }]}
+                  style={[styles.infoInput, { color: textColor, fontFamily }]}
                   value={draftName}
                   onChangeText={setDraftName}
                   returnKeyType="done"
@@ -193,8 +193,12 @@ export default function ProfileScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Phone */}
-          <View style={[styles.infoCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+          {/* Phone — tap to go directly to Change Number */}
+          <TouchableOpacity
+            style={styles.infoCard}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('ChangeNumber' as never)}
+          >
             <AppIcon glass tileSize={40} name="call-outline" size={20} />
             <View style={styles.infoContent}>
               <AppText style={[styles.infoLabel, { color: FG.secondary, fontFamily }]}>Phone Number</AppText>
@@ -202,7 +206,8 @@ export default function ProfileScreen() {
                 {phone || 'Not set'}
               </AppText>
             </View>
-          </View>
+            <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
+          </TouchableOpacity>
 
         </View>
       </ScrollView>
@@ -216,7 +221,8 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingTop: 56, paddingBottom: 12, paddingHorizontal: 14,
-    gap: 8, borderBottomWidth: 1,
+    gap: 8,
+    ...GLASS.header,
   },
   headerTitle: {
     flex: 1, textAlign: 'center',
@@ -235,14 +241,17 @@ const styles = StyleSheet.create({
   avatarPlaceholder: {
     width: 110, height: 110, borderRadius: 55,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 3, borderColor: 'rgba(255,255,255,0.40)',
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
   },
   avatarInitials: { fontSize: 38, fontWeight: '800', color: '#fff' },
   cameraBadge: {
     position: 'absolute', bottom: 2, right: 2,
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, ...SHADOW.button,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.45)',
+    ...SHADOW.button,
   },
   tapHint: { fontSize: 12, color: COLORS.sub },
 
@@ -250,15 +259,19 @@ const styles = StyleSheet.create({
   section:  { gap: 10 },
   infoCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg,
-    paddingHorizontal: 14, paddingVertical: 14, ...SHADOW.card,
+    ...GLASS.card,
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14, paddingVertical: 14,
+    ...SHADOW.card,
   },
   infoContent: { flex: 1 },
   infoLabel:   { fontSize: 11, fontWeight: '600', color: COLORS.sub, marginBottom: 3 },
   infoValue:   { fontSize: 15, fontWeight: '600', color: COLORS.text },
   infoInput: {
     fontSize: 15, fontWeight: '600', color: COLORS.text,
-    borderBottomWidth: 1.5, paddingBottom: 2,
+    borderBottomWidth: 1.5,
+    borderBottomColor: COLORS.blue,
+    paddingBottom: 2,
     padding: 0, margin: 0,
   },
 });

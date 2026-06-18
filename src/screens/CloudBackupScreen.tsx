@@ -81,45 +81,123 @@ const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: COLORS.sky1 },
   scroll: { paddingHorizontal: 14, paddingBottom: 40, gap: 10 },
 
-  heroCard: { borderRadius: RADIUS.lg, padding: 28, alignItems: 'center', overflow: 'hidden', ...SHADOW.glow },
-  heroOrb:  { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.10)', top: -60, right: -60 },
+  heroCard: { 
+    borderRadius: RADIUS.lg, 
+    padding: 28, 
+    alignItems: 'center', 
+    overflow: 'hidden', 
+    ...SHADOW.glow 
+  },
+  heroOrb:  { 
+    position: 'absolute', 
+    width: 200, 
+    height: 200, 
+    borderRadius: 100, 
+    backgroundColor: 'rgba(255,255,255,0.10)', 
+    top: -60, 
+    right: -60 
+  },
 
   cloudIconWrap: { position: 'relative', marginBottom: 14 },
   checkBadge: {
-    position: 'absolute', bottom: 2, right: -4,
-    width: 26, height: 26, borderRadius: 13,
+    position: 'absolute', 
+    bottom: 2, 
+    right: -4,
+    width: 26, 
+    height: 26, 
+    borderRadius: 13,
     backgroundColor: COLORS.green,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#fff',
+    alignItems: 'center', 
+    justifyContent: 'center',
+    borderWidth: 2, 
+    borderColor: '#fff',
   },
 
-  heroTitle: { fontSize: 20, fontWeight: '800', color: '#fff', textAlign: 'center', marginBottom: 8 },
-  heroSub:   { fontSize: 13, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 20, marginBottom: 22 },
+  heroTitle: { 
+    fontSize: 20, 
+    fontWeight: '800', 
+    color: '#fff', 
+    textAlign: 'center', 
+    marginBottom: 8 
+  },
+  heroSub:   { 
+    fontSize: 13, 
+    color: 'rgba(255,255,255,0.8)', 
+    textAlign: 'center', 
+    lineHeight: 20, 
+    marginBottom: 22 
+  },
   backupBtn: {
-    flexDirection: 'row', alignItems: 'center',
+    flexDirection: 'row', 
+    alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: RADIUS.full,
-    paddingHorizontal: 36, paddingVertical: 13,
-    ...SHADOW.button,
+    paddingHorizontal: 36, 
+    paddingVertical: 13,
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.40,
+    shadowRadius: 12,
+    elevation: 10,
   },
   backupBtnDisabled: { opacity: 0.6 },
-  backupBtnText:     { fontSize: 15, fontWeight: '700', color: COLORS.blueDeep },
+  backupBtnText:     { 
+    fontSize: 15, 
+    fontWeight: '700', 
+    color: COLORS.blueDeep 
+  },
 
-  sectionTitle: { fontSize: 10, fontWeight: '700', color: COLORS.sub, letterSpacing: 1.2, paddingTop: 4 },
+  sectionTitle: { 
+    fontSize: 10, 
+    fontWeight: '700', 
+    color: COLORS.sub, 
+    letterSpacing: 1.2, 
+    paddingTop: 4 
+  },
 
-  // Each included item = glass card
+  // Each included item = glass card with blue-tinted styling
   includedCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    ...GLASS.card, borderRadius: RADIUS.lg,
-    paddingHorizontal: 14, paddingVertical: 14,
-    ...SHADOW.card,
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    paddingHorizontal: 14, 
+    paddingVertical: 14,
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
   },
   includedIconBox: {
-    width: 36, height: 36, borderRadius: RADIUS.sm,
+    width: 36, 
+    height: 36, 
+    borderRadius: RADIUS.sm,
     backgroundColor: 'rgba(30,156,240,0.12)',
-    borderWidth: 1, borderColor: 'rgba(30,156,240,0.20)',
-    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, 
+    borderColor: 'rgba(30,156,240,0.18)',
+    alignItems: 'center', 
+    justifyContent: 'center',
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  includedLabel: { flex: 1, fontSize: 14, fontWeight: '500', color: COLORS.text },
-  tick:          { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  includedLabel: { 
+    flex: 1, 
+    fontSize: 14, 
+    fontWeight: '500', 
+    color: COLORS.text 
+  },
+  tick:          { 
+    width: 24, 
+    height: 24, 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
 });

@@ -82,7 +82,7 @@ export default function SettingsScreen() {
 
         {/* Profile — glass card — tap to open profile */}
         <TouchableOpacity
-          style={[styles.profileCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+          style={styles.profileCard}
           activeOpacity={0.8}
           onPress={() => navigation.navigate('Profile')}
         >
@@ -99,7 +99,7 @@ export default function SettingsScreen() {
             {section.items.map((item) => (
               <TouchableOpacity
                 key={item.id}
-                style={[styles.settingsCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                style={styles.settingsCard}
                 activeOpacity={0.75}
                 onPress={() => handleItem(item.id)}
               >
@@ -136,11 +136,17 @@ const styles = StyleSheet.create({
 
   scroll: { paddingHorizontal: 14, paddingBottom: 20, gap: 6 },
 
-  // Profile card
+  // Profile card — blue-tinted glassmorphism
   profileCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 14,
-    ...SHADOW.card, marginBottom: 10,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    ...SHADOW.card,
+    marginBottom: 10,
   },
   profileText: { flex: 1 },
   profileName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
@@ -149,10 +155,15 @@ const styles = StyleSheet.create({
   section:      { gap: 8, marginBottom: 4 },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: COLORS.sub, letterSpacing: 1.2, paddingHorizontal: 4, paddingBottom: 2 },
 
-  // Each settings row = same style as profile card
+  // Each settings row — blue-tinted glassmorphism
   settingsCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 14,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
     ...SHADOW.card,
   },
   iconBoxDanger: {}, // kept for legacy reference — glass tile handles danger styling via fixedColor

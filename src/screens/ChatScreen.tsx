@@ -13,7 +13,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { usePermissions as useMediaLibraryPermissions } from 'expo-media-library';
-import { collection, doc, getDoc } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { collection, doc, getDoc, getDocs, writeBatch, query, where, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Avatar } from '../components';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
@@ -38,6 +39,7 @@ type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
 const CANCEL_THRESHOLD_DP = 50;
 const MAX_UPLOAD_RETRIES = 3;
 const PERMISSION_MESSAGE_DURATION_MS = 3000;
+const MUTE_STORAGE_KEY_PREFIX = 'chat_mute_';
 
 // Common emoji picks
 const EMOJI_LIST = [
@@ -45,6 +47,22 @@ const EMOJI_LIST = [
   '🔥', '🎉', '🙏', '💯', '✅', '🤣', '😅', '🤔', '👀', '💪',
   '🥳', '😭', '🫡', '💀', '🤯', '🫶', '😴', '🤩', '😏', '🙈',
 ];
+
+// ── Group Member Interface ────────────────────────────────────────────────────
+interface GroupMember {
+  userId: string;
+  displayName: string;
+  photoURL: string | null;
+  status: 'online' | 'away' | 'offline';
+}
+
+// ── Past Member Interface ──────────────────────────────────────────────────────
+interface PastMember {
+  userId: string;
+  displayName: string;
+  photoURL: string | null;
+  leftAt: Date;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +77,51 @@ function getInitials(name: string): string {
 function formatTime(date: Date | null): string {
   if (!date) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Format a past member's left date to "Left [date]" */
+function formatLeftDate(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) {
+    return `Left today`;
+  } else if (diffDays === 1) {
+    return `Left yesterday`;
+  } else if (diffDays < 7) {
+    return `Left ${diffDays} days ago`;
+  } else if (diffDays < 30) {
+    const weeks = Math.floor(diffDays / 7);
+    return `Left ${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
+  } else if (diffDays < 365) {
+    const months = Math.floor(diffDays / 30);
+    return `Left ${months} ${months === 1 ? 'month' : 'months'} ago`;
+  } else {
+    return `Left ${date.toLocaleDateString([], { year: 'numeric', month: 'short' })}`;
+  }
+}
+
+/** Load muted state from AsyncStorage */
+async function loadMutedState(chatId: string): Promise<boolean> {
+  try {
+    const key = `${MUTE_STORAGE_KEY_PREFIX}${chatId}`;
+    const value = await AsyncStorage.getItem(key);
+    return value === 'true';
+  } catch (error) {
+    console.error('[ChatScreen] Failed to load muted state:', error);
+    return false;
+  }
+}
+
+/** Save muted state to AsyncStorage */
+async function saveMutedState(chatId: string, muted: boolean): Promise<void> {
+  try {
+    const key = `${MUTE_STORAGE_KEY_PREFIX}${chatId}`;
+    await AsyncStorage.setItem(key, muted.toString());
+  } catch (error) {
+    console.error('[ChatScreen] Failed to save muted state:', error);
+  }
 }
 
 export default function ChatScreen() {
@@ -93,6 +156,31 @@ export default function ChatScreen() {
   const [showEmoji, setShowEmoji] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  // ── Search state ────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<FireMessage[]>([]);
+
+  // ── Group members state ─────────────────────────────────────────
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  // ── Past members state ──────────────────────────────────────────
+  const [pastMembers, setPastMembers] = useState<PastMember[]>([]);
+  const [loadingPastMembers, setLoadingPastMembers] = useState(false);
+
+  // ── Block contact state ─────────────────────────────────────────
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [checkingBlockedStatus, setCheckingBlockedStatus] = useState(true);
+  const [showBlockConfirmation, setShowBlockConfirmation] = useState(false);
+
+  // ── Leave group state ───────────────────────────────────────────
+  const [showLeaveGroupConfirmation, setShowLeaveGroupConfirmation] = useState(false);
+  const [leavingGroup, setLeavingGroup] = useState(false);
 
   // ── Upload & retry state ────────────────────────────────────────
   const [uploadProgress, setUploadProgress] = useState<number>(0);
@@ -119,6 +207,224 @@ export default function ChatScreen() {
 
   // ── Track if recording was cancelled via gesture ─────────────────
   const isCancelledRef = useRef(false);
+
+  // ── Load muted state from AsyncStorage on mount ─────────────────
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadMuted = async () => {
+      const savedMuted = await loadMutedState(chatId);
+      if (isMounted) {
+        setMuted(savedMuted);
+      }
+    };
+    
+    loadMuted();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [chatId]);
+
+  // ── Fetch group members when profile modal opens ────────────────
+  useEffect(() => {
+    if (!profileModalOpen || !isGroup || !chatId) return;
+
+    const fetchGroupMembers = async () => {
+      setLoadingMembers(true);
+      try {
+        console.log('[ChatScreen] Fetching group members for chat:', chatId);
+        
+        // First, get the chat document to retrieve member IDs
+        const chatRef = doc(db, 'chats', chatId);
+        const chatSnap = await getDoc(chatRef);
+        
+        if (!chatSnap.exists()) {
+          console.warn('[ChatScreen] Chat document not found');
+          setGroupMembers([]);
+          setLoadingMembers(false);
+          return;
+        }
+
+        const chatData = chatSnap.data();
+        const memberIds = chatData.members as string[] || [];
+        
+        console.log('[ChatScreen] Found member IDs:', memberIds);
+
+        if (memberIds.length === 0) {
+          setGroupMembers([]);
+          setLoadingMembers(false);
+          return;
+        }
+
+        // Fetch each member's profile from the users collection
+        const memberPromises = memberIds.map(async (memberId) => {
+          try {
+            const userRef = doc(db, 'users', memberId);
+            const userSnap = await getDoc(userRef);
+            
+            if (userSnap.exists()) {
+              const userData = userSnap.data();
+              return {
+                userId: memberId,
+                displayName: userData.displayName || userData.phone || 'Unknown',
+                photoURL: userData.photoURL || null,
+                status: userData.status || 'offline',
+              } as GroupMember;
+            }
+            
+            // Fallback for users without profile data
+            return {
+              userId: memberId,
+              displayName: 'Unknown User',
+              photoURL: null,
+              status: 'offline',
+            } as GroupMember;
+          } catch (error) {
+            console.error('[ChatScreen] Error fetching user:', memberId, error);
+            return {
+              userId: memberId,
+              displayName: 'Unknown User',
+              photoURL: null,
+              status: 'offline',
+            } as GroupMember;
+          }
+        });
+
+        const members = await Promise.all(memberPromises);
+        console.log('[ChatScreen] Fetched group members:', members.length);
+        setGroupMembers(members);
+      } catch (error) {
+        console.error('[ChatScreen] Error fetching group members:', error);
+        setGroupMembers([]);
+      } finally {
+        setLoadingMembers(false);
+      }
+    };
+
+    fetchGroupMembers();
+  }, [profileModalOpen, isGroup, chatId]);
+
+  // ── Fetch past members when profile modal opens ─────────────────
+  useEffect(() => {
+    if (!profileModalOpen || !isGroup || !chatId) return;
+
+    const fetchPastMembers = async () => {
+      setLoadingPastMembers(true);
+      try {
+        console.log('[ChatScreen] Fetching past members for chat:', chatId);
+        
+        // First, get the chat document to check for pastMembers field
+        const chatRef = doc(db, 'chats', chatId);
+        const chatSnap = await getDoc(chatRef);
+        
+        if (!chatSnap.exists()) {
+          console.warn('[ChatScreen] Chat document not found');
+          setPastMembers([]);
+          setLoadingPastMembers(false);
+          return;
+        }
+
+        const chatData = chatSnap.data();
+        const pastMemberData = chatData.pastMembers as Array<{
+          userId: string;
+          leftAt: any; // Firestore Timestamp
+        }> | undefined;
+        
+        console.log('[ChatScreen] Found past member data:', pastMemberData);
+
+        if (!pastMemberData || pastMemberData.length === 0) {
+          setPastMembers([]);
+          setLoadingPastMembers(false);
+          return;
+        }
+
+        // Fetch each past member's profile from the users collection
+        const pastMemberPromises = pastMemberData.map(async (pastMemberEntry) => {
+          try {
+            const userRef = doc(db, 'users', pastMemberEntry.userId);
+            const userSnap = await getDoc(userRef);
+            
+            // Convert Firestore Timestamp to Date
+            const leftAtDate = pastMemberEntry.leftAt?.toDate ? 
+              pastMemberEntry.leftAt.toDate() : 
+              new Date(pastMemberEntry.leftAt);
+            
+            if (userSnap.exists()) {
+              const userData = userSnap.data();
+              return {
+                userId: pastMemberEntry.userId,
+                displayName: userData.displayName || userData.phone || 'Unknown',
+                photoURL: userData.photoURL || null,
+                leftAt: leftAtDate,
+              } as PastMember;
+            }
+            
+            // Fallback for users without profile data
+            return {
+              userId: pastMemberEntry.userId,
+              displayName: 'Unknown User',
+              photoURL: null,
+              leftAt: leftAtDate,
+            } as PastMember;
+          } catch (error) {
+            console.error('[ChatScreen] Error fetching past member:', pastMemberEntry.userId, error);
+            return {
+              userId: pastMemberEntry.userId,
+              displayName: 'Unknown User',
+              photoURL: null,
+              leftAt: new Date(),
+            } as PastMember;
+          }
+        });
+
+        const members = await Promise.all(pastMemberPromises);
+        console.log('[ChatScreen] Fetched past members:', members.length);
+        setPastMembers(members);
+      } catch (error) {
+        console.error('[ChatScreen] Error fetching past members:', error);
+        setPastMembers([]);
+      } finally {
+        setLoadingPastMembers(false);
+      }
+    };
+
+    fetchPastMembers();
+  }, [profileModalOpen, isGroup, chatId]);
+
+  // ── Check blocked status ─────────────────────────────────────────
+  useEffect(() => {
+    if (!userId || !otherUserId || isGroup) {
+      setCheckingBlockedStatus(false);
+      setIsBlocked(false);
+      return;
+    }
+
+    const checkBlockedStatus = async () => {
+      try {
+        console.log('[ChatScreen] Checking if contact is blocked:', otherUserId);
+        
+        // Check if the current user has blocked the other user
+        const blockedRef = doc(db, 'users', userId, 'blockedUsers', otherUserId);
+        const blockedSnap = await getDoc(blockedRef);
+        
+        if (blockedSnap.exists()) {
+          console.log('[ChatScreen] Contact is blocked');
+          setIsBlocked(true);
+        } else {
+          console.log('[ChatScreen] Contact is not blocked');
+          setIsBlocked(false);
+        }
+      } catch (error) {
+        console.error('[ChatScreen] Error checking blocked status:', error);
+        setIsBlocked(false);
+      } finally {
+        setCheckingBlockedStatus(false);
+      }
+    };
+
+    checkBlockedStatus();
+  }, [userId, otherUserId, isGroup]);
 
   // ── Stop playback on unmount / navigation away ──────────────────
   useEffect(() => {
@@ -155,6 +461,27 @@ export default function ChatScreen() {
       if (permissionTimerRef.current) clearTimeout(permissionTimerRef.current);
     };
   }, [recorder.state.permissionDenied, recorder.state.permissionDeniedPermanently]);
+
+  // ── Search handler ──────────────────────────────────────────────
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const results = messages.filter(msg => 
+      msg.text?.toLowerCase().includes(query.toLowerCase())
+    );
+    setSearchResults(results);
+  }, [messages]);
+
+  // ── Scroll to message handler ───────────────────────────────────
+  const scrollToMessage = useCallback((messageId: string) => {
+    const index = messages.findIndex(m => m.messageId === messageId);
+    if (index !== -1 && listRef.current) {
+      listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    }
+  }, [messages]);
 
   // ── Upload and send voice note ──────────────────────────────────
   const handleVoiceUploadAndSend = useCallback(async (result: RecordingResult) => {
@@ -655,6 +982,195 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Clear chat handler ──────────────────────────────────────────
+  const handleClearChat = useCallback(async () => {
+    if (!chatId) {
+      console.error('[ChatScreen] No chatId available');
+      return;
+    }
+
+    try {
+      console.log('[ChatScreen] Clearing chat:', chatId);
+      const messagesRef = collection(db, 'chats', chatId, 'messages');
+      const snapshot = await getDocs(messagesRef);
+
+      if (snapshot.empty) {
+        Alert.alert('Chat Empty', 'There are no messages to clear.');
+        return;
+      }
+
+      const totalMessages = snapshot.docs.length;
+      console.log(`[ChatScreen] Found ${totalMessages} messages to delete`);
+
+      // Firestore batch can handle up to 500 operations
+      // Split into multiple batches if needed
+      const BATCH_SIZE = 500;
+      const batches = [];
+      
+      for (let i = 0; i < snapshot.docs.length; i += BATCH_SIZE) {
+        const batch = writeBatch(db);
+        const batchDocs = snapshot.docs.slice(i, i + BATCH_SIZE);
+        
+        batchDocs.forEach((docSnapshot) => {
+          batch.delete(docSnapshot.ref);
+        });
+        
+        batches.push(batch);
+      }
+
+      // Execute all batches
+      await Promise.all(batches.map(batch => batch.commit()));
+      
+      console.log(`[ChatScreen] Successfully cleared ${totalMessages} messages`);
+      Alert.alert('Success', 'Chat cleared successfully');
+    } catch (error) {
+      console.error('[ChatScreen] Error clearing chat:', error);
+      Alert.alert('Error', 'Failed to clear chat. Please try again.');
+    }
+  }, [chatId]);
+
+  // ── Block contact handler ───────────────────────────────────────
+  const handleBlockContact = useCallback(async () => {
+    if (!userId || !otherUserId || isGroup) {
+      console.error('[ChatScreen] Cannot block: missing user info or is group chat');
+      return;
+    }
+
+    try {
+      console.log('[ChatScreen] Blocking contact:', otherUserId);
+      
+      // Add the blocked user to the current user's blockedUsers subcollection
+      const blockedRef = doc(db, 'users', userId, 'blockedUsers', otherUserId);
+      await writeBatch(db).set(blockedRef, {
+        blockedAt: new Date(),
+        displayName: displayName,
+        photoURL: otherUserPhoto || null,
+      }).commit();
+      
+      console.log('[ChatScreen] Contact blocked successfully');
+      setIsBlocked(true);
+      setShowBlockConfirmation(false);
+      setProfileModalOpen(false);
+      
+      // Show confirmation
+      Alert.alert('Contact Blocked', `${displayName} has been blocked. You won't receive messages from this contact.`);
+    } catch (error) {
+      console.error('[ChatScreen] Error blocking contact:', error);
+      Alert.alert('Error', 'Failed to block contact. Please try again.');
+    }
+  }, [userId, otherUserId, isGroup, displayName, otherUserPhoto]);
+
+  // ── Unblock contact handler ─────────────────────────────────────
+  const handleUnblockContact = useCallback(async () => {
+    if (!userId || !otherUserId || isGroup) {
+      console.error('[ChatScreen] Cannot unblock: missing user info or is group chat');
+      return;
+    }
+
+    try {
+      console.log('[ChatScreen] Unblocking contact:', otherUserId);
+      
+      // Remove the blocked user from the current user's blockedUsers subcollection
+      const blockedRef = doc(db, 'users', userId, 'blockedUsers', otherUserId);
+      await writeBatch(db).delete(blockedRef).commit();
+      
+      console.log('[ChatScreen] Contact unblocked successfully');
+      setIsBlocked(false);
+      
+      // Show confirmation
+      Alert.alert('Contact Unblocked', `You can now send and receive messages from ${displayName}.`);
+    } catch (error) {
+      console.error('[ChatScreen] Error unblocking contact:', error);
+      Alert.alert('Error', 'Failed to unblock contact. Please try again.');
+    }
+  }, [userId, otherUserId, isGroup, displayName]);
+
+  // ── Leave group handler ─────────────────────────────────────────
+  const handleLeaveGroup = useCallback(async () => {
+    if (!userId || !chatId || !isGroup) {
+      console.error('[ChatScreen] Cannot leave: missing user info or not a group chat');
+      return;
+    }
+
+    setLeavingGroup(true);
+
+    try {
+      console.log('[ChatScreen] Leaving group:', chatId);
+      
+      const chatRef = doc(db, 'chats', chatId);
+      const chatSnap = await getDoc(chatRef);
+      
+      if (!chatSnap.exists()) {
+        Alert.alert('Error', 'Group not found.');
+        setLeavingGroup(false);
+        return;
+      }
+
+      const chatData = chatSnap.data();
+      const currentMembers = chatData.members as string[] || [];
+      const updatedMembers = currentMembers.filter((id) => id !== userId);
+      
+      // Get user's display name for the system message
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      const userDisplayName = userSnap.exists() ? (userSnap.data().displayName || user?.phoneNumber || 'User') : 'User';
+      
+      const batch = writeBatch(db);
+      
+      // 1. Update chat: remove from members, add to pastMembers
+      const pastMembersEntry = {
+        userId,
+        leftAt: new Date(),
+      };
+      
+      const currentPastMembers = chatData.pastMembers || [];
+      const updatedPastMembers = [...currentPastMembers, pastMembersEntry];
+      
+      batch.update(chatRef, {
+        members: updatedMembers,
+        pastMembers: updatedPastMembers,
+      });
+      
+      // 2. Add system message to the chat
+      const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+      batch.set(msgRef, {
+        messageId: msgRef.id,
+        senderId: userId,
+        text: `${userDisplayName} left the group`,
+        type: 'system',
+        subtype: 'member-left',
+        timestamp: serverTimestamp(),
+        readBy: [userId],
+      });
+      
+      // 3. Update lastMessage
+      batch.update(chatRef, {
+        'lastMessage.text': `${userDisplayName} left the group`,
+        'lastMessage.senderId': userId,
+        'lastMessage.timestamp': serverTimestamp(),
+      });
+      
+      await batch.commit();
+      
+      console.log('[ChatScreen] Left group successfully');
+      setLeavingGroup(false);
+      setShowLeaveGroupConfirmation(false);
+      setProfileModalOpen(false);
+      
+      // Navigate back to ChatsScreen
+      navigation.goBack();
+      
+      // Show confirmation
+      setTimeout(() => {
+        Alert.alert('Left Group', `You have left ${displayName}.`);
+      }, 500);
+    } catch (error) {
+      console.error('[ChatScreen] Error leaving group:', error);
+      setLeavingGroup(false);
+      Alert.alert('Error', 'Failed to leave group. Please try again.');
+    }
+  }, [userId, chatId, isGroup, displayName, user, navigation]);
+
   // ── Check if recording is active ────────────────────────────────
   const isRecording = recorder.state.status === 'recording';
 
@@ -820,14 +1336,25 @@ export default function ChatScreen() {
               <AppIcon name="chevron-back" size={24} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
 
-            <Avatar initials={getInitials(displayName)} color={COLORS.blue} size={40} />
-
-            <View style={styles.contactInfo}>
-              <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
-              <AppText style={styles.onlineText}>
-                {isGroup ? 'Group chat' : 'Tap here for info'}
-              </AppText>
-            </View>
+            {/* Tapping the avatar/name opens Profile Modal */}
+            <TouchableOpacity
+              style={styles.topBarContact}
+              onPress={() => setProfileModalOpen(true)}
+              activeOpacity={0.75}
+            >
+              <Avatar 
+                initials={getInitials(displayName)} 
+                color={COLORS.blue} 
+                size={40}
+                imageUrl={otherUserPhoto}
+              />
+              <View style={styles.contactInfo}>
+                <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
+                <AppText style={[styles.onlineText, { color: FG.secondary }]}>
+                  {isGroup ? 'Group chat' : 'Tap here for info'}
+                </AppText>
+              </View>
+            </TouchableOpacity>
 
             <TouchableOpacity style={styles.iconBtn} onPress={handleVoiceCall} disabled={isGroup || outgoingCall.isInitiating}>
               <AppIcon name="call" size={20} color={COLORS.blue} fixedColor />
@@ -836,7 +1363,73 @@ export default function ChatScreen() {
             <TouchableOpacity style={styles.iconBtn} onPress={handleVideoCall} disabled={isGroup || outgoingCall.isInitiating}>
               <AppIcon name="videocam" size={20} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setMenuOpen((v) => !v)}>
+              <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} fixedColor />
+            </TouchableOpacity>
           </View>
+
+          {/* ── 3-dot menu dropdown ── */}
+          <Modal visible={menuOpen} transparent animationType="none" onRequestClose={() => setMenuOpen(false)}>
+            <TouchableOpacity 
+              style={styles.menuBackdrop} 
+              activeOpacity={1} 
+              onPress={() => setMenuOpen(false)} 
+            />
+            <View style={[styles.menuCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={async () => {
+                  const newMutedState = !muted;
+                  setMuted(newMutedState);
+                  await saveMutedState(chatId, newMutedState);
+                  setMenuOpen(false);
+                }}
+                activeOpacity={0.75}
+              >
+                <AppIcon 
+                  name={muted ? 'notifications' : 'notifications-off'} 
+                  size={20} 
+                  color={COLORS.blue} 
+                  fixedColor 
+                />
+                <AppText style={[styles.menuItemText, { color: textColor }]}>
+                  {muted ? 'Unmute Notifications' : 'Mute Notifications'}
+                </AppText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuOpen(false);
+                  setSearchOpen(true);
+                }}
+                activeOpacity={0.75}
+              >
+                <AppIcon name="search" size={20} color={COLORS.blue} fixedColor />
+                <AppText style={[styles.menuItemText, { color: textColor }]}>Search in chat</AppText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.menuItem, styles.menuItemDanger]}
+                onPress={() => {
+                  setMenuOpen(false);
+                  Alert.alert(
+                    'Clear Chat',
+                    'Are you sure you want to clear all messages in this chat?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Clear', style: 'destructive', onPress: handleClearChat }
+                    ]
+                  );
+                }}
+                activeOpacity={0.75}
+              >
+                <AppIcon name="trash-outline" size={20} color={COLORS.missed} fixedColor />
+                <AppText style={[styles.menuItemText, styles.menuItemTextDanger]}>Clear Chat</AppText>
+              </TouchableOpacity>
+            </View>
+          </Modal>
 
           {/* ── Messages list ── */}
           {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
@@ -910,8 +1503,34 @@ export default function ChatScreen() {
             </View>
           )}
 
-          {/* ── Input bar ── */}
-          <View style={styles.inputBar}>
+          {/* ── Input bar / Blocked banner ── */}
+          {isBlocked ? (
+            /* Blocked Banner */
+            <View style={[styles.blockedBanner, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
+              <View style={styles.blockedBannerContent}>
+                <AppIcon name="ban-outline" size={20} color={COLORS.missed} fixedColor />
+                <View style={{ flex: 1 }}>
+                  <AppText style={[styles.blockedBannerTitle, { color: textColor, fontFamily }]}>
+                    {displayName} is blocked
+                  </AppText>
+                  <AppText style={[styles.blockedBannerSub, { color: FG.secondary }]}>
+                    You can't send or receive messages
+                  </AppText>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.unblockBtn, { borderColor: COLORS.blue }]}
+                  onPress={handleUnblockContact}
+                  activeOpacity={0.8}
+                >
+                  <AppText style={[styles.unblockBtnText, { color: COLORS.blue }]}>
+                    Unblock
+                  </AppText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            /* Normal Input Bar */
+            <View style={styles.inputBar}>
             {isRecording ? (
               <View style={styles.recordingOverlayContainer}>
                 <VoiceRecordingOverlay
@@ -969,6 +1588,7 @@ export default function ChatScreen() {
               </View>
             )}
           </View>
+          )}
 
           {/* ── Upload progress indicator ── */}
           {(isUploading || uploadingImage) && (
@@ -1054,6 +1674,463 @@ export default function ChatScreen() {
           </View>
         </Modal>
       )}
+
+      {/* ── Search Modal ── */}
+      <Modal
+        visible={searchOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setSearchOpen(false);
+          setSearchQuery('');
+          setSearchResults([]);
+        }}
+      >
+        <View style={styles.searchOverlay}>
+          <TouchableOpacity 
+            style={styles.searchBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setSearchOpen(false);
+              setSearchQuery('');
+              setSearchResults([]);
+            }}
+          />
+          <View style={[styles.searchModal, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+            {/* Search Input */}
+            <View style={[styles.searchInputContainer, { backgroundColor: 'rgba(30,156,240,0.06)', borderColor: 'rgba(30,156,240,0.18)' }]}>
+              <AppIcon name="search" size={20} color={COLORS.blue} fixedColor />
+              <TextInput
+                style={[styles.searchInput, { color: textColor }]}
+                placeholder="Search in chat..."
+                placeholderTextColor={FG.faint}
+                value={searchQuery}
+                onChangeText={handleSearch}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => handleSearch('')}>
+                  <AppIcon name="close-circle" size={20} color={COLORS.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Results List */}
+            {searchQuery.trim() && (
+              <View style={styles.searchResultsContainer}>
+                {searchResults.length === 0 ? (
+                  <View style={styles.searchEmpty}>
+                    <AppText style={[styles.searchEmptyText, { color: FG.secondary }]}>
+                      No messages found
+                    </AppText>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={searchResults}
+                    keyExtractor={(item) => item.messageId}
+                    renderItem={({ item }) => {
+                      const isOut = item.senderId === userId;
+                      const messageText = item.text || '';
+                      const queryIndex = messageText.toLowerCase().indexOf(searchQuery.toLowerCase());
+                      
+                      return (
+                        <TouchableOpacity
+                          style={[styles.searchResultItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            scrollToMessage(item.messageId);
+                            setSearchOpen(false);
+                            setSearchQuery('');
+                            setSearchResults([]);
+                          }}
+                        >
+                          <View style={styles.searchResultContent}>
+                            <View style={styles.searchResultHeader}>
+                              <AppText style={[styles.searchResultSender, { color: textColor, fontFamily }]}>
+                                {isOut ? 'You' : displayName}
+                              </AppText>
+                              <AppText style={[styles.searchResultTime, { color: FG.secondary }]}>
+                                {formatTime(item.timestamp)}
+                              </AppText>
+                            </View>
+                            <AppText 
+                              style={[styles.searchResultText, { color: FG.secondary }]}
+                              numberOfLines={2}
+                            >
+                              {queryIndex >= 0 ? (
+                                <>
+                                  {messageText.substring(0, queryIndex)}
+                                  <AppText style={[styles.searchResultHighlight, { color: COLORS.blue }]}>
+                                    {messageText.substring(queryIndex, queryIndex + searchQuery.length)}
+                                  </AppText>
+                                  {messageText.substring(queryIndex + searchQuery.length)}
+                                </>
+                              ) : (
+                                messageText
+                              )}
+                            </AppText>
+                          </View>
+                          <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
+                        </TouchableOpacity>
+                      );
+                    }}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.searchResultsList}
+                  />
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Profile Modal ── */}
+      <Modal
+        visible={profileModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setProfileModalOpen(false)}
+      >
+        <View style={styles.profileOverlay}>
+          <TouchableOpacity 
+            style={styles.profileBackdrop} 
+            activeOpacity={1} 
+            onPress={() => setProfileModalOpen(false)} 
+          />
+          <View style={[styles.profileSheet, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+            <AppBg />
+            {/* Handle */}
+            <View style={styles.profileHandle} />
+
+            {/* Close button */}
+            <TouchableOpacity 
+              style={styles.profileCloseBtn} 
+              onPress={() => setProfileModalOpen(false)}
+            >
+              <AppIcon name="close" size={20} color={FG.secondary} />
+            </TouchableOpacity>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.profileScroll}>
+              {/* Avatar + name */}
+              <View style={styles.profileAvatarWrap}>
+                  <Avatar 
+                    initials={getInitials(displayName)} 
+                    color={COLORS.blue} 
+                    size={80}
+                    imageUrl={otherUserPhoto}
+                  />
+                </View>
+                <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>
+                  {displayName}
+                </AppText>
+                <AppText style={[styles.profileStatus, { color: FG.secondary }]}>
+                  {isGroup ? `Group · ${messages.length} messages` : 'Online'}
+                </AppText>
+
+                {/* Action buttons */}
+                <View style={styles.profileActions}>
+                  {[
+                    { icon: 'call-outline' as const, label: 'Audio Call', onPress: () => { setProfileModalOpen(false); handleVoiceCall(); } },
+                    { icon: 'videocam-outline' as const, label: 'Video Call', onPress: () => { setProfileModalOpen(false); handleVideoCall(); } },
+                  ].map((a) => (
+                    <TouchableOpacity 
+                      key={a.label} 
+                      style={[styles.profileActionBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} 
+                      onPress={a.onPress} 
+                      activeOpacity={0.8}
+                      disabled={isGroup}
+                    >
+                      <LinearGradient colors={GRADIENTS.primary} style={styles.profileActionIcon}>
+                        <AppIcon name={a.icon} size={20} color="#fff" fixedColor />
+                      </LinearGradient>
+                      <AppText style={[styles.profileActionLabel, { color: textColor }]}>
+                        {a.label}
+                      </AppText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Group Participants - Only show for group chats */}
+                {isGroup && (
+                  <>
+                    <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
+                      PARTICIPANTS ({groupMembers.length})
+                    </AppText>
+                    {loadingMembers ? (
+                      <View style={[styles.profileMemberLoadingBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                        <ActivityIndicator size="small" color={COLORS.blue} />
+                        <AppText style={[styles.profileMemberLoadingText, { color: FG.secondary }]}>
+                          Loading participants...
+                        </AppText>
+                      </View>
+                    ) : groupMembers.length > 0 ? (
+                      groupMembers.map((member) => {
+                        const statusEmoji = 
+                          member.status === 'online' ? '🟢' : 
+                          member.status === 'away' ? '🟡' : '⚫';
+                        const statusText = 
+                          member.status === 'online' ? 'Online' : 
+                          member.status === 'away' ? 'Away' : 'Offline';
+                        
+                        return (
+                          <View 
+                            key={member.userId} 
+                            style={[styles.profileMemberRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                          >
+                            <Avatar 
+                              initials={getInitials(member.displayName)} 
+                              color={COLORS.blue} 
+                              size={42}
+                              imageUrl={member.photoURL}
+                              status={member.status}
+                            />
+                            <View style={{ flex: 1 }}>
+                              <AppText style={[styles.profileMemberName, { color: textColor, fontFamily }]}>
+                                {member.displayName}
+                                {member.userId === userId && <AppText style={[styles.profileMemberYou, { color: FG.secondary }]}> (You)</AppText>}
+                              </AppText>
+                              <AppText style={[styles.profileMemberStatus, { color: FG.secondary }]}>
+                                {statusEmoji} {statusText}
+                              </AppText>
+                            </View>
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <View style={[styles.profileMemberEmptyBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                        <AppIcon name="people-outline" size={28} color={FG.secondary} />
+                        <AppText style={[styles.profileMemberEmptyText, { color: FG.secondary }]}>
+                          No participants found
+                        </AppText>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                {/* Past Members - Only show for group chats if there are any */}
+                {isGroup && (
+                  <>
+                    <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
+                      PAST MEMBERS {pastMembers.length > 0 ? `(${pastMembers.length})` : ''}
+                    </AppText>
+                    {loadingPastMembers ? (
+                      <View style={[styles.profileMemberLoadingBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                        <ActivityIndicator size="small" color={COLORS.blue} />
+                        <AppText style={[styles.profileMemberLoadingText, { color: FG.secondary }]}>
+                          Loading past members...
+                        </AppText>
+                      </View>
+                    ) : pastMembers.length > 0 ? (
+                      pastMembers.map((member) => {
+                        const leftDateText = formatLeftDate(member.leftAt);
+                        
+                        return (
+                          <View 
+                            key={member.userId} 
+                            style={[styles.profilePastMemberRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                          >
+                            <Avatar 
+                              initials={getInitials(member.displayName)} 
+                              color={COLORS.blue} 
+                              size={42}
+                              imageUrl={member.photoURL}
+                              status="offline"
+                            />
+                            <View style={{ flex: 1 }}>
+                              <AppText style={[styles.profileMemberName, styles.profilePastMemberName, { color: textColor, fontFamily }]}>
+                                {member.displayName}
+                              </AppText>
+                              <AppText style={[styles.profileMemberStatus, { color: FG.secondary }]}>
+                                {leftDateText}
+                              </AppText>
+                            </View>
+                            <AppIcon name="exit-outline" size={18} color={FG.secondary} />
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <View style={[styles.profileMemberEmptyBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                        <AppIcon name="people-outline" size={28} color={FG.secondary} />
+                        <AppText style={[styles.profileMemberEmptyText, { color: FG.secondary }]}>
+                          No past members
+                        </AppText>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                {/* Shared media */}
+                <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
+                  SHARED MEDIA
+                </AppText>
+                {messages.filter(m => m.type === 'image').length > 0 ? (
+                  <TouchableOpacity 
+                    style={[styles.profileMediaRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                    activeOpacity={0.8}
+                  >
+                    <AppText style={[styles.profileMediaLabel, { color: textColor }]}>
+                      Shared media
+                    </AppText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <AppText style={[styles.profileMediaCount, { color: FG.secondary }]}>
+                        {messages.filter(m => m.type === 'image').length} photos
+                      </AppText>
+                      <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
+                    </View>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={[styles.infoMediaBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                    <AppIcon name="images-outline" size={28} color={FG.secondary} />
+                    <AppText style={[styles.infoMediaEmpty, { color: FG.secondary }]}>
+                      No media shared yet
+                    </AppText>
+                  </View>
+                )}
+
+                {/* Privacy section for group chats - Leave Group */}
+                {isGroup && (
+                  <>
+                    <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
+                      PRIVACY
+                    </AppText>
+
+                    {/* Leave Group Button */}
+                    {!showLeaveGroupConfirmation ? (
+                      <TouchableOpacity 
+                        style={[styles.profileBlockBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                        onPress={() => setShowLeaveGroupConfirmation(true)}
+                        activeOpacity={0.8}
+                        disabled={leavingGroup}
+                      >
+                        <AppIcon name="exit-outline" size={20} color={COLORS.missed} fixedColor />
+                        <AppText style={[styles.profileBlockText, { color: COLORS.missed }]}>
+                          Leave Group
+                        </AppText>
+                      </TouchableOpacity>
+                    ) : (
+                      /* Inline Confirmation Card */
+                      <View style={[styles.confirmationCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                        {/* Gradient Icon */}
+                        <LinearGradient 
+                          colors={['rgba(255,59,48,0.20)', 'rgba(255,149,0,0.20)']}
+                          style={styles.confirmationIconWrap}
+                        >
+                          <AppIcon name="exit-outline" size={28} color={COLORS.missed} fixedColor />
+                        </LinearGradient>
+
+                        {/* Title */}
+                        <AppText style={[styles.confirmationTitle, { color: textColor, fontFamily }]}>
+                          Leave Group?
+                        </AppText>
+
+                        {/* Body text */}
+                        <AppText style={[styles.confirmationBody, { color: FG.secondary }]}>
+                          You will no longer receive messages from this group. A notification will be sent to all members that you left.
+                        </AppText>
+
+                        {/* Action buttons */}
+                        <View style={styles.confirmationButtons}>
+                          <TouchableOpacity 
+                            style={[styles.confirmationCancelBtn, { borderColor: FG.glassBorder }]}
+                            onPress={() => setShowLeaveGroupConfirmation(false)}
+                            activeOpacity={0.8}
+                            disabled={leavingGroup}
+                          >
+                            <AppText style={[styles.confirmationCancelText, { color: textColor }]}>
+                              Cancel
+                            </AppText>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity 
+                            style={[styles.confirmationBlockBtn, { backgroundColor: COLORS.missed }]}
+                            onPress={handleLeaveGroup}
+                            activeOpacity={0.8}
+                            disabled={leavingGroup}
+                          >
+                            {leavingGroup ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <AppText style={[styles.confirmationBlockText, { color: '#fff' }]}>
+                                Leave Group
+                              </AppText>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                {/* Privacy section - Only show for individual chats */}
+                {!isGroup && (
+                  <>
+                    <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
+                      PRIVACY
+                    </AppText>
+
+                    {/* Block Contact Button */}
+                    {!showBlockConfirmation ? (
+                      <TouchableOpacity 
+                        style={[styles.profileBlockBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                        onPress={() => setShowBlockConfirmation(true)}
+                        activeOpacity={0.8}
+                      >
+                        <AppIcon name="ban-outline" size={20} color={COLORS.missed} fixedColor />
+                        <AppText style={[styles.profileBlockText, { color: COLORS.missed }]}>
+                          Block {displayName}
+                        </AppText>
+                      </TouchableOpacity>
+                    ) : (
+                      /* Inline Confirmation Card */
+                      <View style={[styles.confirmationCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                        {/* Gradient Icon */}
+                        <LinearGradient 
+                          colors={['rgba(255,59,48,0.20)', 'rgba(255,149,0,0.20)']}
+                          style={styles.confirmationIconWrap}
+                        >
+                          <AppIcon name="ban-outline" size={28} color={COLORS.missed} fixedColor />
+                        </LinearGradient>
+
+                        {/* Title */}
+                        <AppText style={[styles.confirmationTitle, { color: textColor, fontFamily }]}>
+                          Block {displayName}?
+                        </AppText>
+
+                        {/* Body text */}
+                        <AppText style={[styles.confirmationBody, { color: FG.secondary }]}>
+                          Blocked contacts cannot call you or send you messages. They won't be notified that you blocked them.
+                        </AppText>
+
+                        {/* Action buttons */}
+                        <View style={styles.confirmationButtons}>
+                          <TouchableOpacity 
+                            style={[styles.confirmationCancelBtn, { borderColor: FG.glassBorder }]}
+                            onPress={() => setShowBlockConfirmation(false)}
+                            activeOpacity={0.8}
+                          >
+                            <AppText style={[styles.confirmationCancelText, { color: textColor }]}>
+                              Cancel
+                            </AppText>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity 
+                            style={[styles.confirmationBlockBtn, { backgroundColor: COLORS.missed }]}
+                            onPress={handleBlockContact}
+                            activeOpacity={0.8}
+                          >
+                            <AppText style={[styles.confirmationBlockText, { color: '#fff' }]}>
+                              Block
+                            </AppText>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </>
+                )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -1068,9 +2145,10 @@ const styles = StyleSheet.create({
     gap: 8, ...GLASS.header,
   },
   backBtn: { padding: 2 },
+  topBarContact: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   contactInfo: { flex: 1 },
-  contactName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
-  onlineText: { fontSize: 12, color: COLORS.sub, marginTop: 2 },
+  contactName: { fontSize: 15, fontWeight: '700' },
+  onlineText: { fontSize: 12, marginTop: 2 },
   iconBtn: { padding: 4 },
 
   // ── Center states (loading / empty) ───────────────────────────────────────
@@ -1093,7 +2171,13 @@ const styles = StyleSheet.create({
   bubbleTextIn: { fontSize: 14, color: '#fff', lineHeight: 20 },
   timeIn: { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
 
-  bubbleOut: { backgroundColor: 'rgba(180,225,245,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', borderBottomRightRadius: 4, ...SHADOW.card },
+  bubbleOut: { 
+    backgroundColor: 'rgba(180,225,245,0.22)', 
+    borderWidth: 1, 
+    borderColor: 'rgba(30,156,240,0.18)', 
+    borderBottomRightRadius: 4, 
+    ...SHADOW.card 
+  },
   bubbleTextOut: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
   timeOutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
   timeOut: { fontSize: 10, color: COLORS.sub },
@@ -1136,8 +2220,11 @@ const styles = StyleSheet.create({
 
   // Emoji panel
   emojiPanel: {
-    maxHeight: 160, borderTopWidth: 1,
+    maxHeight: 160, 
+    borderTopWidth: 1,
     paddingVertical: 8,
+    backgroundColor: 'rgba(180,225,245,0.18)',
+    borderTopColor: 'rgba(30,156,240,0.18)',
   },
   emojiGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 2 },
   emojiItem: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
@@ -1151,7 +2238,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 12,
     ...SHADOW.glow,
   },
-  attachHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(30,156,240,0.30)', alignSelf: 'center', marginBottom: 14 },
+  attachHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(30,156,240,0.40)', alignSelf: 'center', marginBottom: 14 },
   attachTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 16 },
   attachGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   attachItem: {
@@ -1179,7 +2266,9 @@ const styles = StyleSheet.create({
   permissionBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(245,158,11,0.12)',
+    backgroundColor: 'rgba(30,156,240,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 8,
@@ -1213,7 +2302,9 @@ const styles = StyleSheet.create({
   uploadErrorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239,68,68,0.10)',
+    backgroundColor: 'rgba(30,156,240,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.25)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 8,
@@ -1276,5 +2367,403 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // ── Profile Modal ──────────────────────────────────────────────────────────
+  profileOverlay: { flex: 1, justifyContent: 'flex-end' },
+  profileBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.40)' },
+  profileSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    maxHeight: '88%',
+    ...SHADOW.glow,
+  },
+  profileHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(30,156,240,0.30)',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  profileCloseBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 16,
+    zIndex: 10,
+    padding: 6,
+  },
+  profileScroll: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 40,
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileAvatarWrap: { marginTop: 8, marginBottom: 4 },
+  profileName: { fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  profileStatus: { fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  profileActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginVertical: 8,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  profileActionBtn: {
+    flex: 1,
+    maxWidth: 150,
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    ...SHADOW.card,
+  },
+  profileActionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOW.button,
+  },
+  profileActionLabel: { fontSize: 12, fontWeight: '600' },
+  profileSectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: 16,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+  },
+  infoMediaBox: {
+    width: '100%',
+    height: 90,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  infoMediaEmpty: {
+    fontSize: 13,
+  },
+  profileMediaRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    ...SHADOW.card,
+  },
+  profileMediaLabel: { fontSize: 14, fontWeight: '600' },
+  profileMediaCount: { fontSize: 13 },
+
+  // ── Group Members in Profile Modal ────────────────────────────────────────
+  profileMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 8,
+    ...SHADOW.card,
+  },
+  profileMemberName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  profileMemberYou: {
+    fontSize: 12,
+    fontWeight: '400',
+  },
+  profileMemberStatus: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  profileMemberLoadingBox: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 20,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    ...SHADOW.card,
+  },
+  profileMemberLoadingText: {
+    fontSize: 13,
+  },
+  profileMemberEmptyBox: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 24,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    ...SHADOW.card,
+  },
+  profileMemberEmptyText: {
+    fontSize: 13,
+  },
+
+  // ── Past Members in Profile Modal ─────────────────────────────────────────
+  profilePastMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 8,
+    opacity: 0.65, // Reduced opacity to distinguish from active members
+    ...SHADOW.card,
+  },
+  profilePastMemberName: {
+    opacity: 0.85, // Slightly reduced opacity for the name
+  },
+
+  // ── 3-dot menu dropdown ───────────────────────────────────────────────────
+  menuBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'transparent',
+  },
+  menuCard: {
+    position: 'absolute',
+    top: 102, // Below the header (52 padding + 40 avatar + 10 spacing)
+    right: 14,
+    minWidth: 200,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+    ...SHADOW.glow,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  menuItemDanger: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(239,68,68,0.15)',
+  },
+  menuItemTextDanger: {
+    color: COLORS.missed,
+  },
+
+  // ── Search Modal ──────────────────────────────────────────────────────────
+  searchOverlay: {
+    flex: 1,
+    justifyContent: 'flex-start',
+    paddingTop: 60,
+    paddingHorizontal: 16,
+  },
+  searchBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  searchModal: {
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
+    maxHeight: '80%',
+    ...SHADOW.glow,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    margin: 16,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    padding: 0,
+    margin: 0,
+  },
+  searchResultsContainer: {
+    flex: 1,
+    maxHeight: 400,
+  },
+  searchResultsList: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 8,
+  },
+  searchEmpty: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchEmptyText: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    gap: 12,
+    ...SHADOW.card,
+  },
+  searchResultContent: {
+    flex: 1,
+    gap: 4,
+  },
+  searchResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  searchResultSender: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  searchResultTime: {
+    fontSize: 11,
+  },
+  searchResultText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  searchResultHighlight: {
+    fontWeight: '700',
+  },
+
+  // ── Block Contact in Profile Modal ────────────────────────────────────────
+  profileBlockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 8,
+    ...SHADOW.card,
+  },
+  profileBlockText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // ── Inline Confirmation Card ──────────────────────────────────────────────
+  confirmationCard: {
+    width: '100%',
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+    ...SHADOW.card,
+  },
+  confirmationIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  confirmationTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  confirmationBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  confirmationButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    marginTop: 8,
+  },
+  confirmationCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmationCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  confirmationBlockBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmationBlockText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // ── Blocked Banner ────────────────────────────────────────────────────────
+  blockedBanner: {
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+  },
+  blockedBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  blockedBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  blockedBannerSub: {
+    fontSize: 12,
+  },
+  unblockBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+  },
+  unblockBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

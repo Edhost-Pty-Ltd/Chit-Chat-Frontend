@@ -8,6 +8,7 @@ import {
   increment, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { uploadFile, generateFileName, getFileExtension } from '../config/storage';
 
 // ── Create or get existing 1-on-1 chat ───────────────────────────────────────
 export async function getOrCreateDirectChat(
@@ -357,8 +358,6 @@ export async function sendFileMessage(
   try {
     console.log('[sendFileMessage] Starting upload...');
     
-    const { uploadFile } = await import('../config/storage');
-    
     // Upload file
     const fileUrl = await uploadFile(fileUri, 'chatMedia', {
       chatId,
@@ -410,6 +409,72 @@ export async function sendFileMessage(
   } catch (err) {
     console.error('sendFileMessage error:', err);
     return { success: false, messageId: '' };
+  }
+}
+
+// ── Send number change notification to all chats ──────────────────────────────
+export async function sendNumberChangeNotification(
+  currentUserId: string,
+  oldNumber: string,
+  newNumber: string,
+  displayName: string,
+): Promise<{ success: boolean; count: number }> {
+  try {
+    console.log('[sendNumberChangeNotification] Sending to all chats...');
+    
+    // Get all chats where the user is a member
+    const chatsQuery = query(
+      collection(db, 'chats'),
+      where('members', 'array-contains', currentUserId)
+    );
+    
+    const chatsSnap = await getDocs(chatsQuery);
+    console.log(`[sendNumberChangeNotification] Found ${chatsSnap.docs.length} chats`);
+    
+    const messageText = `${displayName} changed their phone number from ${oldNumber} to ${newNumber}`;
+    
+    // Send system message to each chat
+    for (const chatDoc of chatsSnap.docs) {
+      const chatId = chatDoc.id;
+      const members: string[] = chatDoc.data().members ?? [];
+      const otherMembers = members.filter((id) => id !== currentUserId);
+      
+      const batch = writeBatch(db);
+      
+      // Add system message
+      const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+      batch.set(msgRef, {
+        messageId: msgRef.id,
+        senderId: currentUserId,
+        text: messageText,
+        type: 'system',
+        subtype: 'number-change',
+        oldNumber,
+        newNumber,
+        timestamp: serverTimestamp(),
+        readBy: [currentUserId],
+      });
+      
+      // Update chat lastMessage + increment unread for other members
+      const unreadUpdates = Object.fromEntries(
+        otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
+      );
+      
+      batch.update(doc(db, 'chats', chatId), {
+        'lastMessage.text': messageText,
+        'lastMessage.senderId': currentUserId,
+        'lastMessage.timestamp': serverTimestamp(),
+        ...unreadUpdates,
+      });
+      
+      await batch.commit();
+    }
+    
+    console.log('[sendNumberChangeNotification] Notifications sent successfully');
+    return { success: true, count: chatsSnap.docs.length };
+  } catch (err) {
+    console.error('[sendNumberChangeNotification] Error:', err);
+    return { success: false, count: 0 };
   }
 }
 

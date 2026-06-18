@@ -14,7 +14,11 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { doc, updateDoc } from 'firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
+import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
+import { sendNumberChangeNotification } from '../hooks/useChatActions';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
@@ -76,7 +80,7 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
 
 export default function ChangeNumberScreen() {
   const navigation = useNavigation<NavProp>();
-  const { phone: currentPhone, signIn } = useAuth();
+  const { phone: currentPhone, displayName, signIn } = useAuth();
   const { sendOTP, verifyOTP } = useFirebaseAuth();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
@@ -130,10 +134,31 @@ export default function ChangeNumberScreen() {
     try {
       const ok = await verifyOTP(code);
       if (ok) {
+        // Update phone number in AuthContext
         await signIn(fullNumber);
+        
+        // Update phone number in Firestore user document
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        if (currentUser) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          await updateDoc(userRef, { phone: fullNumber });
+          console.log('[ChangeNumberScreen] Updated phone number in Firestore');
+        }
+        
+        // Send number change notification to all chats
+        const { success, count } = await sendNumberChangeNotification(
+          currentUser?.uid || '',
+          currentPhone || 'unknown',
+          fullNumber,
+          displayName || 'User'
+        );
+        
+        console.log(`[ChangeNumberScreen] Sent ${count} number change notifications`);
+        
         Alert.alert(
           'Number updated ✓',
-          `Your number has been changed to ${fullNumber}.`,
+          `Your number has been changed to ${fullNumber}.\n\n${count > 0 ? `A notification has been sent to ${count} chat${count > 1 ? 's' : ''} letting your contacts know.` : 'Your contacts will see your new number.'}`,
           [{ text: 'Done', onPress: () => navigation.goBack() }],
         );
       } else {

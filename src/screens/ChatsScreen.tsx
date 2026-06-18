@@ -3,7 +3,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   TextInput, Modal, Pressable, ScrollView, Animated,
-  ActivityIndicator, Image,
+  ActivityIndicator, Image, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -50,22 +50,30 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+function formatSAPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`;
+  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 9)}`;
+}
+
 // ─── Chat Avatar ──────────────────────────────────────────────────────────────
 interface ChatAvatarProps {
   displayName: string;
   contactPhotoUri?: string;
   firebasePhotoURL?: string;
   isSavedContact?: boolean;
+  hasStatus?: boolean;
 }
 
-function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedContact }: ChatAvatarProps) {
+function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedContact, hasStatus = false }: ChatAvatarProps) {
   const color = stringToColor(displayName);
   const initials = getInitials(displayName);
   
   // Priority: 1. Contact photo, 2. Firebase photo, 3. Initials
   const photoUri = contactPhotoUri || firebasePhotoURL;
   
-  return (
+  const avatarContent = (
     <View style={[styles.avatarCircle, { backgroundColor: color }]}>
       {photoUri ? (
         <Image 
@@ -78,6 +86,20 @@ function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedCon
       )}
     </View>
   );
+
+  // If user has status, wrap in gradient ring
+  if (hasStatus) {
+    return (
+      <LinearGradient colors={[color, COLORS.blue]} style={styles.ring}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <View style={styles.ringInner}>
+          {avatarContent}
+        </View>
+      </LinearGradient>
+    );
+  }
+
+  return avatarContent;
 }
 
 // ─── Dial-pad keypad ──────────────────────────────────────────────────────────
@@ -203,34 +225,39 @@ function NewGroupSheet({
         <AppText style={styles.nameError}>{nameError}</AppText>
       ) : null}
 
-      {/* Selected contacts chips */}
+      {/* Selected avatars row */}
       {selected.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsRow}>
+        <View style={styles.selectedAvatarsRow}>
           {selected.map((userId) => {
             const c = contacts.find((x) => x.userId === userId);
             if (!c) return null;
             const color = stringToColor(c.displayName);
             return (
-              <TouchableOpacity key={userId} style={styles.chip} onPress={() => toggle(userId)}>
-                <View style={[styles.chipDot, { backgroundColor: color }]}>
-                  <Text style={styles.chipInit}>{getInitials(c.displayName)}</Text>
+              <TouchableOpacity key={userId} style={styles.selectedAvatarWrap} onPress={() => toggle(userId)}>
+                <ChatAvatar 
+                  displayName={c.displayName}
+                  contactPhotoUri={c.photoUri}
+                  firebasePhotoURL={c.firebasePhotoURL}
+                  isSavedContact={c.isSaved}
+                />
+                <View style={styles.removeBadge}>
+                  <AppIcon name="close" size={10} color="#fff" fixedColor />
                 </View>
-                <Text style={styles.chipName}>{c.displayName.split(' ')[0]}</Text>
-                <Ionicons name="close" size={13} color={COLORS.sub} />
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </View>
       )}
 
-      <Text style={styles.sectionHint}>{selected.length} / {contacts.length} selected</Text>
+      <Text style={styles.sectionHint}>{selected.length} selected — tap to add or remove</Text>
 
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
         {contacts.map((c) => {
           const sel = selected.includes(c.userId);
           return (
-            <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
+            <TouchableOpacity key={c.userId}
+              style={[styles.contactRow, sel && styles.contactRowSelected]}
+              activeOpacity={0.75}
               onPress={() => toggle(c.userId)}>
               <ChatAvatar 
                 displayName={c.displayName}
@@ -240,11 +267,13 @@ function NewGroupSheet({
               />
               <View style={styles.contactMeta}>
                 <Text style={styles.contactName}>{c.displayName}</Text>
-                <Text style={styles.contactSub} numberOfLines={1}>{c.phone}</Text>
+                <Text style={styles.contactSub} numberOfLines={1}>{formatSAPhone(c.phone)}</Text>
               </View>
-              <View style={[styles.checkbox, sel && styles.checkboxOn]}>
-                {sel && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
+              {sel && (
+                <View style={styles.selectedIndicator}>
+                  <AppIcon name="checkmark-circle" size={22} color={COLORS.blue} fixedColor />
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -272,6 +301,37 @@ function SelectContactSheet({
   hasPermission: boolean;
 }) {
   const [mode, setMode] = useState<SheetMode>('select');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const { FG } = useForeground();
+  const { textColor } = useTypography();
+
+  const searchAnim = useRef(new Animated.Value(0)).current;
+  const searchRef = useRef<TextInput>(null);
+
+  const openSearch = () => {
+    setSearchOpen(true);
+    setMenuOpen(false);
+    Animated.spring(searchAnim, { toValue: 1, useNativeDriver: false, friction: 7, tension: 60 })
+      .start(() => searchRef.current?.focus());
+  };
+
+  const closeSearch = () => {
+    setSearchQuery('');
+    Animated.spring(searchAnim, { toValue: 0, useNativeDriver: false, friction: 7, tension: 60 })
+      .start(() => setSearchOpen(false));
+  };
+
+  const refreshContacts = () => {
+    setMenuOpen(false);
+    closeSearch();
+    reloadContacts();
+  };
+
+  const filtered = searchQuery.trim()
+    ? contacts.filter((c) => c.displayName.toLowerCase().includes(searchQuery.toLowerCase()))
+    : contacts;
 
   if (mode === 'newContact') {
     return <NewContactSheet onBack={() => setMode('select')} onDone={onClose} />;
@@ -287,21 +347,74 @@ function SelectContactSheet({
         <TouchableOpacity onPress={onClose} style={styles.iconPad}>
           <AppIcon name="close" size={22} color={COLORS.sub} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.sheetTitle}>Select contact</Text>
-          <Text style={styles.sheetSub}>{contacts.length} contacts</Text>
-        </View>
+
+        {searchOpen ? (
+          <Animated.View
+            style={[
+              styles.sheetSearchBubble,
+              { backgroundColor: FG.glassBg, borderColor: FG.glassBorder },
+              {
+                opacity: searchAnim,
+                transform: [{
+                  translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }),
+                }],
+              },
+            ]}
+          >
+            <AppIcon name="search-outline" size={15} color={COLORS.sub} />
+            <TextInput
+              ref={searchRef}
+              style={[styles.sheetSearchInput, { color: textColor }]}
+              placeholder="Search contacts…"
+              placeholderTextColor={COLORS.sub}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            <TouchableOpacity onPress={closeSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <AppIcon name="close-circle" size={17} color={COLORS.sub} />
+            </TouchableOpacity>
+          </Animated.View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sheetTitle}>Select contact</Text>
+            <Text style={styles.sheetSub}>{contacts.length} contacts</Text>
+          </View>
+        )}
+
         <View style={{ flexDirection: 'row', gap: 14 }}>
-          <AppIcon name="search-outline" size={22} color={COLORS.sub} />
-          <AppIcon name="ellipsis-vertical" size={22} color={COLORS.sub} />
+          {!searchOpen && (
+            <TouchableOpacity onPress={openSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <AppIcon name="search-outline" size={22} color={COLORS.sub} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            onPress={() => setMenuOpen((v) => !v)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <AppIcon name="ellipsis-vertical" size={22} color={COLORS.sub} />
+          </TouchableOpacity>
         </View>
       </View>
+
+      {/* 3-dot dropdown — shown inline below the header */}
+      {menuOpen && (
+        <View style={[styles.sheetDropdown, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+          <TouchableOpacity
+            style={styles.sheetDropdownItem}
+            onPress={refreshContacts}
+            activeOpacity={0.75}
+          >
+            <AppIcon name="refresh-outline" size={18} color={COLORS.blue} fixedColor />
+            <AppText style={[styles.sheetDropdownTxt, { color: textColor }]}>Refresh contacts</AppText>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Action rows */}
       <View style={styles.actionBlock}>
         {[
-          { icon: 'people'     as const, label: 'New group',   onPress: () => setMode('newGroup')   },
-          { icon: 'person-add' as const, label: 'New contact', onPress: () => setMode('newContact') },
+          { icon: 'people'     as const, label: 'New group',   onPress: () => { setMenuOpen(false); setMode('newGroup');   } },
+          { icon: 'person-add' as const, label: 'New contact', onPress: () => { setMenuOpen(false); setMode('newContact'); } },
         ].map((a) => (
           <TouchableOpacity key={a.label} style={styles.actionRow} activeOpacity={0.75} onPress={a.onPress}>
             <View style={styles.actionIconWrap}>
@@ -315,7 +428,9 @@ function SelectContactSheet({
         ))}
       </View>
 
-      <AppText style={styles.sectionHint}>Contacts</AppText>
+      <AppText style={styles.sectionHint}>
+        {searchQuery.trim() ? `${filtered.length} result${filtered.length !== 1 ? 's' : ''}` : 'Contacts'}
+      </AppText>
 
       {/* Contact list */}
       {contactsLoading ? (
@@ -334,16 +449,18 @@ function SelectContactSheet({
             </LinearGradient>
           </TouchableOpacity>
         </View>
-      ) : contacts.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="people-outline" size={52} color={COLORS.sub} />
-          <Text style={styles.emptyText}>No registered contacts found</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery.trim() ? `No contacts match "${searchQuery}"` : 'No registered contacts found'}
+          </Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-          {contacts.map((c) => (
+          {filtered.map((c) => (
             <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
-              onPress={() => onNavigate(c)}>
+              onPress={() => { setMenuOpen(false); onNavigate(c); }}>
               <ChatAvatar 
                 displayName={c.displayName}
                 contactPhotoUri={c.photoUri}
@@ -352,7 +469,7 @@ function SelectContactSheet({
               />
               <View style={styles.contactMeta}>
                 <Text style={styles.contactName}>{c.displayName}</Text>
-                <Text style={styles.contactSub} numberOfLines={1}>{c.phone}</Text>
+                <Text style={styles.contactSub} numberOfLines={1}>{formatSAPhone(c.phone)}</Text>
               </View>
             </TouchableOpacity>
           ))}
@@ -547,7 +664,7 @@ export default function ChatsScreen() {
     };
 
     return (
-      <TouchableOpacity style={[styles.chatCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} activeOpacity={0.75}
+      <TouchableOpacity style={styles.chatCard} activeOpacity={0.75}
         onPress={() => navigation.navigate('Chat', { 
           chatId: item.chatId, 
           displayName, 
@@ -555,23 +672,34 @@ export default function ChatsScreen() {
           otherUserId: otherMemberId || undefined,
           otherUserPhoto: firebasePhotoURL || contactPhotoUri || null,
         })}>
-        <ChatAvatar 
-          displayName={displayName} 
-          contactPhotoUri={contactPhotoUri}
-          firebasePhotoURL={firebasePhotoURL}
-          isSavedContact={isSavedContact}
-        />
-        <View style={styles.chatMeta}>
-          <AppText style={[styles.chatName, { color: textColor, fontFamily }]} numberOfLines={1}>{displayName}</AppText>
-          {renderLastMessagePreview()}
+        {/* Avatar with status dot */}
+        <View style={styles.chatAvatarWrap}>
+          <ChatAvatar 
+            displayName={displayName} 
+            contactPhotoUri={contactPhotoUri}
+            firebasePhotoURL={firebasePhotoURL}
+            isSavedContact={isSavedContact}
+          />
+          {/* Online status dot - can be enabled when status feature is implemented */}
+          {/* {isOnline && <View style={styles.onlineDot} />} */}
         </View>
-        <View style={styles.chatRight}>
-          <AppText style={[styles.chatTime, { color: FG.secondary }]}>{formatTime(item.timestamp)}</AppText>
-          {item.unreadCount > 0 && (
-            <View style={styles.badge}>
-              <AppText fixedColor style={styles.badgeText}>{item.unreadCount}</AppText>
-            </View>
-          )}
+
+        {/* Name + preview */}
+        <View style={styles.chatMeta}>
+          <View style={styles.chatTopRow}>
+            <AppText style={[styles.chatName, { color: textColor, fontFamily }]} numberOfLines={1}>
+              {displayName}
+            </AppText>
+            <AppText style={[styles.chatTime, { color: FG.secondary }]}>{formatTime(item.timestamp)}</AppText>
+          </View>
+          <View style={styles.chatBottomRow}>
+            {renderLastMessagePreview()}
+            {item.unreadCount > 0 && (
+              <View style={styles.badge}>
+                <AppText fixedColor style={styles.badgeText}>{item.unreadCount}</AppText>
+              </View>
+            )}
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -690,8 +818,11 @@ export default function ChatsScreen() {
       )}
 
       {/* ── FAB ── */}
-      <TouchableOpacity style={styles.fab} activeOpacity={0.85}
-        onPress={() => setSheetOpen(true)}>
+      <TouchableOpacity 
+        style={[styles.fab, Platform.OS === 'web' && styles.fabWeb]} 
+        activeOpacity={0.85}
+        onPress={() => setSheetOpen(true)}
+      >
         <LinearGradient colors={GRADIENTS.primary} style={styles.fabInner}>
           <AppIcon name="add" size={28} color="#fff" fixedColor />
         </LinearGradient>
@@ -746,15 +877,14 @@ const styles = StyleSheet.create({
   },
   searchBubble: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'rgba(30,156,240,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 3 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 3,
+    borderColor: 'rgba(30,156,240,0.18)',
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 2,
     borderRadius: RADIUS.full,
     paddingHorizontal: 14, height: 42,
     overflow: 'hidden',
@@ -782,14 +912,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22, 
     paddingVertical: 9, 
     borderRadius: RADIUS.full, 
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'rgba(30,156,240,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 3 },
-    shadowOpacity: 0.14,
-    shadowRadius: 7,
+    borderColor: 'rgba(30,156,240,0.18)',
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 5,
     elevation: 2,
   },
   tabLabel:        { fontSize: 14, fontWeight: '600', color: COLORS.sub },
@@ -811,17 +940,30 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 4,
   },
-  chatMeta:    { flex: 1, gap: 4 },
-  chatName:    { fontSize: 14, fontWeight: '700', color: COLORS.text },
-  chatPreview: { fontSize: 12, color: COLORS.sub, lineHeight: 18 },
-  voiceNotePreview: { flexDirection: 'row', alignItems: 'center' },
-  chatRight:   { alignItems: 'flex-end', gap: 6, minWidth: 50 },
-  chatTime:    { fontSize: 11, color: COLORS.sub },
-  badge:       { width: 20, height: 20, borderRadius: 10, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center' },
-  badgeText:   { color: '#fff', fontSize: 11, fontWeight: '700' },
+  // Avatar wrapper — relative for status dot
+  chatAvatarWrap: { position: 'relative', width: 52, height: 52 },
+  // Status dot absolute-positioned bottom-right of avatar
+  onlineDot: {
+    position: 'absolute', bottom: 1, right: 1,
+    width: 13, height: 13, borderRadius: 7,
+    backgroundColor: '#22c55e',
+    borderWidth: 2, borderColor: 'rgba(180,225,245,0.22)',
+  },
+  awayDot: { backgroundColor: '#f59e0b' },
+
+  chatMeta:       { flex: 1, gap: 4 },
+  chatTopRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  chatBottomRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  chatName:       { flex: 1, fontSize: 14, fontWeight: '700', color: COLORS.text },
+  chatPreview:    { flex: 1, fontSize: 12, color: COLORS.sub, lineHeight: 17 },
+  voiceNotePreview: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  chatTime:       { fontSize: 11, color: COLORS.sub, flexShrink: 0 },
+  badge:          { width: 20, height: 20, borderRadius: 10, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  badgeText:      { color: '#fff', fontSize: 11, fontWeight: '700' },
 
   // ── FAB ──────────────────────────────────────────────────────────────────
-  fab:      { position: 'absolute', right: 20, bottom: 90, width: 56, height: 56, borderRadius: 28, ...SHADOW.glow },
+  fab:      { position: 'absolute', right: 20, bottom: 130, width: 56, height: 56, borderRadius: 28, ...SHADOW.glow },
+  fabWeb:   { right: 16, bottom: 120 },
   fabInner: { flex: 1, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
 
   // ── Bottom sheet ──────────────────────────────────────────────────────────
@@ -1032,4 +1174,56 @@ const styles = StyleSheet.create({
   // Empty state
   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
   emptyText: { fontSize: 15, color: COLORS.sub },
+
+  // Status ring (for future stories feature)
+  ring: {
+    width: 54, height: 54, borderRadius: 27,
+    padding: 2, alignItems: 'center', justifyContent: 'center',
+  },
+  ringInner: {
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: '#fff', overflow: 'hidden',
+  },
+
+  // Dropdown menu
+  sheetDropdown: {
+    marginHorizontal: 14, marginTop: 4, marginBottom: 10,
+    borderRadius: RADIUS.lg, borderWidth: 1,
+    overflow: 'hidden',
+  },
+  sheetDropdownItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+  },
+  sheetDropdownTxt: { fontSize: 14, fontWeight: '600' },
+
+  // Sheet search bubble
+  sheetSearchBubble: {
+    flex: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    borderRadius: RADIUS.full, borderWidth: 1,
+    paddingHorizontal: 14, height: 42,
+    overflow: 'hidden',
+  },
+  sheetSearchInput: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0 },
+
+  // Selected avatars row
+  selectedAvatarsRow: {
+    flexDirection: 'row', paddingHorizontal: 14,
+    paddingBottom: 10, gap: 12, flexWrap: 'wrap',
+  },
+  selectedAvatarWrap: { position: 'relative' },
+  removeBadge: {
+    position: 'absolute', top: -2, right: -2,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: COLORS.missed,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Selected contact state
+  contactRowSelected: {
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    borderColor: 'rgba(30,156,240,0.30)',
+  },
+  selectedIndicator: { marginLeft: 8 },
 });

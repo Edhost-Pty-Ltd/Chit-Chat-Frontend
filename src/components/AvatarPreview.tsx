@@ -10,7 +10,8 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { COLORS, RADIUS } from '../types/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { COLORS, RADIUS, GRADIENTS } from '../types/theme';
 import { getInitials, getAvatarColor } from '../utils/avatarUtils';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -46,12 +47,17 @@ export function AvatarPreview({
       );
     }
 
-    // No image → initials or fallback
+    // No image → initials with blue gradient background
     const initials = getInitials(username);
-    const backgroundColor = getAvatarColor(username);
 
     return (
-      <View style={[styles.initialsCircle, circleStyle, { backgroundColor }]}>
+      <View style={[styles.initialsCircle, circleStyle]}>
+        <LinearGradient 
+          colors={GRADIENTS.primary}
+          style={[StyleSheet.absoluteFill, { borderRadius: size / 2 }]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        />
         <Text style={[styles.initialsText, { fontSize: Math.round(size * 0.4) }]}>
           {initials}
         </Text>
