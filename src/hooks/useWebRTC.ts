@@ -9,7 +9,7 @@ import {
   RTCIceCandidate,
   mediaDevices,
   MediaStream,
-} from 'react-native-webrtc';
+} from '../utils/webrtc-platform';
 
 // Public STUN servers (Google)
 const ICE_SERVERS = {

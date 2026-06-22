@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { Platform, Alert } from 'react-native';
-import { mediaDevices } from 'react-native-webrtc';
+import { mediaDevices } from '../utils/webrtc-platform';
 
 export function useAudioRouting() {
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);

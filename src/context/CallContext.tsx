@@ -4,7 +4,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import type { CallState, IncomingCallData, CallStatus } from '../types/call';
 import { useWebRTC, type NetworkQuality, type WebRTCHandlers } from '../hooks/useWebRTC';
-import type { MediaStream } from 'react-native-webrtc';
+import type { MediaStream } from '../utils/webrtc-platform';
 import { SignalingService } from '../services/signalingService';
 
 interface CallContextValue extends CallState {
@@ -27,7 +27,7 @@ interface CallContextValue extends CallState {
   networkQuality: NetworkQuality;
 
   // WebRTC instance methods
-  initializePeerConnection: (isVideo: boolean) => Promise<import('react-native-webrtc').RTCPeerConnection>;
+  initializePeerConnection: (isVideo: boolean) => Promise<import('../utils/webrtc-platform').RTCPeerConnectionType>;
   createOffer: (isVideo: boolean) => Promise<RTCSessionDescriptionInit>;
   createAnswer: (offer: RTCSessionDescriptionInit) => Promise<RTCSessionDescriptionInit>;
   setRemoteAnswer: (answer: RTCSessionDescriptionInit) => Promise<void>;
