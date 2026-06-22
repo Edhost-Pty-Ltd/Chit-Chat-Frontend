@@ -101,6 +101,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Hydrate on mount ──────────────────────────────────────────────────────
 
   useEffect(() => {
+    // Set a maximum loading timeout to prevent infinite loading
+    const maxLoadingTimeout = setTimeout(() => {
+      console.warn('[AuthContext] Maximum loading time reached, forcing app to open');
+      setLoading(false);
+    }, 5000); // 5 seconds max loading time
+
     (async () => {
       try {
         const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar] = await Promise.all([
@@ -181,12 +187,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
       document.addEventListener('visibilitychange', handleVisibilityChange);
       return () => {
+        clearTimeout(maxLoadingTimeout);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         unsubscribe();
       };
     }
     
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(maxLoadingTimeout);
+      unsubscribe();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Public API ────────────────────────────────────────────────────────────

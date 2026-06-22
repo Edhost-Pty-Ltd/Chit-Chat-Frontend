@@ -65,7 +65,7 @@ export default function AppNavigator() {
       
       // Attempt to get document with timeout handling
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 30000) // 30 second timeout
+        setTimeout(() => reject(new Error('Timeout')), 10000) // Reduced to 10 seconds
       );
       
       const userDoc = await Promise.race([
@@ -79,16 +79,16 @@ export default function AppNavigator() {
     } catch (error: any) {
       console.error('[AppNavigator] Profile check failed:', error);
       
-      // If it's an offline error, allow user to continue (assume profile exists)
+      // If it's an offline error or timeout, allow user to continue (assume profile exists)
       // This prevents blocking the app when there's no internet
       if (error?.code === 'unavailable' || error?.message?.includes('offline') || error?.message === 'Timeout') {
-        console.warn('[AppNavigator] Network unavailable, assuming profile exists');
+        console.warn('[AppNavigator] Network unavailable or timeout, assuming profile exists');
         setProfileExists(true); // Optimistic: assume profile exists
       } else {
         setProfileCheckError(true);
       }
     }
-  }, []);
+  }, []); // Empty deps - function doesn't depend on any external state
 
   // Check profile existence when user is authenticated
   useEffect(() => {
@@ -105,7 +105,8 @@ export default function AppNavigator() {
       setProfileExists(null);
       setProfileCheckError(false);
     }
-  }, [isSignedIn, loading, checkProfileExists]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, loading]); // Removed checkProfileExists from deps to prevent re-runs
 
   // If user is authenticated but has no profile, sign them out
   // This forces them to go through the proper SignIn → CreateAccount flow
