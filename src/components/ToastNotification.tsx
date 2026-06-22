@@ -13,7 +13,6 @@ import { AppText, AppIcon, useForeground } from '../context/ThemeContext';
 import { useNotifications, AppNotification } from '../context/NotificationContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList } from '../types';
-import { CONTACTS } from '../data/mockData';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -72,10 +71,8 @@ function ToastBanner({ notif }: { notif: AppNotification }) {
   const handleTap = () => {
     markRead(notif.id);
     dismiss();
-    // Navigate to the relevant screen
     if (notif.contactId != null) {
-      const contact = CONTACTS.find((c) => c.id === notif.contactId);
-      if (contact) navigation.navigate('Chat', { contact });
+      navigation.navigate('Chats');
     }
   };
 

@@ -148,6 +148,6 @@ const styles = StyleSheet.create({
   },
   dot: {
     width: 6, height: 6, borderRadius: 3,
-    backgroundColor: 'rgba(30,100,200,0.35)',
+    backgroundColor: 'rgba(30,156,240,0.35)',
   },
 });

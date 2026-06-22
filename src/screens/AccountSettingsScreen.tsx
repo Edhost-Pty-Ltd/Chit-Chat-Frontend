@@ -1,6 +1,7 @@
 // ─── Screen: Account Settings ────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Switch, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,6 +11,8 @@ import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'AccountSettings'>;
+
+const BIOMETRIC_KEY = 'auth_biometric_enabled';
 
 type RowProps = {
   icon: string; label: string; sub?: string;
@@ -44,22 +47,24 @@ export default function AccountSettingsScreen() {
   const navigation = useNavigation<NavProp>();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
-  const { phone, displayName, signOut, biometricEnabled, setBiometricEnabled } = useAuth();
+  const { phone, displayName, signOut } = useAuth();
 
-  const [twoFA,        setTwoFA]        = useState(true);
-  const [bioLoading,   setBioLoading]   = useState(false);
+  const [twoFA,            setTwoFA]            = useState(true);
+  const [bioLoading,       setBioLoading]       = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(BIOMETRIC_KEY).then((v) => setBiometricEnabled(v === 'true'));
+  }, []);
 
   const handleBiometricToggle = async (enabled: boolean) => {
     if (bioLoading) return;
     setBioLoading(true);
     try {
-      const result = await setBiometricEnabled(enabled);
-      if (!result.success && result.message) {
-        Alert.alert(
-          enabled ? 'Cannot Enable Biometrics' : 'Cannot Disable Biometrics',
-          result.message,
-        );
-      }
+      await AsyncStorage.setItem(BIOMETRIC_KEY, enabled ? 'true' : 'false');
+      setBiometricEnabled(enabled);
+    } catch {
+      Alert.alert('Error', 'Could not update biometric preference.');
     } finally {
       setBioLoading(false);
     }

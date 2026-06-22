@@ -1,275 +1,369 @@
 ﻿// ─── Screen: Contacts ────────────────────────────────────────────────────────
-import React, { useState, useRef } from 'react';
-import {
-  View, FlatList, TouchableOpacity, StyleSheet, TextInput,
-  Modal, Animated, Platform,
-} from 'react-native';
+import React, { useState } from 'react';
+import { View, FlatList, TouchableOpacity, StyleSheet, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '../components';
-import { CONTACTS } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
-import { Contact, RootStackParamList } from '../types';
+import { RootStackParamList } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
-import { useContacts } from '../context/ContactsContext';
+import { useContacts, AppContact } from '../hooks/useContacts';
+import { useAuth } from '../hooks/useAuth';
+import { useOutgoingCall } from '../hooks/useOutgoingCall';
+import { useCallContext } from '../context/CallContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Contacts'>;
 
+// Helper to get initials from display name
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+// Helper to get avatar color based on userId
+function getAvatarColor(userId: string): string {
+  const colors = [COLORS.blue, COLORS.blueDark, COLORS.green, COLORS.amber, COLORS.missed];
+  const index = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+  return colors[index];
+}
+
 export default function ContactsScreen() {
   const navigation = useNavigation<NavProp>();
-  const { FG }     = useForeground();
-  const { fontFamily, textColor, iconColor } = useTypography();
-  const { contacts, addContact } = useContacts();
+  const { user } = useAuth();
+  const { contacts, loading, error, hasPermission } = useContacts();
+  const outgoingCall = useOutgoingCall();
+  
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
+  
+  const [query, setQuery] = useState('');
+  const [calling, setCalling] = useState(false);
+  const [callingContactId, setCallingContactId] = useState<string | null>(null);
 
-  const [query,       setQuery]       = useState('');
-  const [searchOpen,  setSearchOpen]  = useState(false);
-  const [menuOpen,    setMenuOpen]    = useState(false);
-  const [refreshKey,  setRefreshKey]  = useState(0); // bump to force list re-render
-
-  const searchAnim = useRef(new Animated.Value(0)).current;
-  const searchRef  = useRef<TextInput>(null);
-
-  // ── Search toggle ──────────────────────────────────────────────────────────
-  const openSearch = () => {
-    setSearchOpen(true);
-    Animated.spring(searchAnim, { toValue: 1, useNativeDriver: false, friction: 7, tension: 60 })
-      .start(() => searchRef.current?.focus());
-  };
-
-  const closeSearch = () => {
-    setQuery('');
-    Animated.spring(searchAnim, { toValue: 0, useNativeDriver: false, friction: 7, tension: 60 })
-      .start(() => setSearchOpen(false));
-  };
-
-  // ── Refresh — resets to initial contacts list ─────────────────────────────
-  const handleRefresh = () => {
-    setMenuOpen(false);
-    closeSearch();
-    setRefreshKey((k) => k + 1); // causes FlatList to remount with fresh data
-  };
-
+  // Filter contacts based on search query
   const data = query.trim()
-    ? contacts.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
+    ? contacts.filter((c) => 
+        c.displayName.toLowerCase().includes(query.toLowerCase()) ||
+        c.phone.includes(query)
+      )
     : contacts;
 
-  // ── Contact row ────────────────────────────────────────────────────────────
-  const renderItem = ({ item }: { item: Contact }) => (
-    <TouchableOpacity
-      style={[styles.contactCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
-      activeOpacity={0.75}
-      onPress={() => navigation.navigate('Chat', { contact: item })}
-    >
-      <Avatar initials={item.avatar} color={item.color} size={48} status={item.status} />
-      <View style={styles.contactMeta}>
-        <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{item.name}</AppText>
-        <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>
-          {item.status === 'online' ? 'Online' : item.lastMsg}
-        </AppText>
-      </View>
+  // Handle call button press
+  const handleCall = async (contact: AppContact) => {
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in to make calls');
+      return;
+    }
+
+    if (!contact.isSaved) {
+      Alert.alert(
+        'Contact Not on Chit-Chat',
+        `${contact.displayName} is not registered on Chit-Chat yet.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setCalling(true);
+    setCallingContactId(contact.userId);
+
+    try {
+      console.log('[ContactsScreen] Initiating call to:', contact.displayName);
+      
+      const callId = await outgoingCall.initiateCall(
+        user.uid,
+        contact.userId,
+        {
+          userId: user.uid,
+          displayName: user.displayName || 'You',
+          photoUrl: user.photoURL,
+        },
+        {
+          userId: contact.userId,
+          displayName: contact.displayName,
+          photoUrl: contact.firebasePhotoURL || null,
+        }
+      );
+
+      if (callId) {
+        // Navigate to call screen
+        navigation.navigate('AudioCall', {
+          callId,
+          isOutgoing: true,
+          otherParty: {
+            userId: contact.userId,
+            displayName: contact.displayName,
+            photoUrl: contact.firebasePhotoURL || null,
+          },
+        });
+      } else {
+        Alert.alert('Call Failed', 'Unable to initiate call');
+      }
+    } catch (err) {
+      console.error('[ContactsScreen] Call failed:', err);
+      Alert.alert('Call Failed', 'Unable to start call. Please try again.');
+    } finally {
+      setCalling(false);
+      setCallingContactId(null);
+    }
+  };
+
+  // Handle chat navigation
+  const handleChat = (contact: AppContact) => {
+    // For now, contacts must be on the app to chat
+    if (!contact.isSaved) {
+      Alert.alert(
+        'Contact Not Available',
+        `${contact.displayName} is not on Chit-Chat yet.`
+      );
+      return;
+    }
+
+    // Navigate to chat (implementation depends on your chat system)
+    // You might need to create or find an existing chat first
+    Alert.alert('Chat', `Opening chat with ${contact.displayName}`);
+  };
+
+  const renderItem = ({ item }: { item: AppContact }) => {
+    const isCurrentlyCalling = calling && callingContactId === item.userId;
+    const canCall = item.isSaved; // Only registered users can be called
+
+    return (
       <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={() => navigation.navigate('AudioCall', { contact: item })}
+        style={styles.contactCard}
+        activeOpacity={0.75}
+        onPress={() => handleChat(item)}
+        disabled={!canCall}
       >
-        <LinearGradient colors={GRADIENTS.primary} style={styles.callBtn}>
-          <AppIcon name="call" size={15} color="#fff" fixedColor />
-        </LinearGradient>
+        <Avatar 
+          initials={getInitials(item.displayName)} 
+          color={getAvatarColor(item.userId)} 
+          size={48} 
+        />
+        <View style={styles.contactMeta}>
+          <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>
+            {item.displayName}
+          </AppText>
+          <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>
+            {canCall ? 'On Chit-Chat' : 'Not on Chit-Chat'}
+          </AppText>
+        </View>
+        
+        {/* Call button - only enabled for registered users */}
+        {canCall ? (
+          <TouchableOpacity 
+            activeOpacity={0.85}
+            onPress={() => handleCall(item)}
+            disabled={calling}
+          >
+            {isCurrentlyCalling ? (
+              <View style={styles.callBtn}>
+                <ActivityIndicator size="small" color="#fff" />
+              </View>
+            ) : (
+              <LinearGradient colors={GRADIENTS.primary} style={styles.callBtn}>
+                <AppIcon name="call" size={15} color="#fff" fixedColor />
+              </LinearGradient>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.callBtnDisabled}>
+            <AppIcon name="call" size={15} color={COLORS.sub} />
+          </View>
+        )}
       </TouchableOpacity>
-    </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <View style={styles.root}>
       <AppBg />
 
-      {/* ── Header ── */}
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
-        {/* Title or animated search bar */}
-        {!searchOpen && (
-          <AppText style={[styles.title, { color: textColor, fontFamily }]}>Contacts</AppText>
-        )}
-
-        {searchOpen && (
-          <Animated.View
-            style={[
-              styles.searchBubble,
-              { backgroundColor: FG.glassBg, borderColor: FG.glassBorder },
-              {
-                opacity: searchAnim,
-                transform: [{
-                  translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }),
-                }],
-              },
-            ]}
-          >
-            <AppIcon name="search-outline" size={15} color={COLORS.sub} />
-            <TextInput
-              ref={searchRef}
-              style={[styles.searchInput, { color: textColor }]}
-              placeholder="Search contacts"
-              placeholderTextColor={COLORS.sub}
-              value={query}
-              onChangeText={setQuery}
-            />
-            <TouchableOpacity onPress={closeSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <AppIcon name="close-circle" size={18} color={COLORS.sub} />
-            </TouchableOpacity>
-          </Animated.View>
-        )}
-
-        {/* Right icons: search + 3-dot */}
-        <View style={styles.headerIcons}>
-          {!searchOpen && (
-            <TouchableOpacity
-              style={[styles.iconBtn, { borderColor: `${iconColor}40`, backgroundColor: FG.glassBg }]}
-              onPress={openSearch}
-              activeOpacity={0.8}
-            >
-              <AppIcon name="search-outline" size={20} color={COLORS.blue} fixedColor />
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.iconBtn, { borderColor: `${iconColor}40`, backgroundColor: FG.glassBg }]}
-            onPress={() => setMenuOpen(true)}
-            activeOpacity={0.8}
-          >
-            <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} fixedColor />
-          </TouchableOpacity>
-        </View>
+      <View style={styles.header}>
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Contacts</AppText>
+        <TouchableOpacity activeOpacity={0.85}>
+          <LinearGradient colors={GRADIENTS.primary} style={styles.addBtn}>
+            <AppIcon name="add" size={20} color="#fff" fixedColor />
+          </LinearGradient>
+        </TouchableOpacity>
       </View>
 
-      {/* ── Contact list ── */}
-      <FlatList
-        key={refreshKey}
-        data={data}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderItem}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        ListHeaderComponent={
-          <AppText style={[styles.countLabel, { color: FG.secondary }]}>
-            {data.length} contact{data.length !== 1 ? 's' : ''}
-          </AppText>
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <AppIcon name="people-outline" size={48} color={FG.secondary} />
-            <AppText style={[styles.emptyText, { color: FG.secondary }]}>
-              {query ? 'No contacts match your search' : 'No contacts yet'}
-            </AppText>
-          </View>
-        }
-      />
-
-      {/* ── 3-dot dropdown menu ── */}
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuOpen(false)}
-      >
-        <TouchableOpacity
-          style={styles.menuOverlay}
-          activeOpacity={1}
-          onPress={() => setMenuOpen(false)}
+      {/* Glass search bar */}
+      <View style={styles.searchWrap}>
+        <AppIcon name="search-outline" size={16} color={COLORS.sub} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search contacts"
+          placeholderTextColor={COLORS.sub}
+          value={query}
+          onChangeText={setQuery}
+          editable={!loading}
         />
-        <View style={[styles.menuCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
-          <AppBg />
-          {[
-            {
-              icon: 'refresh-outline' as const,
-              label: 'Refresh Contact List',
-              onPress: handleRefresh,
-            },
-            {
-              icon: 'person-add-outline' as const,
-              label: 'New Contact',
-              onPress: () => {
-                setMenuOpen(false);
-                navigation.navigate('Chats' as any); // opens ChatsScreen where new contact is created
-              },
-            },
-          ].map((item, idx, arr) => (
-            <TouchableOpacity
-              key={item.label}
-              style={[
-                styles.menuItem,
-                idx < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: FG.glassBorder },
-              ]}
-              onPress={item.onPress}
-              activeOpacity={0.75}
-            >
-              <AppIcon name={item.icon} size={18} color={COLORS.blue} fixedColor />
-              <AppText style={[styles.menuItemTxt, { color: textColor, fontFamily }]}>
-                {item.label}
-              </AppText>
-            </TouchableOpacity>
-          ))}
+      </View>
+
+      {/* Loading state */}
+      {loading ? (
+        <View style={styles.centerWrap}>
+          <ActivityIndicator size="large" color={COLORS.blue} />
+          <AppText style={styles.centerText}>Loading contacts...</AppText>
         </View>
-      </Modal>
+      ) : error ? (
+        <View style={styles.centerWrap}>
+          <AppIcon name="alert-circle-outline" size={48} color={COLORS.missed} />
+          <AppText style={styles.centerText}>Failed to load contacts</AppText>
+          <AppText style={styles.errorText}>{error}</AppText>
+        </View>
+      ) : !hasPermission ? (
+        <View style={styles.centerWrap}>
+          <AppIcon name="lock-closed-outline" size={48} color={COLORS.sub} />
+          <AppText style={styles.centerText}>Contacts Permission Required</AppText>
+          <AppText style={styles.hintText}>
+            Please allow contacts access in your device settings
+          </AppText>
+        </View>
+      ) : (
+        <FlatList
+          data={data}
+          keyExtractor={(item) => item.userId}
+          renderItem={renderItem}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <AppIcon name="people-outline" size={48} color={COLORS.sub} />
+              <AppText style={styles.emptyText}>No contacts found</AppText>
+              {query.trim() && (
+                <AppText style={styles.hintText}>Try a different search</AppText>
+              )}
+            </View>
+          }
+          ListHeaderComponent={
+            contacts.length > 0 ? (
+              <View style={styles.headerInfo}>
+                <AppText style={styles.headerInfoText}>
+                  {contacts.filter(c => c.isSaved).length} of {contacts.length} on Chit-Chat
+                </AppText>
+              </View>
+            ) : null
+          }
+        />
+      )}
+
+      {/* Calling overlay */}
+      {calling && (
+        <View style={styles.callingOverlay}>
+          <ActivityIndicator size="large" color="#fff" />
+          <AppText fixedColor style={styles.callingText}>Starting call...</AppText>
+        </View>
+      )}
     </View>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, backgroundColor: COLORS.sky1 },
 
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingTop: Platform.OS === 'web' ? 20 : 56,
-    paddingBottom: 12, paddingHorizontal: 14,
-    borderBottomWidth: 1, gap: 8,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 10,
   },
-  title:       { flex: 1, fontSize: 24, fontWeight: '800' },
-  headerIcons: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  iconBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    borderWidth: 1, alignItems: 'center', justifyContent: 'center',
+  title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
+  addBtn: { 
+    width: 34, 
+    height: 34, 
+    borderRadius: RADIUS.sm, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    ...SHADOW.button,
   },
 
-  // Animated search bubble — fills the header
-  searchBubble: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderRadius: RADIUS.full, borderWidth: 1,
-    paddingHorizontal: 14, height: 42,
-    overflow: 'hidden',
+  searchWrap: {
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8,
+    marginHorizontal: 14, 
+    marginBottom: 10,
+    backgroundColor: 'rgba(30,156,240,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 14, 
+    paddingVertical: 10,
   },
   searchInput: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0 },
 
-  listContent: { paddingHorizontal: 14, paddingBottom: 32, paddingTop: 8 },
-  countLabel:  { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, marginBottom: 10, paddingHorizontal: 2 },
+  headerInfo: {
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  headerInfoText: {
+    fontSize: 12,
+    color: COLORS.sub,
+    fontWeight: '600',
+  },
 
+  listContent: { paddingHorizontal: 14, paddingBottom: 20 },
+
+  // Glass card per contact with blue-tinted glassmorphism
   contactCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderRadius: RADIUS.lg, borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 13, ...SHADOW.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    shadowColor: '#0e6ea8',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
   },
   contactMeta: { flex: 1 },
-  contactName: { fontSize: 14, fontWeight: '700' },
-  contactSub:  { fontSize: 12, marginTop: 3 },
-  callBtn:     { width: 34, height: 34, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
+  contactName: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  contactSub:  { fontSize: 12, color: COLORS.sub, marginTop: 3 },
+  callBtn: { 
+    width: 34, 
+    height: 34, 
+    borderRadius: RADIUS.sm, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    shadowColor: '#1E9CF0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.40,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  callBtnDisabled: { 
+    width: 34, 
+    height: 34, 
+    borderRadius: RADIUS.sm, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    backgroundColor: 'rgba(30,156,240,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.15)',
+  },
+
+  centerWrap: { alignItems: 'center', paddingTop: 80, gap: 12, paddingHorizontal: 40 },
+  centerText: { fontSize: 15, color: COLORS.sub, fontWeight: '600', textAlign: 'center' },
+  errorText:  { fontSize: 13, color: COLORS.missed, textAlign: 'center' },
+  hintText:   { fontSize: 13, color: COLORS.sub, textAlign: 'center' },
 
   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyText: { fontSize: 15 },
+  emptyText: { fontSize: 15, color: COLORS.sub, fontWeight: '600' },
 
-  // 3-dot dropdown
-  menuOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'transparent' },
-  menuCard: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 100 : 78,
-    right: 12,
-    minWidth: 220,
-    borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    overflow: 'hidden',
-    ...SHADOW.glow,
+  callingOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
   },
-  menuItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingVertical: 14,
-  },
-  menuItemTxt: { fontSize: 14, fontWeight: '500' },
+  callingText: { fontSize: 16, color: '#fff', fontWeight: '600' },
 });

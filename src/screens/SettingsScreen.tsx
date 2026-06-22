@@ -1,6 +1,6 @@
 ﻿// ─── Screen: Settings ────────────────────────────────────────────────────────
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, ScrollView, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme } from '../context/ThemeContext';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
 
 const SETTINGS_SECTIONS: {
   label?: string;
@@ -20,8 +21,9 @@ const SETTINGS_SECTIONS: {
   {
     label: 'APPS',
     items: [
-      { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar' },
-      { id: 'notes',    icon: 'document-text-outline', label: 'Notes'    },
+      { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar'     },
+      { id: 'notes',    icon: 'document-text-outline', label: 'Notes'        },
+      { id: 'backup',   icon: 'cloud-upload-outline',  label: 'Cloud Backup' },
     ],
   },
   {
@@ -34,8 +36,9 @@ const SETTINGS_SECTIONS: {
   },
   {
     items: [
-      { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices' },
-      { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'     },
+      { id: 'storage',    icon: 'server-outline',         label: 'Data and Storage' },
+      { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices'  },
+      { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'      },
     ],
   },
   {
@@ -56,10 +59,11 @@ export default function SettingsScreen() {
   const { fontFamily, textColor, iconColor } = useTypography();
 
   const handleItem = (id: string) => {
-    if (id === 'signout')       { signOut(); return; }
-    if (id === 'calendar')      navigation.navigate('Calendar');
-    if (id === 'notes')         navigation.navigate('Notes');
-    if (id === 'appearance')    navigation.navigate('Appearance');
+    if (id === 'signout')    { signOut(); return; }
+    if (id === 'backup')     navigation.navigate('CloudBackup');
+    if (id === 'calendar')   navigation.navigate('Calendar');
+    if (id === 'notes')      navigation.navigate('Notes');
+    if (id === 'appearance') navigation.navigate('Appearance');
     if (id === 'account')       navigation.navigate('AccountSettings');
     if (id === 'privacy')       navigation.navigate('PrivacySettings');
     if (id === 'notifications') navigation.navigate('NotificationSettings');
@@ -70,7 +74,7 @@ export default function SettingsScreen() {
     <View style={styles.root}>
       <AppBg />
 
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1 }]}>
+      <View style={styles.header}>
         <AppText style={[styles.title, { color: textColor, fontFamily }]}>Settings</AppText>
       </View>
 
@@ -78,7 +82,7 @@ export default function SettingsScreen() {
 
         {/* Profile — glass card — tap to open profile */}
         <TouchableOpacity
-          style={[styles.profileCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+          style={styles.profileCard}
           activeOpacity={0.8}
           onPress={() => navigation.navigate('Profile')}
         >
@@ -95,7 +99,7 @@ export default function SettingsScreen() {
             {section.items.map((item) => (
               <TouchableOpacity
                 key={item.id}
-                style={[styles.settingsCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                style={styles.settingsCard}
                 activeOpacity={0.75}
                 onPress={() => handleItem(item.id)}
               >
@@ -125,18 +129,24 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  header: { paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14 },
+  header: { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14 },
   title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
 
   scroll: { paddingHorizontal: 14, paddingBottom: 20, gap: 6 },
 
-  // Profile card
+  // Profile card — blue-tinted glassmorphism
   profileCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 14,
-    ...SHADOW.card, marginBottom: 10,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    ...SHADOW.card,
+    marginBottom: 10,
   },
   profileText: { flex: 1 },
   profileName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
@@ -145,10 +155,15 @@ const styles = StyleSheet.create({
   section:      { gap: 8, marginBottom: 4 },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: COLORS.sub, letterSpacing: 1.2, paddingHorizontal: 4, paddingBottom: 2 },
 
-  // Each settings row = same style as profile card
+  // Each settings row — blue-tinted glassmorphism
   settingsCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 14,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
     ...SHADOW.card,
   },
   iconBoxDanger: {}, // kept for legacy reference — glass tile handles danger styling via fixedColor

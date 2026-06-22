@@ -7,6 +7,10 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import { doc, updateDoc } from 'firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
+import { db } from '../config/firebase';
+import { uploadFile, generateFileName } from '../config/storage';
 import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
@@ -26,7 +30,28 @@ export default function ProfileScreen() {
   // ── Save name ─────────────────────────────────────────────────────────────
   const saveName = async () => {
     const trimmed = draftName.trim();
-    if (trimmed) await setDisplayName(trimmed);
+    if (!trimmed) {
+      setEditingName(false);
+      return;
+    }
+    
+    try {
+      // Save to AsyncStorage via context
+      await setDisplayName(trimmed);
+      
+      // Also save to Firestore so other users can see the updated name
+      const authInstance = getAuth();
+      const currentUser = authInstance.currentUser;
+      if (currentUser) {
+        const userRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userRef, { displayName: trimmed });
+        console.log('[ProfileScreen] Updated displayName in Firestore:', trimmed);
+      }
+    } catch (error) {
+      console.error('[ProfileScreen] Error saving displayName:', error);
+      Alert.alert('Error', 'Failed to save display name. Please try again.');
+    }
+    
     setEditingName(false);
   };
 
@@ -40,13 +65,50 @@ export default function ProfileScreen() {
       }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'] as any,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.85,
     });
+    
     if (!result.canceled && result.assets[0]) {
-      await setAvatarUri(result.assets[0].uri);
+      const uri = result.assets[0].uri;
+      
+      try {
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        
+        if (!currentUser) {
+          Alert.alert('Error', 'Not signed in');
+          return;
+        }
+        
+        // Upload to Firebase Storage first
+        console.log('[ProfileScreen] Uploading profile picture to Firebase Storage...');
+        
+        const fileName = generateFileName('jpg');
+        const downloadURL = await uploadFile(uri, 'avatar', {
+          userId: currentUser.uid,
+          fileName,
+        }, (progress) => {
+          console.log(`[ProfileScreen] Upload progress: ${progress}%`);
+        });
+        
+        console.log('[ProfileScreen] Upload complete, download URL:', downloadURL);
+        
+        // Save local URI to AsyncStorage for immediate UI update
+        await setAvatarUri(uri);
+        
+        // Save download URL to Firestore so other users can access it
+        const userRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userRef, { photoURL: downloadURL });
+        console.log('[ProfileScreen] Updated photoURL in Firestore');
+        
+        Alert.alert('Success', 'Profile picture updated successfully');
+      } catch (error: any) {
+        console.error('[ProfileScreen] Error saving avatar:', error);
+        Alert.alert('Error', `Failed to save profile picture: ${error.message}`);
+      }
     }
   };
 
@@ -57,7 +119,7 @@ export default function ProfileScreen() {
       <AppBg />
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <AppIcon glass tileSize={36} name="chevron-back" size={20} />
         </TouchableOpacity>
@@ -81,7 +143,7 @@ export default function ProfileScreen() {
                 <AppText fixedColor style={styles.avatarInitials}>{initials}</AppText>
               </LinearGradient>
             )}
-            <View style={[styles.cameraBadge, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+            <View style={styles.cameraBadge}>
               <AppIcon name="camera" size={16} fixedColor color={COLORS.blue} />
             </View>
           </TouchableOpacity>
@@ -95,7 +157,7 @@ export default function ProfileScreen() {
 
           {/* Name — tap anywhere on the card to edit */}
           <TouchableOpacity
-            style={[styles.infoCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            style={styles.infoCard}
             activeOpacity={0.8}
             onPress={() => {
               setDraftName(shownName);
@@ -109,7 +171,7 @@ export default function ProfileScreen() {
               {editingName ? (
                 <TextInput
                   ref={nameInputRef}
-                  style={[styles.infoInput, { color: textColor, fontFamily, borderBottomColor: COLORS.blue }]}
+                  style={[styles.infoInput, { color: textColor, fontFamily }]}
                   value={draftName}
                   onChangeText={setDraftName}
                   returnKeyType="done"
@@ -133,7 +195,7 @@ export default function ProfileScreen() {
 
           {/* Phone — tap to go directly to Change Number */}
           <TouchableOpacity
-            style={[styles.infoCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            style={styles.infoCard}
             activeOpacity={0.8}
             onPress={() => navigation.navigate('ChangeNumber' as never)}
           >
@@ -158,8 +220,9 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 12, paddingHorizontal: 14,
-    gap: 8, borderBottomWidth: 1,
+    paddingTop: 56, paddingBottom: 12, paddingHorizontal: 14,
+    gap: 8,
+    ...GLASS.header,
   },
   headerTitle: {
     flex: 1, textAlign: 'center',
@@ -173,19 +236,22 @@ const styles = StyleSheet.create({
   avatarWrap:    { width: 110, height: 110, borderRadius: 55, ...SHADOW.glow },
   avatarImg: {
     width: 110, height: 110, borderRadius: 55,
-    borderWidth: 3, borderColor: 'rgba(30,156,240,0.40)',
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
   },
   avatarPlaceholder: {
     width: 110, height: 110, borderRadius: 55,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 3, borderColor: 'rgba(30,156,240,0.30)',
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
   },
   avatarInitials: { fontSize: 38, fontWeight: '800', color: '#fff' },
   cameraBadge: {
     position: 'absolute', bottom: 2, right: 2,
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, ...SHADOW.button,
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.45)',
+    ...SHADOW.button,
   },
   tapHint: { fontSize: 12, color: COLORS.sub },
 
@@ -193,15 +259,19 @@ const styles = StyleSheet.create({
   section:  { gap: 10 },
   infoCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card, borderRadius: RADIUS.lg,
-    paddingHorizontal: 14, paddingVertical: 14, ...SHADOW.card,
+    ...GLASS.card,
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14, paddingVertical: 14,
+    ...SHADOW.card,
   },
   infoContent: { flex: 1 },
   infoLabel:   { fontSize: 11, fontWeight: '600', color: COLORS.sub, marginBottom: 3 },
   infoValue:   { fontSize: 15, fontWeight: '600', color: COLORS.text },
   infoInput: {
     fontSize: 15, fontWeight: '600', color: COLORS.text,
-    borderBottomWidth: 1.5, paddingBottom: 2,
+    borderBottomWidth: 1.5,
+    borderBottomColor: COLORS.blue,
+    paddingBottom: 2,
     padding: 0, margin: 0,
   },
 });

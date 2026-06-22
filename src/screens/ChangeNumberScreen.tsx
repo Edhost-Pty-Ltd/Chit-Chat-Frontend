@@ -14,25 +14,21 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { doc, updateDoc } from 'firebase/firestore';
+import { getAuth } from '@react-native-firebase/auth';
+import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
+import { sendNumberChangeNotification } from '../hooks/useChatActions';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { RootStackParamList } from '../types';
-import { useMessages } from '../context/MessagesContext';
+import { useAuth as useFirebaseAuth } from '../hooks/useAuth';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'ChangeNumber'>;
 
-// ─── Stub helpers ─────────────────────────────────────────────────────────────
-async function sendOtp(_phone: string): Promise<void> {
-  await new Promise<void>((r) => setTimeout(r, 800));
-}
-async function verifyOtp(_phone: string, code: string): Promise<boolean> {
-  await new Promise<void>((r) => setTimeout(r, 600));
-  return code === '123456';
-}
+type Step = 'number' | 'otp';
 
-// ─── Country Picker ───────────────────────────────────────────────────────────
 function CountryPicker({ visible, selected, onSelect, onClose }: {
   visible: boolean; selected: Country;
   onSelect: (c: Country) => void; onClose: () => void;
@@ -81,12 +77,11 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
 }
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
-type Step = 'number' | 'otp';
 
 export default function ChangeNumberScreen() {
   const navigation = useNavigation<NavProp>();
   const { phone: currentPhone, displayName, signIn } = useAuth();
-  const { injectNumberChangeMessage } = useMessages();
+  const { sendOTP, verifyOTP } = useFirebaseAuth();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
 
@@ -122,8 +117,12 @@ export default function ChangeNumberScreen() {
     }
     setErrorMsg(''); setLoading(true);
     try {
-      await sendOtp(fullNumber);
-      setStep('otp'); startResendTimer();
+      const ok = await sendOTP(fullNumber);
+      if (ok) {
+        setStep('otp'); startResendTimer();
+      } else {
+        setErrorMsg('Failed to send code. Try again.');
+      }
     } catch { setErrorMsg('Failed to send code. Try again.'); }
     finally { setLoading(false); }
   };
@@ -133,21 +132,33 @@ export default function ChangeNumberScreen() {
     if (code.length < 6) { setErrorMsg('Enter all 6 digits.'); return; }
     setErrorMsg(''); setLoading(true);
     try {
-      const ok = await verifyOtp(fullNumber, code);
+      const ok = await verifyOTP(code);
       if (ok) {
-        // Update the phone number in AuthContext
+        // Update phone number in AuthContext
         await signIn(fullNumber);
-
-        // Inject a rich number-change message into every contact's thread
-        injectNumberChangeMessage({
-          oldNumber:   currentPhone || 'unknown',
-          newNumber:   fullNumber,
-          displayName: displayName || 'Your contact',
-        });
-
+        
+        // Update phone number in Firestore user document
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        if (currentUser) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          await updateDoc(userRef, { phone: fullNumber });
+          console.log('[ChangeNumberScreen] Updated phone number in Firestore');
+        }
+        
+        // Send number change notification to all chats
+        const { success, count } = await sendNumberChangeNotification(
+          currentUser?.uid || '',
+          currentPhone || 'unknown',
+          fullNumber,
+          displayName || 'User'
+        );
+        
+        console.log(`[ChangeNumberScreen] Sent ${count} number change notifications`);
+        
         Alert.alert(
           'Number updated ✓',
-          `Your number has been changed to ${fullNumber}.\n\nA message has been sent inside each of your conversations letting your contacts know.`,
+          `Your number has been changed to ${fullNumber}.\n\n${count > 0 ? `A notification has been sent to ${count} chat${count > 1 ? 's' : ''} letting your contacts know.` : 'Your contacts will see your new number.'}`,
           [{ text: 'Done', onPress: () => navigation.goBack() }],
         );
       } else {
@@ -286,7 +297,11 @@ export default function ChangeNumberScreen() {
                   <TouchableOpacity onPress={async () => {
                     if (resendTimer > 0) return;
                     setLoading(true);
-                    try { await sendOtp(fullNumber); startResendTimer(); }
+                    try {
+                      const ok = await sendOTP(fullNumber);
+                      if (ok) startResendTimer();
+                      else setErrorMsg('Failed to resend.');
+                    }
                     catch { setErrorMsg('Failed to resend.'); }
                     finally { setLoading(false); }
                   }} disabled={resendTimer > 0}>
@@ -294,13 +309,6 @@ export default function ChangeNumberScreen() {
                       {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
                     </AppText>
                   </TouchableOpacity>
-                </View>
-
-                <View style={styles.hintBox}>
-                  <AppIcon name="information-circle-outline" size={15} color={COLORS.sub} />
-                  <AppText fixedColor style={styles.hintText}>
-                    Demo: use code <AppText fixedColor style={{ fontWeight: '700', color: COLORS.blue }}>123456</AppText>
-                  </AppText>
                 </View>
               </>
             )}

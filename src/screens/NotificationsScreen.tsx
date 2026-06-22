@@ -10,7 +10,6 @@ import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../contex
 import { useNotifications, AppNotification, NotifType } from '../context/NotificationContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
-import { CONTACTS } from '../data/mockData';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -37,8 +36,7 @@ function NotifRow({ notif }: { notif: AppNotification }) {
   const handlePress = () => {
     markRead(notif.id);
     if (notif.contactId != null) {
-      const contact = CONTACTS.find((c) => c.id === notif.contactId);
-      if (contact) navigation.navigate('Chat', { contact });
+      navigation.navigate('Chats');
     }
   };
 

@@ -2,8 +2,12 @@
 import React, { useState } from 'react';
 import { View, Switch, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
+import { RootStackParamList } from '../types';
+
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'NotificationSettings'>;
 
 function Row({ icon, label, sub, value, onToggle, onPress, rightLabel }: {
   icon: string; label: string; sub?: string;
@@ -32,7 +36,7 @@ function Row({ icon, label, sub, value, onToggle, onPress, rightLabel }: {
 }
 
 export default function NotificationSettingsScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavProp>();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
 
@@ -72,6 +76,10 @@ export default function NotificationSettingsScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+
+        <Row icon="mail-outline" label="Notification Inbox"
+          sub="View recent notifications"
+          onPress={() => navigation.navigate('Notifications')} />
 
         {/* Do Not Disturb */}
         <AppText style={[styles.sectionLabel, { color: FG.secondary }]}>DO NOT DISTURB</AppText>

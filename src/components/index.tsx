@@ -2,7 +2,8 @@
 import React from 'react';
 import {
   View, TouchableOpacity, StyleSheet, ViewStyle, Image,
-} from 'react-native';import { useNavigation } from '@react-navigation/native';
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,21 +21,37 @@ interface AvatarProps {
   size?: number;
   status?: ContactStatus;
   style?: ViewStyle;
+  imageUrl?: string | null;
 }
-export function Avatar({ initials, color, size = 44, status: _status, style }: AvatarProps) {
+export function Avatar({ initials, color, size = 44, status: _status, style, imageUrl }: AvatarProps) {
   return (
     <View style={[{ width: size, height: size }, style]}>
-      <View style={[styles.avatarCircle, {
-        width: size, height: size, borderRadius: size / 2,
-        backgroundColor: color,
-      }]}>
-        <AppText style={[styles.avatarText, { fontSize: Math.round(size * 0.36) }]}>
-          {initials}
-        </AppText>
-      </View>
+      {imageUrl ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: 2,
+            borderColor: 'rgba(255,255,255,0.50)',
+          }}
+        />
+      ) : (
+        <View style={[styles.avatarCircle, {
+          width: size, height: size, borderRadius: size / 2,
+          backgroundColor: color,
+        }]}>
+          <AppText style={[styles.avatarText, { fontSize: Math.round(size * 0.36) }]}>
+            {initials}
+          </AppText>
+        </View>
+      )}
     </View>
   );
-}// ─── BottomNav ────────────────────────────────────────────────────────────────
+}
+
+// ─── BottomNav ────────────────────────────────────────────────────────────────
 type TabKey = 'chats' | 'calls' | 'status' | 'settings';
 const TABS: {
   id: TabKey;
@@ -57,36 +74,36 @@ export function BottomNav({ active }: BottomNavProps) {
 
   return (
     <View style={styles.navBarWrapper}>
-    <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
-      {TABS.map((t) => {
-        const isActive = active === t.id;
-        return (
-          <TouchableOpacity
-            key={t.id}
-            style={styles.navItem}
-            activeOpacity={0.75}
-            onPress={() => navigation.navigate(t.screen as any)}
-          >
-            {isActive ? (
-              <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
-                <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
-              </LinearGradient>
-            ) : (
-              <View style={styles.iconTileInactive}>
-                <AppIcon name={t.icon} size={20} color={FG.secondary} />
-              </View>
-            )}
-            <AppText style={[
-              styles.navLabel,
-              { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
-              isActive && styles.navLabelActive,
-            ]}>
-              {t.label}
-            </AppText>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
+      <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+        {TABS.map((t) => {
+          const isActive = active === t.id;
+          return (
+            <TouchableOpacity
+              key={t.id}
+              style={styles.navItem}
+              activeOpacity={0.75}
+              onPress={() => navigation.navigate(t.screen as any)}
+            >
+              {isActive ? (
+                <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
+                  <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
+                </LinearGradient>
+              ) : (
+                <View style={styles.iconTileInactive}>
+                  <AppIcon name={t.icon} size={20} color={FG.secondary} />
+                </View>
+              )}
+              <AppText style={[
+                styles.navLabel,
+                { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
+                isActive && styles.navLabelActive,
+              ]}>
+                {t.label}
+              </AppText>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -148,7 +165,7 @@ export function AppHeader({ title, showBack, rightIcon, onRightPress }: AppHeade
 const styles = StyleSheet.create({
   avatarCircle: {
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)',
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)',
   },
   avatarText: { color: '#fff', fontWeight: '700' },
   statusDot:  { position: 'absolute', borderWidth: 2, borderColor: COLORS.sky1 },
@@ -164,12 +181,6 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    overflow: 'hidden',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 8,
   },
   navItem: {
     flex: 1,
@@ -205,3 +216,8 @@ const styles = StyleSheet.create({
   headerTitle:    { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: COLORS.text },
   headerRightBtn: { width: 32, height: 32, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center', ...SHADOW.button },
 });
+
+// ─── Re-exports ──────────────────────────────────────────────────────────────
+// Export other components that are in separate files
+export { IncomingCallOverlay } from './IncomingCallOverlay';
+export { IncomingCallManager } from './IncomingCallManager';

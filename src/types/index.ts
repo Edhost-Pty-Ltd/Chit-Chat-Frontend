@@ -16,7 +16,6 @@ export interface Contact {
   time: string;
   unread: number;
   pinned?: boolean;
-  members?: Contact[];  // group members (only set for group contacts)
 }
 
 export interface Message {
@@ -27,17 +26,32 @@ export interface Message {
   voice?: boolean;
   time: string;
   type: MessageType;
-  // Number-change system message fields
-  numberChange?: {
-    oldNumber: string;
-    newNumber: string;
-    displayName: string;
-  };
-  // Group-left system message
-  groupLeft?: {
-    groupName: string;
-    displayName: string;
-  };
+}
+
+// ─── Real-time Chat Message (Firestore) ───────────────────────────────────────
+export interface ChatMessage {
+  messageId: string;
+  senderId: string;
+  text: string | null;
+  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file';
+  
+  // Media URLs
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  voiceUrl?: string | null;
+  audioUrl?: string | null;
+  fileUrl?: string | null;
+  
+  // Media metadata
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  duration?: number;
+  thumbnailUrl?: string;
+  
+  timestamp: Date;
+  readBy: string[];
+  editedAt?: Date | null;
 }
 
 export interface Call {
@@ -69,16 +83,16 @@ export interface CalendarEvent {
 }
 
 // ─── Notes ────────────────────────────────────────────────────────────────
-export interface NoteAttachment {
-  uri:  string;
-  name: string;
-  type: 'image' | 'document';
-}
-
 export interface DrawStroke {
   points: { x: number; y: number }[];
-  color:  string;
-  width:  number;
+  color: string;
+  width: number;
+}
+
+export interface NoteAttachment {
+  uri: string;
+  name: string;
+  type: 'image' | 'document';
 }
 
 export interface Note {
@@ -87,8 +101,8 @@ export interface Note {
   preview: string;
   date: string;
   checked?: boolean;
-  attachments?: NoteAttachment[];
   strokes?: DrawStroke[];
+  attachments?: NoteAttachment[];
 }
 
 // ─── Navigation param list ─────────────────────────────────────────────────
@@ -96,22 +110,39 @@ export type RootStackParamList = {
   Splash: undefined;
   SignIn: undefined;
   Chats: undefined;
-  Chat: { contact: Contact };
+  Chat: { chatId: string; displayName: string; isGroup: boolean; otherUserId?: string; otherUserPhoto?: string | null };
   Calls: undefined;
   Status: undefined;
   Contacts: undefined;
   Calendar: undefined;
   Notes: undefined;
+  CloudBackup: undefined;
   Settings: undefined;
   Appearance: undefined;
   Profile: undefined;
   CreateAccount: undefined;
-  VideoCall: { contact: Contact; duration?: number; participants?: Contact[] };
-  AudioCall: { contact: Contact; duration?: number; participants?: Contact[] };
   AccountSettings: undefined;
   PrivacySettings: undefined;
   NotificationSettings: undefined;
   ChangeNumber: undefined;
   Notifications: undefined;
   LinkedDevices: undefined;
+  AudioCall: { 
+    callId: string;
+    isOutgoing: boolean;
+    otherParty: {
+      userId: string;
+      displayName: string;
+      photoUrl: string | null;
+    };
+  };
+  VideoCall: { 
+    callId: string;
+    isOutgoing: boolean;
+    otherParty: {
+      userId: string;
+      displayName: string;
+      photoUrl: string | null;
+    };
+  };
 };

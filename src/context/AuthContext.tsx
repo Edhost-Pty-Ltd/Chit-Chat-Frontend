@@ -14,22 +14,21 @@
 import React, {
   createContext, useContext, useEffect, useState, useCallback, useRef,
 } from 'react';
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// expo-local-authentication requires a native build — lazy load so Expo Go doesn't crash
-let LocalAuthentication: any = null;
-try { LocalAuthentication = require('expo-local-authentication'); } catch { /* Expo Go / web */ }
+import { getAuth, signOut as firebaseSignOut } from '@react-native-firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 
 const KEYS = {
-  phone:            'auth_phone',
-  signedIn:         'auth_signed_in',
-  lastActive:       'auth_last_active',
-  displayName:      'auth_display_name',
-  avatarUri:        'auth_avatar_uri',
-  biometricEnabled: 'auth_biometric_enabled',
+  phone:       'auth_phone',
+  signedIn:    'auth_signed_in',
+  lastActive:  'auth_last_active',
+  displayName: 'auth_display_name',
+  avatarUri:   'auth_avatar_uri',
 } as const;
 
 interface AuthContextValue {
@@ -39,8 +38,6 @@ interface AuthContextValue {
   setDisplayName: (name: string) => Promise<void>;
   avatarUri: string | null;
   setAvatarUri: (uri: string) => Promise<void>;
-  biometricEnabled: boolean;
-  setBiometricEnabled: (enabled: boolean) => Promise<{ success: boolean; message?: string }>;
   signIn: (phone: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshActivity: () => void;
@@ -54,8 +51,6 @@ const AuthContext = createContext<AuthContextValue>({
   setDisplayName: async () => {},
   avatarUri: null,
   setAvatarUri: async () => {},
-  biometricEnabled: false,
-  setBiometricEnabled: async () => ({ success: false }),
   signIn: async () => {},
   signOut: async () => {},
   refreshActivity: () => {},
@@ -67,7 +62,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [phone, setPhone]                   = useState('');
   const [displayName, setDisplayNameState]  = useState('');
   const [avatarUri, setAvatarUriState]      = useState<string | null>(null);
-  const [biometricEnabled, setBiometricState] = useState(false);
   const [loading, setLoading]               = useState(true);
   const webTimerRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -87,9 +81,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const doSignOut = async () => {
     clearWebTimer();
-    await AsyncStorage.multiRemove([KEYS.phone, KEYS.signedIn, KEYS.lastActive]);
+    // Sign out from Firebase Auth
+    const authInstance = getAuth();
+    await firebaseSignOut(authInstance);
+    // Clear AsyncStorage session data
+    await AsyncStorage.multiRemove([
+      KEYS.phone,
+      KEYS.signedIn,
+      KEYS.lastActive,
+      KEYS.displayName,
+      KEYS.avatarUri,
+    ]);
     setPhone('');
     setIsSignedIn(false);
+    setDisplayNameState('');
+    setAvatarUriState(null);
   };
 
   // ── Hydrate on mount ──────────────────────────────────────────────────────
@@ -97,19 +103,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar, storedBio] = await Promise.all([
+        const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar] = await Promise.all([
           AsyncStorage.getItem(KEYS.signedIn),
           AsyncStorage.getItem(KEYS.phone),
           AsyncStorage.getItem(KEYS.lastActive),
           AsyncStorage.getItem(KEYS.displayName),
           AsyncStorage.getItem(KEYS.avatarUri),
-          AsyncStorage.getItem(KEYS.biometricEnabled),
         ]);
 
         if (storedName)   setDisplayNameState(storedName);
         if (storedAvatar) setAvatarUriState(storedAvatar);
-        const bioOn = storedBio === 'true';
-        if (bioOn) setBiometricState(true);
 
         if (signedIn === 'true' && storedPhone) {
           if (Platform.OS === 'web') {
@@ -126,30 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
             }
           } else {
-            // Mobile — check biometric if enabled
-            if (bioOn && (Platform.OS as string) !== 'web') {
-              if (!LocalAuthentication) {
-                // Running in Expo Go — skip biometric check
-              } else {
-              const hasHw = await LocalAuthentication.hasHardwareAsync();
-              const enrolled = await LocalAuthentication.isEnrolledAsync();
-              if (hasHw && enrolled) {
-                const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-                const isFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-                const result = await LocalAuthentication.authenticateAsync({
-                  promptMessage: isFace ? 'Sign in with Face ID' : 'Sign in with fingerprint',
-                  fallbackLabel: 'Use PIN',
-                  cancelLabel: 'Cancel',
-                  disableDeviceFallback: false,
-                });
-                if (!result.success) {
-                  // Biometric failed — don't sign in, go to Sign In screen
-                  setLoading(false);
-                  return;
-                }
-              }
-              }
-            }
+            // Mobile — no expiry
             setPhone(storedPhone);
             setIsSignedIn(true);
           }
@@ -158,6 +138,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
     })();
+
+    // Listen to Firebase auth state changes
+    const authInstance = getAuth();
+    const unsubscribe = authInstance.onAuthStateChanged(async (user) => {
+      console.log('[AuthContext] Firebase auth state changed:', user?.uid);
+      
+      if (!user) {
+        // User signed out in Firebase, sync with local state
+        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+        if (signedIn === 'true') {
+          console.log('[AuthContext] Firebase signed out but local state says signed in, cleaning up...');
+          await doSignOut();
+        }
+      } else {
+        // User signed in to Firebase
+        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+        if (signedIn !== 'true') {
+          console.log('[AuthContext] Firebase signed in but local state not updated');
+          // This case is handled by explicit signIn() call
+        }
+      }
+    });
 
     // On web, also check whenever the tab becomes visible again
     if (Platform.OS === 'web') {
@@ -178,23 +180,89 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       };
       document.addEventListener('visibilitychange', handleVisibilityChange);
-      return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        unsubscribe();
+      };
     }
+    
+    return () => unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Public API ────────────────────────────────────────────────────────────
 
   const signIn = async (phoneNumber: string) => {
-    const now = Date.now().toString();
-    await AsyncStorage.multiSet([
-      [KEYS.phone,      phoneNumber],
-      [KEYS.signedIn,   'true'],
-      [KEYS.lastActive, now],
-    ]);
-    setPhone(phoneNumber);
-    setIsSignedIn(true);
-    if (Platform.OS === 'web') {
-      scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS);
+    try {
+      console.log('[AuthContext] Starting signIn for:', phoneNumber);
+      const now = Date.now().toString();
+      
+      // Save basic session data to AsyncStorage
+      await AsyncStorage.multiSet([
+        [KEYS.phone,      phoneNumber],
+        [KEYS.signedIn,   'true'],
+        [KEYS.lastActive, now],
+      ]);
+      console.log('[AuthContext] Session data saved to AsyncStorage');
+      
+      // Fetch user profile from Firestore and populate displayName and avatarUri
+      try {
+        const authInstance = getAuth();
+        const currentUser = authInstance.currentUser;
+        
+        console.log('[AuthContext] Current Firebase user:', currentUser?.uid);
+        
+        if (currentUser) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          console.log('[AuthContext] Fetching user profile from Firestore...');
+          
+          const userSnap = await getDoc(userRef);
+          
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const firestoreDisplayName = userData.displayName || '';
+            const firestorePhotoURL = userData.photoURL || null;
+            
+            console.log('[AuthContext] Profile found in Firestore:', {
+              displayName: firestoreDisplayName,
+              photoURL: firestorePhotoURL,
+            });
+            
+            // Update state
+            if (firestoreDisplayName) {
+              setDisplayNameState(firestoreDisplayName);
+              await AsyncStorage.setItem(KEYS.displayName, firestoreDisplayName);
+            }
+            
+            if (firestorePhotoURL) {
+              setAvatarUriState(firestorePhotoURL);
+              await AsyncStorage.setItem(KEYS.avatarUri, firestorePhotoURL);
+            }
+          } else {
+            console.log('[AuthContext] No user profile found in Firestore');
+          }
+        } else {
+          console.warn('[AuthContext] No Firebase user found after sign-in');
+        }
+      } catch (error: any) {
+        console.error('[AuthContext] Error fetching user profile from Firestore:', error);
+        // Check if it's an offline error
+        if (error?.code === 'unavailable' || error?.message?.includes('offline')) {
+          console.warn('[AuthContext] Firestore offline - continuing with sign-in');
+        }
+        // Continue with sign-in even if profile fetch fails
+      }
+      
+      setPhone(phoneNumber);
+      setIsSignedIn(true);
+      console.log('[AuthContext] Sign-in completed successfully - isSignedIn state updated to true');
+      console.log('[AuthContext] Current state - phone:', phoneNumber, 'isSignedIn:', true);
+      
+      if (Platform.OS === 'web') {
+        scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS);
+      }
+    } catch (error: any) {
+      console.error('[AuthContext] Critical error during signIn:', error);
+      throw error; // Re-throw to let SignInScreen handle it
     }
   };
 
@@ -206,37 +274,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const setAvatarUri = async (uri: string) => {
     setAvatarUriState(uri);
     await AsyncStorage.setItem(KEYS.avatarUri, uri);
-  };
-
-  /** Enable or disable biometric login. When enabling, prompts biometrics first. */
-  const setBiometricEnabled = async (enabled: boolean): Promise<{ success: boolean; message?: string }> => {
-    if (Platform.OS === 'web') {
-      return { success: false, message: 'Biometrics not available on web.' };
-    }
-    if (!LocalAuthentication) {
-      return { success: false, message: 'Biometrics require a development build.' };
-    }
-    if (enabled) {
-      const hasHw   = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasHw)   return { success: false, message: 'This device has no biometric hardware.' };
-      if (!enrolled) return { success: false, message: 'No biometrics enrolled. Please set up fingerprint or face ID in device settings.' };
-
-      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-      const isFace = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: isFace ? 'Confirm with Face ID to enable biometric login' : 'Confirm with fingerprint to enable biometric login',
-        fallbackLabel: 'Use PIN',
-        cancelLabel: 'Cancel',
-        disableDeviceFallback: false,
-      });
-      if (!result.success) {
-        return { success: false, message: 'Authentication failed. Biometric login not enabled.' };
-      }
-    }
-    setBiometricState(enabled);
-    await AsyncStorage.setItem(KEYS.biometricEnabled, enabled ? 'true' : 'false');
-    return { success: true };
   };
 
   const signOut = async () => {
@@ -254,7 +291,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       isSignedIn, phone, displayName, setDisplayName,
       avatarUri, setAvatarUri,
-      biometricEnabled, setBiometricEnabled,
       signIn, signOut, refreshActivity, loading,
     }}>
       {children}

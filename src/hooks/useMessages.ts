@@ -1,0 +1,147 @@
+// ─── useMessages Hook ─────────────────────────────────────────────────────────
+// Real-time listener for messages inside a single chat.
+// Also exposes sendMessage, which handles both 1-on-1 and group chats.
+
+import { useState, useEffect } from 'react';
+import {
+  collection, query, orderBy, onSnapshot,
+  addDoc, doc, updateDoc, serverTimestamp,
+  Timestamp, increment,
+} from 'firebase/firestore';
+import { db } from '../config/firebase';
+
+export interface FireMessage {
+  messageId:  string;
+  senderId:   string;
+  text:       string | null;
+  imageUrl:   string | null;
+  voiceUrl:   string | null;
+  videoUrl:   string | null;
+  fileUrl:    string | null;
+  type:       'text' | 'image' | 'voice' | 'video' | 'file';
+  timestamp:  Date | null;
+  readBy:     string[];
+  duration:   number | null;
+  fileName:   string | null;
+  fileSize:   number | null;
+  mimeType:   string | null;
+  thumbnailUrl: string | null;
+}
+
+export function useMessages(chatId: string | null, currentUserId: string | null) {
+  const [messages, setMessages] = useState<FireMessage[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
+
+  // ── Real-time listener ────────────────────────────────────────
+  useEffect(() => {
+    if (!chatId) return;
+
+    setLoading(true);
+
+    const q = query(
+      collection(db, 'chats', chatId, 'messages'),
+      orderBy('timestamp', 'asc'),
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const msgs: FireMessage[] = snap.docs.map((doc) => {
+          const d = doc.data();
+          return {
+            messageId: doc.id,
+            senderId:  d.senderId,
+            text:      d.text      ?? null,
+            imageUrl:  d.imageUrl  ?? null,
+            voiceUrl:  d.voiceUrl  ?? null,
+            videoUrl:  d.videoUrl  ?? null,
+            fileUrl:   d.fileUrl   ?? null,
+            type:      d.type      ?? 'text',
+            timestamp: d.timestamp
+              ? (d.timestamp as Timestamp).toDate()
+              : null,
+            readBy: d.readBy ?? [],
+            duration: d.duration ?? null,
+            fileName: d.fileName ?? null,
+            fileSize: d.fileSize ?? null,
+            mimeType: d.mimeType ?? null,
+            thumbnailUrl: d.thumbnailUrl ?? null,
+          };
+        });
+        setMessages(msgs);
+        setLoading(false);
+
+        // Mark messages as read
+        if (currentUserId) markAsRead(chatId, currentUserId);
+      },
+      (err) => {
+        setError(err.message);
+        setLoading(false);
+      },
+    );
+
+    return () => unsub();
+  }, [chatId, currentUserId]);
+
+  // ── Send a text message ───────────────────────────────────────
+  async function sendMessage(text: string): Promise<boolean> {
+    if (!chatId || !currentUserId || !text.trim()) return false;
+
+    try {
+      const trimmed = text.trim();
+
+      // 1. Add message to subcollection
+      await addDoc(collection(db, 'chats', chatId, 'messages'), {
+        senderId:  currentUserId,
+        text:      trimmed,
+        imageUrl:  null,
+        voiceUrl:  null,
+        type:      'text',
+        timestamp: serverTimestamp(),
+        readBy:    [currentUserId],
+      });
+
+      // 2. Update chat's lastMessage + unread counts for other members
+      const chatRef = doc(db, 'chats', chatId);
+      await updateDoc(chatRef, {
+        'lastMessage.text':      trimmed,
+        'lastMessage.senderId':  currentUserId,
+        'lastMessage.timestamp': serverTimestamp(),
+        // Firestore doesn't support dynamic keys in updateDoc directly,
+        // so we use a helper below
+        ...buildUnreadIncrement(currentUserId),
+      });
+
+      return true;
+    } catch (err: any) {
+      setError(err.message);
+      return false;
+    }
+  }
+
+  return { messages, loading, error, sendMessage };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Mark all messages in this chat as read by currentUser
+async function markAsRead(chatId: string, userId: string) {
+  try {
+    const chatRef = doc(db, 'chats', chatId);
+    await updateDoc(chatRef, {
+      [`unreadCounts.${userId}`]: 0,
+    });
+  } catch (_) {
+    // Non-critical — ignore silently
+  }
+}
+
+// Build an increment object for all members except the sender
+// Called after sending — increments unread count for every other member
+function buildUnreadIncrement(senderId: string): Record<string, any> {
+  // We can't know other member IDs here without fetching the chat doc,
+  // so we use a Firestore transaction in the ChatsScreen instead.
+  // This is a placeholder — see createChat() for full implementation.
+  return {};
+}
