@@ -103,7 +103,8 @@ export default function PrivacySettingsScreen() {
         <AppText style={[styles.sectionLabel, { color: FG.secondary }]}>ADVANCED</AppText>
         <Row icon="ban-outline" label="Blocked Contacts"
           sub="Manage who can't contact you"
-          onPress={() => Alert.alert('Blocked', 'No contacts blocked.')} rightLabel="0" />
+          onPress={() => (navigation as any).navigate('BlockedContacts')} 
+          rightLabel="" />
         <Row icon="shield-outline" label="Silence Unknown Callers"
           sub="Calls from unknown numbers go to voicemail"
           onPress={() => Alert.alert('Unknown Callers', 'Configure call filtering.')} />

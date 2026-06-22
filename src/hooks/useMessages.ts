@@ -18,14 +18,27 @@ export interface FireMessage {
   voiceUrl:   string | null;
   videoUrl:   string | null;
   fileUrl:    string | null;
-  type:       'text' | 'image' | 'voice' | 'video' | 'file';
+  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location';
   timestamp:  Date | null;
+  expiresAt:  Date | null;
   readBy:     string[];
   duration:   number | null;
   fileName:   string | null;
   fileSize:   number | null;
   mimeType:   string | null;
   thumbnailUrl: string | null;
+  location?: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    altitude?: number | null;
+    altitudeAccuracy?: number | null;
+    heading?: number | null;
+    speed?: number | null;
+    timestamp: number;
+  } | null;
+  isLiveLocation?: boolean;
+  liveLocationExpiry?: Date | null;
 }
 
 export function useMessages(chatId: string | null, currentUserId: string | null) {
@@ -47,28 +60,46 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
     const unsub = onSnapshot(
       q,
       (snap) => {
-        const msgs: FireMessage[] = snap.docs.map((doc) => {
-          const d = doc.data();
-          return {
-            messageId: doc.id,
-            senderId:  d.senderId,
-            text:      d.text      ?? null,
-            imageUrl:  d.imageUrl  ?? null,
-            voiceUrl:  d.voiceUrl  ?? null,
-            videoUrl:  d.videoUrl  ?? null,
-            fileUrl:   d.fileUrl   ?? null,
-            type:      d.type      ?? 'text',
-            timestamp: d.timestamp
-              ? (d.timestamp as Timestamp).toDate()
-              : null,
-            readBy: d.readBy ?? [],
-            duration: d.duration ?? null,
-            fileName: d.fileName ?? null,
-            fileSize: d.fileSize ?? null,
-            mimeType: d.mimeType ?? null,
-            thumbnailUrl: d.thumbnailUrl ?? null,
-          };
-        });
+        const now = new Date();
+        const msgs: FireMessage[] = snap.docs
+          .map((doc) => {
+            const d = doc.data();
+            return {
+              messageId: doc.id,
+              senderId:  d.senderId,
+              text:      d.text      ?? null,
+              imageUrl:  d.imageUrl  ?? null,
+              voiceUrl:  d.voiceUrl  ?? null,
+              videoUrl:  d.videoUrl  ?? null,
+              fileUrl:   d.fileUrl   ?? null,
+              type:      d.type      ?? 'text',
+              timestamp: d.timestamp
+                ? (d.timestamp as Timestamp).toDate()
+                : null,
+              expiresAt: d.expiresAt
+                ? (d.expiresAt as Timestamp).toDate()
+                : null,
+              readBy: d.readBy ?? [],
+              duration: d.duration ?? null,
+              fileName: d.fileName ?? null,
+              fileSize: d.fileSize ?? null,
+              mimeType: d.mimeType ?? null,
+              thumbnailUrl: d.thumbnailUrl ?? null,
+              location: d.location ?? null,
+              isLiveLocation: d.isLiveLocation ?? false,
+              liveLocationExpiry: d.liveLocationExpiry
+                ? (d.liveLocationExpiry as Timestamp).toDate()
+                : null,
+            };
+          })
+          // Filter out expired messages (72-hour TTL)
+          .filter((msg) => {
+            // Keep messages without expiry date (legacy messages)
+            if (!msg.expiresAt) return true;
+            // Keep messages that haven't expired yet
+            return msg.expiresAt > now;
+          });
+        
         setMessages(msgs);
         setLoading(false);
 

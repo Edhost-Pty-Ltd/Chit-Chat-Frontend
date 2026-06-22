@@ -19,14 +19,16 @@ import { db } from '../config/firebase';
 import { Avatar } from '../components';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { FileMessageBubble } from '../components/FileMessageBubble';
+import { LocationMessageBubble } from '../components/LocationMessageBubble';
 import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages, FireMessage } from '../hooks/useMessages';
 import { useVoicePlayer } from '../hooks/useVoicePlayer';
 import { useVoiceRecorder, RecordingResult } from '../hooks/useVoiceRecorder';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
+import { useLocationSharing } from '../hooks/useLocationSharing';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
-import { sendVoiceMessage, sendImageMessage, sendFileMessage } from '../hooks/useChatActions';
+import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
@@ -151,14 +153,19 @@ export default function ChatScreen() {
   // ── Outgoing call ──────────────────────────────────────────────
   const outgoingCall = useOutgoingCall();
 
+  // ── Location sharing ────────────────────────────────────────────
+  const locationSharing = useLocationSharing();
+
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
+  const [showLocationMenu, setShowLocationMenu] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState(15);
 
   // ── Search state ────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
@@ -551,8 +558,28 @@ export default function ChatScreen() {
 
   // ── Voice call handler ──────────────────────────────────────────
   const handleVoiceCall = useCallback(async () => {
-    if (!userId || !otherUserId || isGroup) {
-      Alert.alert('Cannot make call', isGroup ? 'Group calls are not supported yet.' : 'User information not available.');
+    if (!userId) {
+      Alert.alert('Cannot make call', 'User information not available.');
+      return;
+    }
+
+    // Handle group calls with Jitsi
+    if (isGroup) {
+      const roomName = `chitchat-${chatId}`;
+      const userDisplayName = user?.phoneNumber || 'Unknown';
+      
+      navigation.navigate('JitsiCall', {
+        roomName,
+        displayName: userDisplayName,
+        audioOnly: true,
+        chatId,
+      });
+      return;
+    }
+
+    // Handle 1-on-1 calls with WebRTC
+    if (!otherUserId) {
+      Alert.alert('Cannot make call', 'User information not available.');
       return;
     }
 
@@ -604,12 +631,32 @@ export default function ChatScreen() {
       console.error('[ChatScreen] Error initiating call:', error);
       Alert.alert('Call Failed', 'An error occurred while trying to start the call');
     }
-  }, [userId, otherUserId, isGroup, displayName, otherUserPhoto, user, outgoingCall, navigation]);
+  }, [userId, otherUserId, isGroup, chatId, displayName, otherUserPhoto, user, outgoingCall, navigation]);
 
   // ── Video call handler ──────────────────────────────────────────────────────
   const handleVideoCall = useCallback(async () => {
-    if (!userId || !otherUserId || isGroup) {
-      Alert.alert('Cannot make call', isGroup ? 'Group calls are not supported yet.' : 'User information not available.');
+    if (!userId) {
+      Alert.alert('Cannot make call', 'User information not available.');
+      return;
+    }
+
+    // Handle group calls with Jitsi
+    if (isGroup) {
+      const roomName = `chitchat-${chatId}`;
+      const userDisplayName = user?.phoneNumber || 'Unknown';
+      
+      navigation.navigate('JitsiCall', {
+        roomName,
+        displayName: userDisplayName,
+        audioOnly: false,
+        chatId,
+      });
+      return;
+    }
+
+    // Handle 1-on-1 calls with WebRTC
+    if (!otherUserId) {
+      Alert.alert('Cannot make call', 'User information not available.');
       return;
     }
 
@@ -662,7 +709,7 @@ export default function ChatScreen() {
       console.error('[ChatScreen] Error initiating video call:', error);
       Alert.alert('Call Failed', 'An error occurred while trying to start the call');
     }
-  }, [userId, otherUserId, isGroup, displayName, otherUserPhoto, user, outgoingCall, navigation]);
+  }, [userId, otherUserId, isGroup, chatId, displayName, otherUserPhoto, user, outgoingCall, navigation]);
 
   // ── PanResponder for mic button ─────────────────────────────────
   const micPanResponder = useMemo(() => PanResponder.create({
@@ -982,6 +1029,69 @@ export default function ChatScreen() {
     }
   };
 
+  // ── Location handlers ───────────────────────────────────────────
+  const handleOpenLocationMenu = () => {
+    setShowAttach(false);
+    setShowLocationMenu(true);
+  };
+
+  const handleSendCurrentLocation = async () => {
+    if (!userId) return;
+    
+    setShowLocationMenu(false);
+    
+    const location = await locationSharing.getCurrentLocation();
+    if (!location) {
+      Alert.alert('Error', locationSharing.error || 'Failed to get location');
+      return;
+    }
+    
+    const result = await sendCurrentLocationMessage(chatId, userId, location);
+    
+    if (!result.success) {
+      Alert.alert('Error', 'Failed to send location');
+    }
+  };
+
+  const handleStartLiveLocation = async () => {
+    if (!userId) return;
+    
+    setShowLocationMenu(false);
+    
+    const location = await locationSharing.getCurrentLocation();
+    if (!location) {
+      Alert.alert('Error', locationSharing.error || 'Failed to get location');
+      return;
+    }
+    
+    const result = await sendLiveLocationMessage(
+      chatId,
+      userId,
+      location,
+      selectedDuration
+    );
+    
+    if (!result.success) {
+      Alert.alert('Error', 'Failed to send live location');
+      return;
+    }
+    
+    const started = await locationSharing.startLiveSharing(
+      chatId,
+      result.messageId,
+      selectedDuration
+    );
+    
+    if (!started) {
+      Alert.alert('Error', locationSharing.error || 'Failed to start live sharing');
+    }
+  };
+
+  const handleStopLiveLocation = async (messageId: string) => {
+    await locationSharing.stopLiveSharing();
+    await stopLiveLocationSharing(chatId, messageId);
+  };
+
   // ── Clear chat handler ──────────────────────────────────────────
   const handleClearChat = useCallback(async () => {
     if (!chatId) {
@@ -1216,6 +1326,14 @@ export default function ChatScreen() {
               mimeType={item.mimeType ?? undefined}
               isOutgoing={false}
             />
+          ) : item.type === 'location' && item.location ? (
+            <LocationMessageBubble
+              location={item.location}
+              isLiveLocation={item.isLiveLocation}
+              liveLocationExpiry={item.liveLocationExpiry}
+              isSender={false}
+              onStopSharing={() => handleStopLiveLocation(item.messageId)}
+            />
           ) : item.type === 'image' && item.imageUrl ? (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
               <TouchableOpacity 
@@ -1264,6 +1382,14 @@ export default function ChatScreen() {
               fileUrl={item.fileUrl!}
               mimeType={item.mimeType ?? undefined}
               isOutgoing={true}
+            />
+          ) : item.type === 'location' && item.location ? (
+            <LocationMessageBubble
+              location={item.location}
+              isLiveLocation={item.isLiveLocation}
+              liveLocationExpiry={item.liveLocationExpiry}
+              isSender={true}
+              onStopSharing={() => handleStopLiveLocation(item.messageId)}
             />
           ) : item.type === 'image' && item.imageUrl ? (
             <View style={[styles.bubble, styles.bubbleOut]}>
@@ -1356,11 +1482,11 @@ export default function ChatScreen() {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconBtn} onPress={handleVoiceCall} disabled={isGroup || outgoingCall.isInitiating}>
+            <TouchableOpacity style={styles.iconBtn} onPress={handleVoiceCall} disabled={outgoingCall.isInitiating}>
               <AppIcon name="call" size={20} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconBtn} onPress={handleVideoCall} disabled={isGroup || outgoingCall.isInitiating}>
+            <TouchableOpacity style={styles.iconBtn} onPress={handleVideoCall} disabled={outgoingCall.isInitiating}>
               <AppIcon name="videocam" size={20} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
 
@@ -1611,7 +1737,7 @@ export default function ChatScreen() {
               { icon: 'document-outline' as const, label: 'Files', action: openDocuments },
               { icon: 'camera-outline' as const, label: 'Camera', action: () => { setShowAttach(false); openCamera(); } },
               { icon: 'musical-notes-outline' as const, label: 'Audio', action: openAudioPicker },
-              { icon: 'location-outline' as const, label: 'Location', action: () => Alert.alert('Location', 'Share location') },
+              { icon: 'location-outline' as const, label: 'Location', action: handleOpenLocationMenu },
               { icon: 'person-outline' as const, label: 'Contact', action: () => Alert.alert('Contact', 'Share contact') },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={[styles.attachItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
@@ -1622,6 +1748,97 @@ export default function ChatScreen() {
                 <AppText style={[styles.attachLabel, { color: textColor, fontFamily }]}>{item.label}</AppText>
               </TouchableOpacity>
             ))}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Location Sharing Menu ── */}
+      <Modal
+        visible={showLocationMenu}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowLocationMenu(false)}
+      >
+        <TouchableOpacity 
+          style={styles.attachOverlay}
+          activeOpacity={1}
+          onPress={() => setShowLocationMenu(false)}
+        />
+        <View style={[styles.attachSheet, { backgroundColor: FG.glassBg }]}>
+          <View style={styles.attachHandle} />
+          <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>
+            Share Location
+          </AppText>
+
+          {/* Current Location */}
+          <TouchableOpacity 
+            style={[styles.locationOption, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            onPress={handleSendCurrentLocation}
+            activeOpacity={0.8}
+          >
+            <View style={styles.locationIconWrap}>
+              <AppIcon name="location" size={28} color={COLORS.blue} fixedColor />
+            </View>
+            <View style={styles.locationOptionText}>
+              <AppText style={[styles.locationOptionTitle, { color: textColor, fontFamily }]}>
+                Current Location
+              </AppText>
+              <AppText style={[styles.locationOptionDesc, { color: COLORS.sub }]}>
+                Send your current location
+              </AppText>
+            </View>
+          </TouchableOpacity>
+
+          {/* Live Location */}
+          <View style={[styles.locationOption, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+            <View style={styles.locationIconWrap}>
+              <AppIcon name="navigate" size={28} color={COLORS.blue} fixedColor />
+            </View>
+            <View style={styles.locationOptionText}>
+              <AppText style={[styles.locationOptionTitle, { color: textColor, fontFamily }]}>
+                Live Location
+              </AppText>
+              <AppText style={[styles.locationOptionDesc, { color: COLORS.sub }]}>
+                Share for:
+              </AppText>
+              
+              {/* Duration Selector */}
+              <View style={styles.durationButtons}>
+                {[5, 15, 30, 60].map((duration) => (
+                  <TouchableOpacity
+                    key={duration}
+                    style={[
+                      styles.durationButton,
+                      { backgroundColor: selectedDuration === duration ? COLORS.blue : FG.glassBg },
+                      { borderColor: FG.glassBorder },
+                    ]}
+                    onPress={() => setSelectedDuration(duration)}
+                  >
+                    <AppText 
+                      style={[
+                        styles.durationText,
+                        { color: selectedDuration === duration ? '#fff' : textColor }
+                      ]}
+                      fixedColor={selectedDuration === duration}
+                    >
+                      {duration}m
+                    </AppText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity 
+                style={[styles.startLiveButton, { marginTop: 12 }]}
+                onPress={handleStartLiveLocation}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={GRADIENTS.primary} style={styles.startLiveButtonInner}>
+                  <AppText fixedColor style={styles.startLiveButtonText}>
+                    Start Sharing
+                  </AppText>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2765,5 +2982,67 @@ const styles = StyleSheet.create({
   unblockBtnText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  // ── Location Menu ─────────────────────────────────────────────────────────
+  locationOption: {
+    flexDirection: 'row',
+    gap: 16,
+    padding: 16,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    marginBottom: 12,
+    ...SHADOW.card,
+  },
+  locationIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationOptionText: {
+    flex: 1,
+    gap: 6,
+  },
+  locationOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  locationOptionDesc: {
+    fontSize: 13,
+  },
+  durationButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  durationButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  durationText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  startLiveButton: {
+    borderRadius: RADIUS.md,
+    overflow: 'hidden',
+    ...SHADOW.button,
+  },
+  startLiveButtonInner: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startLiveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

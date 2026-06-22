@@ -33,7 +33,7 @@ export interface ChatMessage {
   messageId: string;
   senderId: string;
   text: string | null;
-  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file';
+  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file' | 'location';
   
   // Media URLs
   imageUrl?: string | null;
@@ -49,9 +49,34 @@ export interface ChatMessage {
   duration?: number;
   thumbnailUrl?: string;
   
+  // Location data
+  location?: LocationData | null;
+  isLiveLocation?: boolean;
+  liveLocationExpiry?: Date | null;
+  
   timestamp: Date;
   readBy: string[];
   editedAt?: Date | null;
+}
+
+// ─── Location Data ─────────────────────────────────────────────────────────────
+export interface LocationData {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  altitude?: number | null;
+  altitudeAccuracy?: number | null;
+  heading?: number | null;
+  speed?: number | null;
+  timestamp: number;
+}
+
+// ─── Live Location Update ──────────────────────────────────────────────────────
+export interface LiveLocationUpdate {
+  messageId: string;
+  location: LocationData;
+  timestamp: Date;
+  isActive: boolean;
 }
 
 export interface Call {
@@ -126,6 +151,13 @@ export type RootStackParamList = {
   ChangeNumber: undefined;
   Notifications: undefined;
   LinkedDevices: undefined;
+  BlockedContacts: undefined;
+  JitsiCall: {
+    roomName: string;
+    displayName: string;
+    audioOnly?: boolean;
+    chatId?: string;
+  };
   AudioCall: { 
     callId: string;
     isOutgoing: boolean;
