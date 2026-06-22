@@ -116,7 +116,6 @@ export type RootStackParamList = {
   Contacts: undefined;
   Calendar: undefined;
   Notes: undefined;
-  CloudBackup: undefined;
   Settings: undefined;
   Appearance: undefined;
   Profile: undefined;

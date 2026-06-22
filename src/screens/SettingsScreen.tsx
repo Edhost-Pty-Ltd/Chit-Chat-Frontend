@@ -23,7 +23,6 @@ const SETTINGS_SECTIONS: {
     items: [
       { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar'     },
       { id: 'notes',    icon: 'document-text-outline', label: 'Notes'        },
-      { id: 'backup',   icon: 'cloud-upload-outline',  label: 'Cloud Backup' },
     ],
   },
   {
@@ -60,7 +59,6 @@ export default function SettingsScreen() {
 
   const handleItem = (id: string) => {
     if (id === 'signout')    { signOut(); return; }
-    if (id === 'backup')     navigation.navigate('CloudBackup');
     if (id === 'calendar')   navigation.navigate('Calendar');
     if (id === 'notes')      navigation.navigate('Notes');
     if (id === 'appearance') navigation.navigate('Appearance');

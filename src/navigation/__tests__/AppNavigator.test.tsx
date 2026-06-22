@@ -153,10 +153,6 @@ jest.mock('../../screens/NotesScreen', () => {
   const React = require('react');
   return { __esModule: true, default: () => React.createElement('NotesScreen') };
 });
-jest.mock('../../screens/CloudBackupScreen', () => {
-  const React = require('react');
-  return { __esModule: true, default: () => React.createElement('CloudBackupScreen') };
-});
 jest.mock('../../screens/SettingsScreen', () => {
   const React = require('react');
   return { __esModule: true, default: () => React.createElement('SettingsScreen') };

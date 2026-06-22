@@ -20,7 +20,6 @@ import StatusScreen       from '../screens/StatusScreen';
 import ContactsScreen     from '../screens/ContactsScreen';
 import CalendarScreen     from '../screens/CalendarScreen';
 import NotesScreen        from '../screens/NotesScreen';
-import CloudBackupScreen  from '../screens/CloudBackupScreen';
 import SettingsScreen     from '../screens/SettingsScreen';
 import AppearanceScreen  from '../screens/AppearanceScreen';
 import ProfileScreen     from '../screens/ProfileScreen';
@@ -190,7 +189,6 @@ export default function AppNavigator() {
             <Stack.Screen name="Contacts"    component={ContactsScreen}    />
             <Stack.Screen name="Calendar"    component={CalendarScreen}    />
             <Stack.Screen name="Notes"       component={NotesScreen}       />
-            <Stack.Screen name="CloudBackup" component={CloudBackupScreen} />
             <Stack.Screen name="Settings"    component={SettingsScreen}    />
             <Stack.Screen name="Appearance"      component={AppearanceScreen}      />
             <Stack.Screen name="Profile"         component={ProfileScreen}         />
