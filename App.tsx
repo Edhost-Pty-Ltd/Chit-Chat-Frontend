@@ -3,6 +3,10 @@ import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
+
+// Import Firebase config FIRST to ensure it's initialized before any contexts
+import './src/config/firebase';
+
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { CallProvider } from './src/context/CallContext';

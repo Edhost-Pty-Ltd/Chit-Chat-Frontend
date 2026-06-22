@@ -9,6 +9,7 @@
 // TODO: Implement proper auth bridge or migrate to full JS SDK when phone auth
 // supports it without requiring reCAPTCHA manual handling.
 
+import { Platform } from 'react-native';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
@@ -22,27 +23,37 @@ const firebaseConfig = {
   appId:             '1:825582316169:web:ea4abdaa918504fe77f458',
 };
 
+console.log('[Firebase] Initializing Firebase...');
+
 // Prevent duplicate app initialization on hot reload
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+console.log('[Firebase] Firebase app initialized:', app.name);
 
 // Firestore — real-time database (JS SDK)
 export const db = getFirestore(app);
 
+console.log('[Firebase] Firestore initialized');
+
 // Firebase Storage — voice note audio file hosting
 export const storage = getStorage(app);
 
-// Enable offline persistence for better reliability
+console.log('[Firebase] Storage initialized');
+
+// Enable offline persistence for better reliability (web only)
 // This allows Firestore to work offline and sync when connection is restored
-try {
-  enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-      console.warn('[Firebase] Persistence failed: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-      console.warn('[Firebase] Persistence not available in this browser');
-    }
-  });
-} catch (error) {
-  console.warn('[Firebase] Persistence initialization error:', error);
+if (Platform.OS === 'web') {
+  try {
+    enableIndexedDbPersistence(db).catch((err) => {
+      if (err.code === 'failed-precondition') {
+        console.warn('[Firebase] Persistence failed: Multiple tabs open');
+      } else if (err.code === 'unimplemented') {
+        console.warn('[Firebase] Persistence not available in this browser');
+      }
+    });
+  } catch (error) {
+    console.warn('[Firebase] Persistence initialization error:', error);
+  }
 }
 
 export default app;
