@@ -196,22 +196,31 @@ export default function SignInScreen() {
         try {
           await signInToContext(fullNumber);
           console.log('[SignInScreen] Sign-in to context successful');
-          // Firebase auth state will update automatically via onAuthStateChanged
-          // Navigation will happen via AppNavigator once auth state updates
+          
+          // Force navigation to reset the stack and ensure we go to chats
+          // This fixes the issue on physical devices where auth state might not update immediately
+          setLoading(false);
+          
+          // Use replace to reset navigation stack
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Chats' }],
+          });
         } catch (contextError: any) {
           console.error('[SignInScreen] Error signing in to context:', contextError);
           setErrorMsg(contextError.message || 'Failed to complete sign-in. Please try again.');
+          setLoading(false);
         }
       } else {
         console.log('[SignInScreen] OTP verification failed:', authError);
         setErrorMsg(authError || 'Incorrect code. Please try again.');
         setOtp(['', '', '', '', '', '']);
         otpRefs.current[0]?.focus();
+        setLoading(false);
       }
     } catch (err: any) {
       console.error('[SignInScreen] Exception during verification:', err);
       setErrorMsg(err.message || 'Verification failed. Please try again.');
-    } finally {
       setLoading(false);
     }
   };

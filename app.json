@@ -12,7 +12,9 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Chit-Chat needs access to your microphone to record voice notes.",
-        "NSContactsUsageDescription": "Chit-Chat needs access to your contacts to help you find friends on the app."
+        "NSContactsUsageDescription": "Chit-Chat needs access to your contacts to help you find friends on the app.",
+        "NSLocationWhenInUseUsageDescription": "Chit-Chat needs access to your location to share it with your contacts.",
+        "NSLocationAlwaysUsageDescription": "Chit-Chat needs access to your location to share live location updates."
       }
     },
     "plugins": [
@@ -62,6 +64,16 @@
           "savePhotosPermission": "Chit-Chat needs permission to save photos to your gallery.",
           "isAccessMediaLocationEnabled": true
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Chit-Chat needs access to your location to share it with your contacts.",
+          "locationAlwaysPermission": "Chit-Chat needs access to your location to share live location updates.",
+          "locationWhenInUsePermission": "Chit-Chat needs access to your location to share it with your contacts.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
       ]
     ],
     "android": {
@@ -85,7 +97,10 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
       ],
       "softwareKeyboardLayoutMode": "pan",
       "navigationBar": {

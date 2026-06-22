@@ -3,13 +3,13 @@
 
 import React, { useEffect, useRef } from 'react';
 import {
-  View, StyleSheet, TouchableOpacity, Modal, Platform, Animated,
+  View, StyleSheet, TouchableOpacity, Modal, Platform, Animated, Vibration,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { setAudioModeAsync, AudioMode } from 'expo-audio';
 import { AppText, AppIcon } from '../context/ThemeContext';
 import { Avatar } from '.';
+import { useRingtone } from '../hooks/useRingtone';
 import { COLORS, RADIUS, SHADOW } from '../types/theme';
 import type { IncomingCallData } from '../types/call';
 
@@ -22,6 +22,7 @@ interface IncomingCallOverlayProps {
 
 export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: IncomingCallOverlayProps) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const ringtone = useRingtone();
 
   // Pulse animation for avatar
   useEffect(() => {
@@ -45,42 +46,39 @@ export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: Incom
     }
   }, [visible, pulseAnim]);
 
-  // Play ringtone
+  // Play ringtone and vibrate when call comes in
   useEffect(() => {
-    const setupAudio = async () => {
-      if (!visible) return;
-
-      try {
-        console.log('[IncomingCallOverlay] Setting up audio mode...');
-        
-        // Set audio mode for phone calls using expo-audio
-        await setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          allowsRecordingIOS: false,
-          shouldPlayInBackground: true,
-        } as unknown as AudioMode);
-
-        // For now, just log that we'd play a ringtone
-        // You can add a custom ringtone file to assets later
-        console.log('[IncomingCallOverlay] Audio mode configured for incoming call');
-        
-        // TODO: Add custom ringtone with expo-audio's useAudioPlayer hook
-        // This would be implemented in a future update
-      } catch (error) {
-        console.error('[IncomingCallOverlay] Error setting audio mode:', error);
-        // Don't crash the app if audio setup fails
-      }
-    };
-
-    if (visible) {
-      setupAudio();
+    if (visible && call) {
+      console.log('[IncomingCallOverlay] Starting ringtone and vibration...');
+      
+      // Start ringtone
+      ringtone.play();
+      
+      // Start vibration pattern (0.5s on, 0.5s off, repeat)
+      const vibrationPattern = [0, 500, 500]; // delay, vibrate, pause
+      Vibration.vibrate(vibrationPattern, true); // true = repeat
+      
+      return () => {
+        console.log('[IncomingCallOverlay] Stopping ringtone and vibration...');
+        ringtone.stop();
+        Vibration.cancel();
+      };
     }
+  }, [visible, call]);
 
-    return () => {
-      // Cleanup if needed
-      console.log('[IncomingCallOverlay] Cleaning up audio...');
-    };
-  }, [visible]);
+  // Handle answer - stop ringtone and vibration
+  const handleAnswer = () => {
+    ringtone.stop();
+    Vibration.cancel();
+    onAnswer();
+  };
+
+  // Handle reject - stop ringtone and vibration
+  const handleReject = () => {
+    ringtone.stop();
+    Vibration.cancel();
+    onReject();
+  };
 
   const getInitials = (name: string) => {
     const parts = name.trim().split(/\s+/);
@@ -136,7 +134,7 @@ export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: Incom
             {/* Reject button */}
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={onReject}
+              onPress={handleReject}
               activeOpacity={0.8}
             >
               <View style={[styles.actionIcon, styles.rejectIcon]}>
@@ -150,7 +148,7 @@ export function IncomingCallOverlay({ visible, call, onAnswer, onReject }: Incom
             {/* Answer button */}
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={onAnswer}
+              onPress={handleAnswer}
               activeOpacity={0.8}
             >
               <View style={[styles.actionIcon, styles.answerIcon]}>

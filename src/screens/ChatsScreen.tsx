@@ -179,36 +179,64 @@ function NewGroupSheet({
   onBack,
   onDone,
   contacts,
+  currentUserId,
+  onNavigateToGroup,
 }: {
   onBack: () => void;
   onDone: () => void;
   contacts: AppContact[];
+  currentUserId: string;
+  onNavigateToGroup: (chatId: string, groupName: string) => void;
 }) {
   const [selected,  setSelected]  = useState<string[]>([]);
   const [groupName, setGroupName] = useState('');
   const [nameError, setNameError] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const toggle = (userId: string) =>
     setSelected((prev) => prev.includes(userId) ? prev.filter((x) => x !== userId) : [...prev, userId]);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!groupName.trim()) { setNameError('Please enter a group name.'); return; }
     if (selected.length < 1) { setNameError('Select at least one contact.'); return; }
-    onDone();
+    
+    setCreating(true);
+    try {
+      const { createGroupChat } = await import('../hooks/useChatActions');
+      const chatId = await createGroupChat(currentUserId, selected, groupName.trim());
+      console.log('[NewGroupSheet] Group created:', chatId);
+      onDone(); // Close modal
+      onNavigateToGroup(chatId, groupName.trim()); // Navigate to group chat
+    } catch (err) {
+      console.error('[NewGroupSheet] Failed to create group:', err);
+      setNameError('Failed to create group. Please try again.');
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
     <>
       <View style={styles.sheetSubHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.iconPad}>
+        <TouchableOpacity onPress={onBack} style={styles.iconPad} disabled={creating}>
           <AppIcon name="chevron-back" size={22} color={COLORS.blue} />
         </TouchableOpacity>
         <AppText style={styles.sheetTitle}>New Group</AppText>
         {selected.length > 0 && groupName.trim() && (
-          <TouchableOpacity onPress={handleCreate} activeOpacity={0.85}>
+          <TouchableOpacity 
+            onPress={handleCreate} 
+            activeOpacity={0.85}
+            disabled={creating}
+          >
             <LinearGradient colors={GRADIENTS.primary} style={styles.nextBtnGrad}>
-              <AppText style={styles.nextBtnText}>Create</AppText>
-              <AppIcon name="arrow-forward" size={15} color="#fff" fixedColor />
+              {creating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <AppText style={styles.nextBtnText}>Create</AppText>
+                  <AppIcon name="arrow-forward" size={15} color="#fff" fixedColor />
+                </>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -291,6 +319,8 @@ function SelectContactSheet({
   contactsError,
   reloadContacts,
   hasPermission,
+  currentUserId,
+  onNavigateToGroup,
 }: {
   onClose: () => void;
   onNavigate: (contact: AppContact) => void;
@@ -299,6 +329,8 @@ function SelectContactSheet({
   contactsError: string | null;
   reloadContacts: () => void;
   hasPermission: boolean;
+  currentUserId: string;
+  onNavigateToGroup: (chatId: string, groupName: string) => void;
 }) {
   const [mode, setMode] = useState<SheetMode>('select');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -337,7 +369,13 @@ function SelectContactSheet({
     return <NewContactSheet onBack={() => setMode('select')} onDone={onClose} />;
   }
   if (mode === 'newGroup') {
-    return <NewGroupSheet onBack={() => setMode('select')} onDone={onClose} contacts={contacts} />;
+    return <NewGroupSheet 
+      onBack={() => setMode('select')} 
+      onDone={onClose} 
+      contacts={contacts} 
+      currentUserId={currentUserId}
+      onNavigateToGroup={onNavigateToGroup}
+    />;
   }
 
   return (
@@ -627,6 +665,16 @@ export default function ChatsScreen() {
     }
   };
 
+  // Called when a group is created
+  const handleNavigateToGroup = (chatId: string, groupName: string) => {
+    if (!userId) return;
+    navigation.navigate('Chat', {
+      chatId,
+      displayName: groupName,
+      isGroup: true,
+    });
+  };
+
   const renderChat = ({ item }: { item: ChatPreview }) => {
     const displayName = getDisplayName(item);
     const isGroup = item.type === 'group';
@@ -725,6 +773,8 @@ export default function ChatsScreen() {
             contactsError={contactsError}
             reloadContacts={reloadContacts}
             hasPermission={hasPermission}
+            currentUserId={userId || ''}
+            onNavigateToGroup={handleNavigateToGroup}
           />
         </View>
       </Modal>

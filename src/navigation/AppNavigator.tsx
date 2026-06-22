@@ -27,12 +27,14 @@ import ProfileScreen     from '../screens/ProfileScreen';
 import CreateAccountScreen from '../screens/CreateAccountScreen';
 import VideoCallScreen    from '../screens/VideoCallScreen';
 import AudioCallScreen    from '../screens/AudioCallScreen';
+import JitsiCallScreen    from '../screens/JitsiCallScreen';
 import AccountSettingsScreen      from '../screens/AccountSettingsScreen';
 import PrivacySettingsScreen      from '../screens/PrivacySettingsScreen';
 import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 import ChangeNumberScreen         from '../screens/ChangeNumberScreen';
 import NotificationsScreen        from '../screens/NotificationsScreen';
 import LinkedDevicesScreen        from '../screens/LinkedDevicesScreen';
+import BlockedContactsScreen      from '../screens/BlockedContactsScreen';
 import { IncomingCallManager } from '../components';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -196,12 +198,14 @@ export default function AppNavigator() {
             <Stack.Screen name="Profile"         component={ProfileScreen}         />
             <Stack.Screen name="VideoCall"       component={VideoCallScreen}       />
             <Stack.Screen name="AudioCall"       component={AudioCallScreen}       />
+            <Stack.Screen name="JitsiCall"       component={JitsiCallScreen}       />
             <Stack.Screen name="AccountSettings"      component={AccountSettingsScreen}      />
             <Stack.Screen name="PrivacySettings"      component={PrivacySettingsScreen}      />
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
             <Stack.Screen name="ChangeNumber"         component={ChangeNumberScreen}         />
             <Stack.Screen name="Notifications"        component={NotificationsScreen}        />
             <Stack.Screen name="LinkedDevices"        component={LinkedDevicesScreen}        />
+            <Stack.Screen name="BlockedContacts"      component={BlockedContactsScreen}      />
           </>
         ) : (
           // ── Unauthenticated screens (or authenticated without profile) ───
