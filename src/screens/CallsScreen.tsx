@@ -13,7 +13,7 @@ import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import type { CallHistoryItem } from '../types/call';
 import type { RootStackParamList } from '../types';
-import { AppBg, AppText, AppIcon, useForeground } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
@@ -198,6 +198,7 @@ function ContactPickerSheet({
   contacts: any[];
   loading: boolean;
 }) {
+  const { bevel } = useGlass();
   return (
     <Modal visible={visible} transparent animationType="slide"
       onRequestClose={onClose} statusBarTranslucent>
@@ -232,7 +233,7 @@ function ContactPickerSheet({
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
             {contacts.map((c) => (
-              <TouchableOpacity key={c.userId} style={styles.contactCard}
+              <TouchableOpacity key={c.userId} style={[styles.contactCard, bevel]}
                 activeOpacity={0.75} onPress={() => onSelectAudio(c.userId, c.displayName, c.photoUri || c.firebasePhotoURL || null)}>
                 <Avatar 
                   initials={getInitials(c.displayName)} 
@@ -268,6 +269,7 @@ export default function CallsScreen() {
   const { callHistory, loading, error } = useCallHistory(user?.uid ?? null);
   const { contacts, loading: contactsLoading } = useContacts();
   const outgoingCall = useOutgoingCall();
+  const { bevel } = useGlass();
   
   const [tab, setTab] = useState<CallTab>('All');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -481,7 +483,7 @@ export default function CallsScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.callCard}
+        style={[styles.callCard, bevel]}
         onPress={() => handleCallRowPress(item)}
         activeOpacity={0.7}
       >
@@ -585,7 +587,7 @@ export default function CallsScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity key={t} onPress={() => setTab(t)}
-              style={styles.tabPillInactive} activeOpacity={0.7}>
+              style={[styles.tabPillInactive, bevel]} activeOpacity={0.7}>
               <AppText style={styles.tabTextInactive}>{t}</AppText>
             </TouchableOpacity>
           );
@@ -679,9 +681,6 @@ const styles = StyleSheet.create({
   },
   tabPillInactive: {
     paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADIUS.full,
-    backgroundColor: 'rgba(180,225,245,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
   },
   tabTextActive:   { fontSize: 13, fontWeight: '700', color: '#fff' },
   tabTextInactive: { fontSize: 13, fontWeight: '500', color: COLORS.sub },
@@ -690,16 +689,8 @@ const styles = StyleSheet.create({
 
   callCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: 'rgba(180,225,245,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 13,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   callMeta:       { flex: 1 },
   callName:       { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 3 },
@@ -755,16 +746,8 @@ const styles = StyleSheet.create({
   contactCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     marginHorizontal: 14, marginBottom: 8,
-    backgroundColor: 'rgba(180,225,245,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   contactMeta: { flex: 1 },
   contactName: { fontSize: 14, fontWeight: '600', color: COLORS.text },

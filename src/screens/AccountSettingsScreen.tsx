@@ -6,7 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
@@ -22,9 +22,10 @@ type RowProps = {
 function Row({ icon, label, sub, value, onToggle, onPress, danger, rightLabel }: RowProps) {
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
+  const { bevel } = useGlass();
   return (
     <TouchableOpacity
-      style={[styles.row, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+      style={[styles.row, bevel]}
       onPress={onPress} activeOpacity={onPress ? 0.75 : 1}
     >
       <AppIcon glass tileSize={38} name={icon as any} size={18}
@@ -130,7 +131,7 @@ const styles = StyleSheet.create({
   title:  { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
   scroll: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 40, gap: 8 },
   sectionLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 4, paddingBottom: 2, paddingTop: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 13, ...SHADOW.card },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 13 },
   rowMeta:    { flex: 1 },
   rowLabel:   { fontSize: 14, fontWeight: '500' },
   rowSub:     { fontSize: 12, marginTop: 2 },

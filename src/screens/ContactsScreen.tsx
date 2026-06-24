@@ -7,7 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { useAuth } from '../hooks/useAuth';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
@@ -37,7 +37,7 @@ export default function ContactsScreen() {
   
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
-  
+  const { bevel } = useGlass();
   const [query, setQuery] = useState('');
   const [calling, setCalling] = useState(false);
   const [callingContactId, setCallingContactId] = useState<string | null>(null);
@@ -132,7 +132,7 @@ export default function ContactsScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.contactCard}
+        style={[styles.contactCard, bevel]}
         activeOpacity={0.75}
         onPress={() => handleChat(item)}
         disabled={!canCall}
@@ -312,17 +312,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: 'rgba(180,225,245,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14,
     paddingVertical: 13,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   contactMeta: { flex: 1 },
   contactName: { fontSize: 14, fontWeight: '700', color: COLORS.text },

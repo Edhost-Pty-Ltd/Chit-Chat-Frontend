@@ -12,7 +12,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import { db } from '../config/firebase';
 import { uploadFile, generateFileName } from '../config/storage';
 import { useAuth } from '../context/AuthContext';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
 
 export default function ProfileScreen() {
@@ -20,6 +20,7 @@ export default function ProfileScreen() {
   const { phone, displayName, setDisplayName, avatarUri, setAvatarUri } = useAuth();
   const { FG }  = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
 
   const [editingName, setEditingName] = useState(false);
   const [draftName,   setDraftName]   = useState(displayName || 'John Doe');
@@ -157,7 +158,7 @@ export default function ProfileScreen() {
 
           {/* Name — tap anywhere on the card to edit */}
           <TouchableOpacity
-            style={styles.infoCard}
+            style={[styles.infoCard, bevel]}
             activeOpacity={0.8}
             onPress={() => {
               setDraftName(shownName);
@@ -195,7 +196,7 @@ export default function ProfileScreen() {
 
           {/* Phone — tap to go directly to Change Number */}
           <TouchableOpacity
-            style={styles.infoCard}
+            style={[styles.infoCard, bevel]}
             activeOpacity={0.8}
             onPress={() => navigation.navigate('ChangeNumber' as never)}
           >
@@ -259,10 +260,8 @@ const styles = StyleSheet.create({
   section:  { gap: 10 },
   infoCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    ...GLASS.card,
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 14,
-    ...SHADOW.card,
   },
   infoContent: { flex: 1 },
   infoLabel:   { fontSize: 11, fontWeight: '600', color: COLORS.sub, marginBottom: 3 },

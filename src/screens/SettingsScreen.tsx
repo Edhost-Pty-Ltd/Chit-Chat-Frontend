@@ -10,7 +10,7 @@ import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../context/AuthContext';
 
-import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme, useGlass } from '../context/ThemeContext';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
 
@@ -23,7 +23,6 @@ const SETTINGS_SECTIONS: {
     items: [
       { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar'     },
       { id: 'notes',    icon: 'document-text-outline', label: 'Notes'        },
-      { id: 'backup',   icon: 'cloud-upload-outline',  label: 'Cloud Backup' },
     ],
   },
   {
@@ -57,10 +56,10 @@ export default function SettingsScreen() {
   const { signOut, phone, displayName } = useAuth();
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
+  const { bevel } = useGlass();
 
   const handleItem = (id: string) => {
     if (id === 'signout')    { signOut(); return; }
-    if (id === 'backup')     navigation.navigate('CloudBackup');
     if (id === 'calendar')   navigation.navigate('Calendar');
     if (id === 'notes')      navigation.navigate('Notes');
     if (id === 'appearance') navigation.navigate('Appearance');
@@ -82,7 +81,7 @@ export default function SettingsScreen() {
 
         {/* Profile — glass card — tap to open profile */}
         <TouchableOpacity
-          style={styles.profileCard}
+          style={[styles.profileCard, bevel]}
           activeOpacity={0.8}
           onPress={() => navigation.navigate('Profile')}
         >
@@ -99,7 +98,7 @@ export default function SettingsScreen() {
             {section.items.map((item) => (
               <TouchableOpacity
                 key={item.id}
-                style={styles.settingsCard}
+                style={[styles.settingsCard, bevel]}
                 activeOpacity={0.75}
                 onPress={() => handleItem(item.id)}
               >
@@ -139,13 +138,9 @@ const styles = StyleSheet.create({
   // Profile card — blue-tinted glassmorphism
   profileCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: 'rgba(180,225,245,0.22)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    ...SHADOW.card,
     marginBottom: 10,
   },
   profileText: { flex: 1 },
@@ -158,13 +153,9 @@ const styles = StyleSheet.create({
   // Each settings row — blue-tinted glassmorphism
   settingsCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: 'rgba(180,225,245,0.22)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    ...SHADOW.card,
   },
   iconBoxDanger: {}, // kept for legacy reference — glass tile handles danger styling via fixedColor
   itemLabel:       { flex: 1, fontSize: 14, fontWeight: '500', color: COLORS.text },

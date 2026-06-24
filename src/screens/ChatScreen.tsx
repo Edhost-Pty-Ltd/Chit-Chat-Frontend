@@ -54,7 +54,7 @@ import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
@@ -156,6 +156,7 @@ export default function ChatScreen() {
   const { chatId, displayName, isGroup, otherUserId, otherUserPhoto } = route.params;
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [mediaLibraryPermission, requestMediaLibraryPermission] = useMediaLibraryPermissions();
@@ -1442,7 +1443,7 @@ export default function ChatScreen() {
               activeOpacity={1} 
               onPress={() => setMenuOpen(false)} 
             />
-            <View style={[styles.menuCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+            <View style={[styles.menuCard, bevel]}>
               <TouchableOpacity
                 style={styles.menuItem}
                 onPress={async () => {
@@ -1680,7 +1681,7 @@ export default function ChatScreen() {
               { icon: 'location-outline' as const, label: 'Location', action: handleOpenLocationMenu },
               { icon: 'person-outline' as const, label: 'Contact', action: () => Alert.alert('Contact', 'Share contact') },
             ].map((item) => (
-              <TouchableOpacity key={item.label} style={[styles.attachItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+              <TouchableOpacity key={item.label} style={[styles.attachItem, bevel]}
                 onPress={item.action} activeOpacity={0.8}>
                 <View style={styles.attachIconWrap}>
                   <AppIcon name={item.icon} size={26} color={COLORS.blue} fixedColor />
@@ -1712,7 +1713,7 @@ export default function ChatScreen() {
 
           {/* Current Location */}
           <TouchableOpacity 
-            style={[styles.locationOption, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            style={[styles.locationOption, bevel]}
             onPress={handleSendCurrentLocation}
             activeOpacity={0.8}
           >
@@ -1730,7 +1731,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
 
           {/* Live Location */}
-          <View style={[styles.locationOption, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+          <View style={[styles.locationOption, bevel]}>
             <View style={styles.locationIconWrap}>
               <AppIcon name="navigate" size={28} color={COLORS.blue} fixedColor />
             </View>
@@ -1892,7 +1893,7 @@ export default function ChatScreen() {
                       
                       return (
                         <TouchableOpacity
-                          style={[styles.searchResultItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                          style={[styles.searchResultItem, bevel]}
                           activeOpacity={0.7}
                           onPress={() => {
                             scrollToMessage(item.messageId);
@@ -1992,7 +1993,7 @@ export default function ChatScreen() {
                   ].map((a) => (
                     <TouchableOpacity 
                       key={a.label} 
-                      style={[styles.profileActionBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]} 
+                      style={[styles.profileActionBtn, bevel]} 
                       onPress={a.onPress} 
                       activeOpacity={0.8}
                       disabled={isGroup}
@@ -2014,7 +2015,7 @@ export default function ChatScreen() {
                       PARTICIPANTS ({groupMembers.length})
                     </AppText>
                     {loadingMembers ? (
-                      <View style={[styles.profileMemberLoadingBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                      <View style={[styles.profileMemberLoadingBox, bevel]}>
                         <ActivityIndicator size="small" color={COLORS.blue} />
                         <AppText style={[styles.profileMemberLoadingText, { color: FG.secondary }]}>
                           Loading participants...
@@ -2032,7 +2033,7 @@ export default function ChatScreen() {
                         return (
                           <View 
                             key={member.userId} 
-                            style={[styles.profileMemberRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                            style={[styles.profileMemberRow, bevel]}
                           >
                             <Avatar 
                               initials={getInitials(member.displayName)} 
@@ -2054,7 +2055,7 @@ export default function ChatScreen() {
                         );
                       })
                     ) : (
-                      <View style={[styles.profileMemberEmptyBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                      <View style={[styles.profileMemberEmptyBox, bevel]}>
                         <AppIcon name="people-outline" size={28} color={FG.secondary} />
                         <AppText style={[styles.profileMemberEmptyText, { color: FG.secondary }]}>
                           No participants found
@@ -2071,7 +2072,7 @@ export default function ChatScreen() {
                       PAST MEMBERS {pastMembers.length > 0 ? `(${pastMembers.length})` : ''}
                     </AppText>
                     {loadingPastMembers ? (
-                      <View style={[styles.profileMemberLoadingBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                      <View style={[styles.profileMemberLoadingBox, bevel]}>
                         <ActivityIndicator size="small" color={COLORS.blue} />
                         <AppText style={[styles.profileMemberLoadingText, { color: FG.secondary }]}>
                           Loading past members...
@@ -2084,7 +2085,7 @@ export default function ChatScreen() {
                         return (
                           <View 
                             key={member.userId} 
-                            style={[styles.profilePastMemberRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                            style={[styles.profilePastMemberRow, bevel]}
                           >
                             <Avatar 
                               initials={getInitials(member.displayName)} 
@@ -2106,7 +2107,7 @@ export default function ChatScreen() {
                         );
                       })
                     ) : (
-                      <View style={[styles.profileMemberEmptyBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                      <View style={[styles.profileMemberEmptyBox, bevel]}>
                         <AppIcon name="people-outline" size={28} color={FG.secondary} />
                         <AppText style={[styles.profileMemberEmptyText, { color: FG.secondary }]}>
                           No past members
@@ -2122,7 +2123,7 @@ export default function ChatScreen() {
                 </AppText>
                 {messages.filter(m => m.type === 'image').length > 0 ? (
                   <TouchableOpacity 
-                    style={[styles.profileMediaRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                    style={[styles.profileMediaRow, bevel]}
                     activeOpacity={0.8}
                   >
                     <AppText style={[styles.profileMediaLabel, { color: textColor }]}>
@@ -2136,7 +2137,7 @@ export default function ChatScreen() {
                     </View>
                   </TouchableOpacity>
                 ) : (
-                  <View style={[styles.infoMediaBox, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                  <View style={[styles.infoMediaBox, bevel]}>
                     <AppIcon name="images-outline" size={28} color={FG.secondary} />
                     <AppText style={[styles.infoMediaEmpty, { color: FG.secondary }]}>
                       No media shared yet
@@ -2154,7 +2155,7 @@ export default function ChatScreen() {
                     {/* Leave Group Button */}
                     {!showLeaveGroupConfirmation ? (
                       <TouchableOpacity 
-                        style={[styles.profileBlockBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                        style={[styles.profileBlockBtn, bevel]}
                         onPress={() => setShowLeaveGroupConfirmation(true)}
                         activeOpacity={0.8}
                         disabled={leavingGroup}
@@ -2166,7 +2167,7 @@ export default function ChatScreen() {
                       </TouchableOpacity>
                     ) : (
                       /* Inline Confirmation Card */
-                      <View style={[styles.confirmationCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                      <View style={[styles.confirmationCard, bevel]}>
                         {/* Gradient Icon */}
                         <LinearGradient 
                           colors={['rgba(255,59,48,0.20)', 'rgba(255,149,0,0.20)']}
@@ -2228,7 +2229,7 @@ export default function ChatScreen() {
                     {/* Block Contact Button */}
                     {!showBlockConfirmation ? (
                       <TouchableOpacity 
-                        style={[styles.profileBlockBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                        style={[styles.profileBlockBtn, bevel]}
                         onPress={() => setShowBlockConfirmation(true)}
                         activeOpacity={0.8}
                       >
@@ -2239,7 +2240,7 @@ export default function ChatScreen() {
                       </TouchableOpacity>
                     ) : (
                       /* Inline Confirmation Card */
-                      <View style={[styles.confirmationCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+                      <View style={[styles.confirmationCard, bevel]}>
                         {/* Gradient Icon */}
                         <LinearGradient 
                           colors={['rgba(255,59,48,0.20)', 'rgba(255,149,0,0.20)']}
@@ -2400,7 +2401,7 @@ const styles = StyleSheet.create({
   attachGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   attachItem: {
     width: 90, paddingVertical: 14, alignItems: 'center', gap: 8,
-    borderRadius: RADIUS.lg, borderWidth: 1, ...SHADOW.card,
+    borderRadius: RADIUS.lg,
   },
   attachIconWrap: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(30,156,240,0.10)', alignItems: 'center', justifyContent: 'center' },
   attachLabel: { fontSize: 11, fontWeight: '600', color: COLORS.sub, textAlign: 'center' },
@@ -2412,7 +2413,7 @@ const styles = StyleSheet.create({
   },
   cameraCloseBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   cameraShutterBtn: { alignItems: 'center', justifyContent: 'center' },
-  cameraShutter: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
+  cameraShutter: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.95)', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
 
   // ── Recording overlay ─────────────────────────────────────────────────────
   recordingOverlayContainer: {
@@ -2573,11 +2574,10 @@ const styles = StyleSheet.create({
     flex: 1,
     maxWidth: 150,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     paddingVertical: 14,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    ...SHADOW.card,
   },
   profileActionIcon: {
     width: 48,
@@ -2616,8 +2616,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    ...SHADOW.card,
   },
   profileMediaLabel: { fontSize: 14, fontWeight: '600' },
   profileMediaCount: { fontSize: 13 },
@@ -2629,11 +2627,9 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginBottom: 8,
-    ...SHADOW.card,
   },
   profileMemberName: {
     fontSize: 14,
@@ -2655,8 +2651,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 20,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    ...SHADOW.card,
   },
   profileMemberLoadingText: {
     fontSize: 13,
@@ -2668,8 +2662,6 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 24,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    ...SHADOW.card,
   },
   profileMemberEmptyText: {
     fontSize: 13,
@@ -2682,12 +2674,10 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginBottom: 8,
     opacity: 0.65, // Reduced opacity to distinguish from active members
-    ...SHADOW.card,
   },
   profilePastMemberName: {
     opacity: 0.85, // Slightly reduced opacity for the name
@@ -2704,9 +2694,7 @@ const styles = StyleSheet.create({
     right: 14,
     minWidth: 200,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     overflow: 'hidden',
-    ...SHADOW.glow,
   },
   menuItem: {
     flexDirection: 'row',
@@ -2740,10 +2728,8 @@ const styles = StyleSheet.create({
   },
   searchModal: {
     borderRadius: RADIUS.xl,
-    borderWidth: 1,
     overflow: 'hidden',
     maxHeight: '80%',
-    ...SHADOW.glow,
   },
   searchInputContainer: {
     flexDirection: 'row',
@@ -2785,9 +2771,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 14,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     gap: 12,
-    ...SHADOW.card,
   },
   searchResultContent: {
     flex: 1,
@@ -2821,11 +2805,9 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 14,
     marginBottom: 8,
-    ...SHADOW.card,
   },
   profileBlockText: {
     fontSize: 14,
@@ -2836,13 +2818,11 @@ const styles = StyleSheet.create({
   confirmationCard: {
     width: '100%',
     borderRadius: RADIUS.xl,
-    borderWidth: 1,
     paddingHorizontal: 20,
     paddingVertical: 20,
     alignItems: 'center',
     gap: 12,
     marginBottom: 8,
-    ...SHADOW.card,
   },
   confirmationIconWrap: {
     width: 56,
@@ -2930,9 +2910,7 @@ const styles = StyleSheet.create({
     gap: 16,
     padding: 16,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     marginBottom: 12,
-    ...SHADOW.card,
   },
   locationIconWrap: {
     width: 52,

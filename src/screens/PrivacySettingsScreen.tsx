@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { View, Switch, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
 
 type Visibility = 'Everyone' | 'Contacts' | 'Nobody';
@@ -14,9 +14,10 @@ function Row({ icon, label, sub, value, onToggle, onPress, rightLabel }: {
 }) {
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
+  const { bevel } = useGlass();
   return (
     <TouchableOpacity
-      style={[styles.row, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+      style={[styles.row, bevel]}
       onPress={onPress} activeOpacity={onPress ? 0.75 : 1}
     >
       <AppIcon glass tileSize={38} name={icon as any} size={18} color={iconColor} />
@@ -36,9 +37,10 @@ function Row({ icon, label, sub, value, onToggle, onPress, rightLabel }: {
 function VisibilityPicker({ label, value, onChange }: { label: string; value: Visibility; onChange: (v: Visibility) => void }) {
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
+  const { bevel } = useGlass();
   const options: Visibility[] = ['Everyone', 'Contacts', 'Nobody'];
   return (
-    <View style={[styles.row, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+    <View style={[styles.row, bevel]}>
       <AppIcon glass tileSize={38} name="people-outline" size={18} color={iconColor} />
       <AppText style={[styles.rowLabel, { color: textColor, fontFamily, flex: 1 }]}>{label}</AppText>
       <View style={styles.visRow}>
@@ -120,7 +122,7 @@ const styles = StyleSheet.create({
   title:  { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
   scroll: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 40, gap: 8 },
   sectionLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2, paddingHorizontal: 4, paddingBottom: 2, paddingTop: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: RADIUS.lg, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 13, ...SHADOW.card },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 13 },
   rowMeta:    { flex: 1 },
   rowLabel:   { fontSize: 14, fontWeight: '500' },
   rowSub:     { fontSize: 12, marginTop: 2 },

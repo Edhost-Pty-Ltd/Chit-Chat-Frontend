@@ -9,7 +9,7 @@ import {
   RTCIceCandidate,
   mediaDevices,
   MediaStream,
-} from '@livekit/react-native-webrtc';
+} from '../utils/webrtc-platform';
 
 // Public STUN servers (Google)
 const ICE_SERVERS = {
@@ -250,6 +250,67 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
     }
   }, []);
 
+  // ── Switch camera (front/back) ─────────────────────────────────────────────
+  const switchCamera = useCallback(async (facingMode: 'user' | 'environment') => {
+    try {
+      const pc = peerConnectionRef.current;
+      if (!pc || !localStreamRef.current) {
+        console.warn('[useWebRTC] Cannot switch camera: not initialized');
+        return;
+      }
+
+      console.log('[useWebRTC] Switching camera to:', facingMode);
+
+      // Get current video track
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (!oldVideoTrack) {
+        console.warn('[useWebRTC] No video track to switch');
+        return;
+      }
+
+      // Store old track settings before replacement
+      const wasEnabled = oldVideoTrack.enabled;
+
+      // Get new video stream with different facing mode
+      const newStream = await mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+          facingMode,
+        },
+      });
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      
+      // Preserve enabled state from old track
+      newVideoTrack.enabled = wasEnabled;
+      
+      // Find video sender in peer connection
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) {
+        // Replace track in peer connection (this sends to remote peer)
+        await sender.replaceTrack(newVideoTrack);
+        console.log('[useWebRTC] Video track replaced in peer connection');
+      }
+
+      // Update local stream reference
+      localStreamRef.current.removeTrack(oldVideoTrack);
+      localStreamRef.current.addTrack(newVideoTrack);
+
+      // Stop old track AFTER everything is set up
+      oldVideoTrack.stop();
+
+      // Single UI update at the end
+      setStreamVersion(v => v + 1);
+      
+      console.log('[useWebRTC] Camera switched successfully');
+    } catch (error) {
+      console.error('[useWebRTC] Failed to switch camera:', error);
+      throw error; // Re-throw to let the caller handle it
+    }
+  }, []);
+
   // ── Monitor network quality ────────────────────────────────────────────────
   const startNetworkMonitoring = useCallback(() => {
     if (!peerConnectionRef.current) return;
@@ -392,6 +453,7 @@ export function useWebRTC(handlers?: WebRTCHandlers) {
     addIceCandidate,
     toggleMute,
     toggleVideo,
+    switchCamera,
     startNetworkMonitoring,
     stopNetworkMonitoring,
     cleanup,

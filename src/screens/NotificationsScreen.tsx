@@ -6,7 +6,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useNotifications, AppNotification, NotifType } from '../context/NotificationContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
@@ -32,6 +32,7 @@ function NotifRow({ notif }: { notif: AppNotification }) {
   const { FG }     = useForeground();
   const { textColor, fontFamily } = useTypography();
   const { markRead } = useNotifications();
+  const { bevel } = useGlass();
 
   const handlePress = () => {
     markRead(notif.id);
@@ -47,10 +48,13 @@ function NotifRow({ notif }: { notif: AppNotification }) {
     <TouchableOpacity
       style={[
         styles.row,
-        {
-          backgroundColor: notif.read ? FG.glassBg : 'rgba(30,156,240,0.08)',
-          borderColor: notif.read ? FG.glassBorder : 'rgba(30,156,240,0.28)',
-        },
+        notif.read
+          ? bevel
+          : {
+              backgroundColor: 'rgba(30,156,240,0.08)',
+              borderWidth: 1,
+              borderColor: 'rgba(30,156,240,0.28)',
+            },
       ]}
       activeOpacity={0.75}
       onPress={handlePress}
@@ -167,9 +171,9 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderRadius: RADIUS.lg, borderWidth: 1,
+    borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 12,
-    ...SHADOW.card, position: 'relative',
+    position: 'relative',
   },
   unreadDot: {
     position: 'absolute', left: 6, top: '50%',

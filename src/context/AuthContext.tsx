@@ -16,7 +16,7 @@ import React, {
 } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAuth, signOut as firebaseSignOut } from '@react-native-firebase/auth';
+import { getAuth, onAuthStateChanged, signOut as fbSignOut } from '@react-native-firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -82,8 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const doSignOut = async () => {
     clearWebTimer();
     // Sign out from Firebase Auth
-    const authInstance = getAuth();
-    await firebaseSignOut(authInstance);
+    await fbSignOut(getAuth());
     // Clear AsyncStorage session data
     await AsyncStorage.multiRemove([
       KEYS.phone,
@@ -101,6 +100,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ── Hydrate on mount ──────────────────────────────────────────────────────
 
   useEffect(() => {
+    // Set a maximum loading timeout to prevent infinite loading
+    const maxLoadingTimeout = setTimeout(() => {
+      console.warn('[AuthContext] Maximum loading time reached, forcing app to open');
+      setLoading(false);
+    }, 5000); // 5 seconds max loading time
+
     (async () => {
       try {
         const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar] = await Promise.all([
@@ -140,30 +145,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
 
     // Listen to Firebase auth state changes
-    const authInstance = getAuth();
-    const unsubscribe = authInstance.onAuthStateChanged(async (user) => {
-      console.log('[AuthContext] Firebase auth state changed:', user?.uid);
-      
-      if (!user) {
-        // User signed out in Firebase, sync with local state
-        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
-        if (signedIn === 'true') {
-          console.log('[AuthContext] Firebase signed out but local state says signed in, cleaning up...');
-          await doSignOut();
+    const unsubscribe = onAuthStateChanged(getAuth(), async (user) => {
+      try {
+        console.log('[AuthContext] Firebase auth state changed:', user?.uid);
+        
+        if (!user) {
+          // User signed out in Firebase, sync with local state
+          const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+          if (signedIn === 'true') {
+            console.log('[AuthContext] Firebase signed out but local state says signed in, cleaning up...');
+            await doSignOut();
+          }
+        } else {
+          // User signed in to Firebase
+          const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+          if (signedIn !== 'true') {
+            console.log('[AuthContext] Firebase signed in but local state not updated');
+            // This case is handled by explicit signIn() call
+          }
         }
-      } else {
-        // User signed in to Firebase
-        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
-        if (signedIn !== 'true') {
-          console.log('[AuthContext] Firebase signed in but local state not updated');
-          // This case is handled by explicit signIn() call
-        }
+      } catch (error: any) {
+        // Catch and log any errors from auth state listener
+        // Don't let these crash the app
+        console.error('[AuthContext] Error in auth state listener:', error);
       }
     });
 
-    // REMOVED: Web visibility check code - will re-implement later if needed for web platform
+    // On web, also check whenever the tab becomes visible again
+    if (Platform.OS === 'web') {
+      const handleVisibilityChange = async () => {
+        if (document.visibilityState === 'visible') {
+          const [signedIn, lastActiveStr] = await Promise.all([
+            AsyncStorage.getItem(KEYS.signedIn),
+            AsyncStorage.getItem(KEYS.lastActive),
+          ]);
+          if (signedIn === 'true' && lastActiveStr) {
+            const elapsed = Date.now() - parseInt(lastActiveStr, 10);
+            if (elapsed >= WEB_SESSION_TIMEOUT_MS) {
+              await doSignOut();
+            } else {
+              scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
+            }
+          }
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+        clearTimeout(maxLoadingTimeout);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        unsubscribe();
+      };
+    }
     
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(maxLoadingTimeout);
+      unsubscribe();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -183,8 +220,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Fetch user profile from Firestore and populate displayName and avatarUri
       try {
-        const authInstance = getAuth();
-        const currentUser = authInstance.currentUser;
+        const currentUser = getAuth().currentUser;
         
         console.log('[AuthContext] Current Firebase user:', currentUser?.uid);
         

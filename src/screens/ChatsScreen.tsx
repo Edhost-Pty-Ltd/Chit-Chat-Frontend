@@ -6,6 +6,7 @@ import {
   ActivityIndicator, Image, Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import { db } from '../config/firebase';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 type NavProp   = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
 type TabType   = 'Chats' | 'Groups';
 type SheetMode = 'select' | 'newContact' | 'newGroup';
@@ -113,6 +114,7 @@ const KEY_ROWS = [
 function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
   const [number, setNumber] = useState('');
   const [name,   setName]   = useState('');
+  const { bevel } = useGlass();
   const press = (k: string) => setNumber((n) => n + k);
   const del   = () => setNumber((n) => n.slice(0, -1));
 
@@ -126,7 +128,7 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
       </View>
 
       {/* Name input — glass */}
-      <View style={styles.glassInput}>
+      <View style={[styles.glassInput, bevel]}>
         <AppIcon name="person-outline" size={18} color={COLORS.sub} />
         <TextInput style={styles.inputField} placeholder="Contact name"
           placeholderTextColor={COLORS.sub} value={name} onChangeText={setName} />
@@ -147,7 +149,7 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
         {KEY_ROWS.map((row, ri) => (
           <View key={ri} style={styles.keyRow}>
             {row.map((k) => (
-              <TouchableOpacity key={k.d} style={styles.keyBtn} activeOpacity={0.65}
+              <TouchableOpacity key={k.d} style={[styles.keyBtn, bevel]} activeOpacity={0.65}
                 onPress={() => press(k.d)}>
                 <AppText style={styles.keyDigit}>{k.d}</AppText>
                 {k.s ? <AppText style={styles.keySub}>{k.s}</AppText> : null}
@@ -158,7 +160,7 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
       </View>
 
       <View style={styles.rowActions}>
-        <TouchableOpacity style={styles.cancelBtn} onPress={onBack} activeOpacity={0.8}>
+        <TouchableOpacity style={[styles.cancelBtn, bevel]} onPress={onBack} activeOpacity={0.8}>
           <AppText style={styles.cancelText}>Cancel</AppText>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.confirmBtn, (!number || !name) && styles.dimmed]}
@@ -192,6 +194,9 @@ function NewGroupSheet({
   const [groupName, setGroupName] = useState('');
   const [nameError, setNameError] = useState('');
   const [creating, setCreating] = useState(false);
+  const { bevel } = useGlass();
+  const { FG } = useForeground();
+  const { textColor } = useTypography();
 
   const toggle = (userId: string) =>
     setSelected((prev) => prev.includes(userId) ? prev.filter((x) => x !== userId) : [...prev, userId]);
@@ -243,7 +248,7 @@ function NewGroupSheet({
       </View>
 
       {/* Group name — glass */}
-      <View style={styles.glassInput}>
+      <View style={[styles.glassInput, bevel]}>
         <AppIcon name="people-outline" size={18} color={COLORS.sub} />
         <TextInput style={styles.inputField} placeholder="Group name"
           placeholderTextColor={COLORS.sub} value={groupName}
@@ -284,7 +289,7 @@ function NewGroupSheet({
           const sel = selected.includes(c.userId);
           return (
             <TouchableOpacity key={c.userId}
-              style={[styles.contactRow, sel && styles.contactRowSelected]}
+              style={[styles.contactRow, bevel, sel && styles.contactRowSelected]}
               activeOpacity={0.75}
               onPress={() => toggle(c.userId)}>
               <ChatAvatar 
@@ -294,8 +299,8 @@ function NewGroupSheet({
                 isSavedContact={c.isSaved}
               />
               <View style={styles.contactMeta}>
-                <Text style={styles.contactName}>{c.displayName}</Text>
-                <Text style={styles.contactSub} numberOfLines={1}>{formatSAPhone(c.phone)}</Text>
+                <AppText style={[styles.contactName, { color: textColor }]}>{c.displayName}</AppText>
+                <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>{formatSAPhone(c.phone)}</AppText>
               </View>
               {sel && (
                 <View style={styles.selectedIndicator}>
@@ -338,6 +343,7 @@ function SelectContactSheet({
   const [searchQuery, setSearchQuery] = useState('');
   const { FG } = useForeground();
   const { textColor } = useTypography();
+  const { bevel } = useGlass();
 
   const searchAnim = useRef(new Animated.Value(0)).current;
   const searchRef = useRef<TextInput>(null);
@@ -414,8 +420,8 @@ function SelectContactSheet({
           </Animated.View>
         ) : (
           <View style={{ flex: 1 }}>
-            <Text style={styles.sheetTitle}>Select contact</Text>
-            <Text style={styles.sheetSub}>{contacts.length} contacts</Text>
+            <Text style={[styles.sheetTitle, { color: textColor }]}>Select contact</Text>
+            <Text style={[styles.sheetSub, { color: FG.secondary }]}>{contacts.length} contacts</Text>
           </View>
         )}
 
@@ -454,7 +460,7 @@ function SelectContactSheet({
           { icon: 'people'     as const, label: 'New group',   onPress: () => { setMenuOpen(false); setMode('newGroup');   } },
           { icon: 'person-add' as const, label: 'New contact', onPress: () => { setMenuOpen(false); setMode('newContact'); } },
         ].map((a) => (
-          <TouchableOpacity key={a.label} style={styles.actionRow} activeOpacity={0.75} onPress={a.onPress}>
+          <TouchableOpacity key={a.label} style={[styles.actionRow, bevel]} activeOpacity={0.75} onPress={a.onPress}>
             <View style={styles.actionIconWrap}>
               <LinearGradient colors={GRADIENTS.primary} style={styles.actionIcon}>
                 <AppIcon name={a.icon} size={20} color="#fff" fixedColor />
@@ -474,12 +480,12 @@ function SelectContactSheet({
       {contactsLoading ? (
         <View style={styles.emptyWrap}>
           <ActivityIndicator size="large" color={COLORS.blue} />
-          <Text style={styles.emptyText}>Loading contacts…</Text>
+          <Text style={[styles.emptyText, { color: FG.secondary }]}>Loading contacts…</Text>
         </View>
       ) : contactsError ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="people-outline" size={52} color={COLORS.sub} />
-          <Text style={styles.emptyText}>{contactsError}</Text>
+          <Text style={[styles.emptyText, { color: FG.secondary }]}>{contactsError}</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={reloadContacts} activeOpacity={0.8}>
             <LinearGradient colors={GRADIENTS.primary} style={styles.retryBtnGrad}>
               <AppIcon name="refresh" size={16} color="#fff" fixedColor />
@@ -490,14 +496,14 @@ function SelectContactSheet({
       ) : filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="people-outline" size={52} color={COLORS.sub} />
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyText, { color: FG.secondary }]}>
             {searchQuery.trim() ? `No contacts match "${searchQuery}"` : 'No registered contacts found'}
           </Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
           {filtered.map((c) => (
-            <TouchableOpacity key={c.userId} style={styles.contactRow} activeOpacity={0.75}
+            <TouchableOpacity key={c.userId} style={[styles.contactRow, bevel]} activeOpacity={0.75}
               onPress={() => { setMenuOpen(false); onNavigate(c); }}>
               <ChatAvatar 
                 displayName={c.displayName}
@@ -506,8 +512,8 @@ function SelectContactSheet({
                 isSavedContact={c.isSaved}
               />
               <View style={styles.contactMeta}>
-                <Text style={styles.contactName}>{c.displayName}</Text>
-                <Text style={styles.contactSub} numberOfLines={1}>{formatSAPhone(c.phone)}</Text>
+                <AppText style={[styles.contactName, { color: textColor }]}>{c.displayName}</AppText>
+                <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>{formatSAPhone(c.phone)}</AppText>
               </View>
             </TouchableOpacity>
           ))}
@@ -524,6 +530,8 @@ export default function ChatsScreen() {
   const userId      = user?.uid ?? null;
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
+  const { bevel, iconButton } = useGlass();
+  const insets = useSafeAreaInsets();
 
   const { chats, loading: chatsLoading } = useChats(userId);
   const { contacts, loading: contactsLoading, reload: reloadContacts, hasPermission, error: contactsError } = useContacts();
@@ -712,7 +720,7 @@ export default function ChatsScreen() {
     };
 
     return (
-      <TouchableOpacity style={styles.chatCard} activeOpacity={0.75}
+      <TouchableOpacity style={[styles.chatCard, bevel]} activeOpacity={0.75}
         onPress={() => navigation.navigate('Chat', { 
           chatId: item.chatId, 
           displayName, 
@@ -786,7 +794,7 @@ export default function ChatsScreen() {
 
           {!searchOpen && (
             <TouchableOpacity
-                style={[styles.searchIconBtn, { borderColor: `${iconColor}40` }]}
+                style={iconButton}
                 onPress={openSearch}
                 activeOpacity={0.8}
               >
@@ -836,7 +844,7 @@ export default function ChatsScreen() {
               </LinearGradient>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity key={t} style={styles.tabPillInactive}
+            <TouchableOpacity key={t} style={[styles.tabPillInactive, bevel]}
               onPress={() => setTab(t)} activeOpacity={0.7}>
               <AppText style={[styles.tabLabel, { color: FG.secondary }]}>{t}</AppText>
             </TouchableOpacity>
@@ -869,13 +877,11 @@ export default function ChatsScreen() {
 
       {/* ── FAB ── */}
       <TouchableOpacity 
-        style={[styles.fab, Platform.OS === 'web' && styles.fabWeb]} 
+        style={[styles.fab, bevel, { bottom: insets.bottom + 150 }, Platform.OS === 'web' && styles.fabWeb]} 
         activeOpacity={0.85}
         onPress={() => setSheetOpen(true)}
       >
-        <LinearGradient colors={GRADIENTS.primary} style={styles.fabInner}>
-          <AppIcon name="add" size={28} color="#fff" fixedColor />
-        </LinearGradient>
+        <AppIcon name="add" size={28} color={COLORS.blue} fixedColor />
       </TouchableOpacity>
 
       <BottomNav active="chats" />
@@ -962,14 +968,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22, 
     paddingVertical: 9, 
     borderRadius: RADIUS.full, 
-    backgroundColor: 'rgba(30,156,240,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    shadowColor: '#1E9CF0',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.10,
-    shadowRadius: 5,
-    elevation: 2,
   },
   tabLabel:        { fontSize: 14, fontWeight: '600', color: COLORS.sub },
   tabLabelActive:  { fontSize: 14, fontWeight: '700', color: '#fff' },
@@ -980,15 +978,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 12,
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: 'rgba(180,225,245,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
+    // bevel colors applied at runtime via useGlass() so they adapt to dark/light
   },
   // Avatar wrapper — relative for status dot
   chatAvatarWrap: { position: 'relative', width: 52, height: 52 },
@@ -1012,7 +1002,7 @@ const styles = StyleSheet.create({
   badgeText:      { color: '#fff', fontSize: 11, fontWeight: '700' },
 
   // ── FAB ──────────────────────────────────────────────────────────────────
-  fab:      { position: 'absolute', right: 20, bottom: 130, width: 56, height: 56, borderRadius: 28, ...SHADOW.glow },
+  fab:      { position: 'absolute', right: 20, bottom: 130, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   fabWeb:   { right: 16, bottom: 120 },
   fabInner: { flex: 1, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
 
@@ -1043,17 +1033,11 @@ const styles = StyleSheet.create({
   actionBlock: { paddingHorizontal: 14, gap: 8, marginBottom: 4 },
   actionRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 13,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   actionIconWrap: {},
   actionIcon: {
@@ -1072,17 +1056,11 @@ const styles = StyleSheet.create({
   contactRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     marginHorizontal: 14, marginBottom: 8,
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 11,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   contactMeta: { flex: 1 },
   contactName: { fontSize: 14, fontWeight: '600', color: COLORS.text },
@@ -1122,17 +1100,11 @@ const styles = StyleSheet.create({
   chipsRow: { paddingHorizontal: 14, paddingBottom: 10, gap: 8 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.full,
     paddingHorizontal: 10, paddingVertical: 6,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 1, height: 2 },
-    shadowOpacity: 0.14,
-    shadowRadius: 6,
-    elevation: 2,
   },
   chipDot:  { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   chipInit: { fontSize: 9, color: '#fff', fontWeight: '700' },
@@ -1150,17 +1122,11 @@ const styles = StyleSheet.create({
   glassInput: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: 14, marginBottom: 10,
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.md,
     paddingHorizontal: 14, paddingVertical: 12,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 3 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 3,
   },
   inputField: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0 },
 
@@ -1179,17 +1145,11 @@ const styles = StyleSheet.create({
   keyRow:  { flexDirection: 'row', gap: 10 },
   keyBtn:  {
     flex: 1, paddingVertical: 14,
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   keyDigit: { fontSize: 26, fontWeight: '300', color: COLORS.text, lineHeight: 30 },
   keySub:   { fontSize: 9, fontWeight: '600', color: COLORS.sub, letterSpacing: 1 },
@@ -1199,18 +1159,12 @@ const styles = StyleSheet.create({
   cancelBtn:   { 
     flex: 1, 
     paddingVertical: 14, 
-    backgroundColor: 'rgba(180,225,245,0.22)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.60)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg, 
     alignItems: 'center', 
     justifyContent: 'center',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 3 },
-    shadowOpacity: 0.14,
-    shadowRadius: 8,
-    elevation: 3,
   },
   cancelText:  { fontSize: 14, fontWeight: '600', color: COLORS.sub },
   confirmBtn:  { flex: 2 },
@@ -1232,7 +1186,7 @@ const styles = StyleSheet.create({
   },
   ringInner: {
     width: 50, height: 50, borderRadius: 25,
-    backgroundColor: '#fff', overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.95)', overflow: 'hidden',
   },
 
   // Dropdown menu

@@ -138,6 +138,13 @@ export interface ForegroundTokens {
   icon:        string;
   glassBg:     string;
   glassBorder: string;
+  // Beveled glass rim — directional borders give a 3D edge with a clear centre.
+  // Light hits top/left (bright), bottom/right sits in shadow (dark).
+  bevelBorder: string;
+  bevelTop:    string;
+  bevelLeft:   string;
+  bevelBottom: string;
+  bevelRight:  string;
 }
 
 const LIGHT_FG: ForegroundTokens = {
@@ -145,8 +152,13 @@ const LIGHT_FG: ForegroundTokens = {
   secondary:   '#5a7fa0',
   faint:       'rgba(90,127,160,0.55)',
   icon:        '#5a7fa0',
-  glassBg:     'rgba(255,255,255,0.22)',
-  glassBorder: 'rgba(255,255,255,0.45)',
+  glassBg:     'transparent',
+  glassBorder: 'rgba(30,156,240,0.18)',
+  bevelBorder: 'rgba(255,255,255,0.25)',
+  bevelTop:    'rgba(255,255,255,0.85)',
+  bevelLeft:   'rgba(255,255,255,0.55)',
+  bevelBottom: 'rgba(10,77,122,0.35)',
+  bevelRight:  'rgba(10,77,122,0.22)',
 };
 
 const DARK_FG: ForegroundTokens = {
@@ -156,6 +168,14 @@ const DARK_FG: ForegroundTokens = {
   icon:        'rgba(255,255,255,0.80)',
   glassBg:     'rgba(255,255,255,0.15)',
   glassBorder: 'rgba(255,255,255,0.30)',
+  // On dark backgrounds a dark shadow edge is invisible, so every edge uses a
+  // white rim (brightest on top for the 3D highlight, dimmer on the bottom).
+  // This keeps the full glass outline visible, matching the light-mode look.
+  bevelBorder: 'rgba(255,255,255,0.30)',
+  bevelTop:    'rgba(255,255,255,0.85)',
+  bevelLeft:   'rgba(255,255,255,0.55)',
+  bevelBottom: 'rgba(255,255,255,0.30)',
+  bevelRight:  'rgba(255,255,255,0.38)',
 };
 
 // ─── Background type ──────────────────────────────────────────────────────────
@@ -292,6 +312,43 @@ export function useTypography() {
   return { fontFamily, textColor, iconColor, FG };
 }
 
+// ─── useGlass ─────────────────────────────────────────────────────────────────
+// Returns ready-to-spread style objects for the app's beveled "clear glass"
+// look. Adapts automatically to light/dark backgrounds. The centre stays fully
+// transparent (gradient shows through); the 3D comes from directional borders.
+export function useGlass() {
+  const { FG } = useContext(ThemeContext);
+
+  // Beveled glass surface — spread onto any card/container View.
+  const bevel = {
+    backgroundColor: 'transparent' as const,
+    borderWidth: 1.5,
+    borderColor: FG.bevelBorder,
+    borderTopColor: FG.bevelTop,
+    borderLeftColor: FG.bevelLeft,
+    borderBottomColor: FG.bevelBottom,
+    borderRightColor: FG.bevelRight,
+  };
+
+  // Circular glass icon button (matches the ChatsScreen search icon).
+  const iconButton = {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: 'transparent' as const,
+    borderWidth: 1.5,
+    borderColor: FG.bevelBorder,
+    borderTopColor: FG.bevelTop,
+    borderLeftColor: FG.bevelLeft,
+    borderBottomColor: FG.bevelBottom,
+    borderRightColor: FG.bevelRight,
+  };
+
+  return { bevel, iconButton, FG };
+}
+
 // ─── AppText ─────────────────────────────────────────────────────────────────
 // Drop-in for <Text>. Applies user's fontFamily always.
 // Applies user's textColor unless fixedColor={true} is passed
@@ -347,7 +404,7 @@ export function AppIcon({
 
   if (!glass) return icon;
 
-  // 3D glass tile — frosted white surface, light top border, depth shadow
+  // 3D glass tile — beveled clear glass, consistent with useGlass().iconButton
   return (
     <View style={[
       {
@@ -356,19 +413,15 @@ export function AppIcon({
         borderRadius: tileSize * 0.28,
         alignItems: 'center',
         justifyContent: 'center',
-        // Glass fill — white tint over whatever background shows through
-        backgroundColor: FG.glassBg,
-        borderWidth: 1,
-        borderColor: FG.glassBorder,
-        // 3D depth via shadow
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.15,
-        shadowRadius: 6,
-        elevation: 4,
-        // Top-edge highlight (inner bevel simulation via border)
-        borderTopColor: 'rgba(255,255,255,0.60)',
-        borderTopWidth: 1.5,
+        // Clear centre — no fill, no elevation (avoids Android white-fill artifact)
+        backgroundColor: 'transparent',
+        // Directional bevel rim — adapts to light/dark via FG tokens
+        borderWidth: 1.5,
+        borderColor: FG.bevelBorder,
+        borderTopColor: FG.bevelTop,
+        borderLeftColor: FG.bevelLeft,
+        borderBottomColor: FG.bevelBottom,
+        borderRightColor: FG.bevelRight,
       },
       style,
     ]}>

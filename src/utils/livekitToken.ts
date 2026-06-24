@@ -37,15 +37,15 @@ export async function generateLiveKitToken(opts: TokenOptions): Promise<string> 
 
   // Native: pass the native Firebase ID token explicitly so the backend can
   // resolve the caller even if the callable auth context isn't attached.
-  const authNs = require('@react-native-firebase/auth').default;
-  const currentUser = authNs().currentUser;
+  const { getAuth } = require('@react-native-firebase/auth');
+  const currentUser = getAuth().currentUser;
   if (!currentUser) {
     throw new Error('You must be signed in to start a call.');
   }
   const idToken = await currentUser.getIdToken();
 
-  const functionsNs = require('@react-native-firebase/functions').default;
-  const callable = functionsNs().httpsCallable('generateLiveKitToken');
+  const { getFunctions, httpsCallable } = require('@react-native-firebase/functions');
+  const callable = httpsCallable(getFunctions(), 'generateLiveKitToken');
   const result: any = await callable({ roomName, displayName, idToken });
   return result.data.token as string;
 }

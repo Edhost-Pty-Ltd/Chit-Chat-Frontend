@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { Note, NoteAttachment, DrawStroke } from '../types';
 import { NOTES } from '../data/mockData';
@@ -210,6 +210,7 @@ export default function NotesScreen() {
   const navigation = useNavigation();
   const { FG }     = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel }  = useGlass();
 
   const [notes,       setNotes]       = useState<Note[]>(NOTES);
   const [query,       setQuery]       = useState('');
@@ -357,7 +358,7 @@ export default function NotesScreen() {
   // ── Note card ──────────────────────────────────────────────────────────────
   const renderNote = ({ item }: { item: Note }) => (
     <TouchableOpacity
-      style={[styles.noteCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+      style={[styles.noteCard, bevel]}
       activeOpacity={0.75}
       onPress={() => openEdit(item)}
     >
@@ -416,7 +417,7 @@ export default function NotesScreen() {
       </View>
 
       {/* Search */}
-      <View style={[styles.searchWrap, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+      <View style={[styles.searchWrap, bevel]}>
         <AppIcon name="search-outline" size={16} color={FG.secondary} />
         <TextInput
           style={[styles.searchInput, { color: textColor }]}
@@ -658,7 +659,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
   listContent: { paddingHorizontal: 14, paddingBottom: 32 },
 
-  noteCard:      { borderRadius: RADIUS.lg, borderWidth: 1, padding: 16, ...SHADOW.card },
+  noteCard:      { borderRadius: RADIUS.lg, padding: 16 },
   noteTop:       { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 },
   noteTitle:     { fontSize: 15, fontWeight: '700', flex: 1, marginRight: 10 },
   notePreview:   { fontSize: 13, lineHeight: 20, marginBottom: 6 },

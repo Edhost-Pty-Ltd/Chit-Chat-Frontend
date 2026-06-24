@@ -1,433 +1,449 @@
 // ─── Screen: Audio Call ──────────────────────────────────────────────────────
-// Layout:
-//   • Top bar: back button, contact name, timer, chat, switch-to-video, add person
-//   • Main area: avatar, caller name, call status/duration
-//   • Optional PiP tile (top-right) when camera is enabled for preview
-//   • Bottom controls: mute, speaker, camera toggle, hang up
-//   • Integrates with WebRTC hooks for real call functionality
+// • Duration preserved when switching to/from VideoCall
+// • Chat button → opens conversation without ending call
+// • Switch to video → VideoCallScreen with same duration (call continues)
+// • Camera toggle shows local PiP (works on mobile + web)
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, TouchableOpacity, StyleSheet, Alert, Platform, Modal, Pressable, Dimensions,
+  View, TouchableOpacity, StyleSheet, Dimensions,
+  Platform, Modal, ScrollView, Pressable, BackHandler,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import RTCView from '../components/RTCView';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
-import { Avatar } from '../components';
-import { useCallContext } from '../context/CallContext';
-import { useOutgoingCall } from '../hooks/useOutgoingCall';
-import { useIncomingCallAnswer } from '../hooks/useIncomingCallAnswer';
-import { useAudioRouting } from '../hooks/useAudioRouting';
+import { useWebRTC } from '../hooks/useWebRTC';
+import { useAuth } from '../hooks/useAuth';
+import { useFloatingCall } from '../context/FloatingCallContext';
+import { db } from '../config/firebase';
+import { doc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
-import { getAuth } from '@react-native-firebase/auth';
-import { COLORS, RADIUS, SHADOW } from '../types/theme';
-import { RootStackParamList } from '../types';
-import type { NetworkQuality } from '../hooks/useWebRTC';
+
+import { AppText, AppIcon, AppBg, useGlass } from '../context/ThemeContext';
+import { Avatar } from '../components';
+import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
+import { RootStackParamList, Contact } from '../types';
+import { CONTACTS } from '../data/mockData';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'AudioCall'>;
 type RouteP  = RouteProp<RootStackParamList, 'AudioCall'>;
 
 const { height } = Dimensions.get('window');
-const PIP_W = 110;
-const PIP_H = 150;
 
 export default function AudioCallScreen() {
   const navigation = useNavigation<NavProp>();
-  const route = useRoute<RouteP>();
+  const route      = useRoute<RouteP>();
   const { callId, isOutgoing, otherParty } = route.params;
+  const { user } = useAuth();
+  const { minimizeCall, updateDuration } = useFloatingCall();
+  const { bevel } = useGlass();
 
-  const { callStatus, isMuted, isSpeakerOn, callDuration, activeCallId, setMuted, setSpeakerOn, incrementCallDuration, setCallDuration } = useCallContext();
-  const outgoingCall = useOutgoingCall();
-  const incomingCallAnswer = useIncomingCallAnswer();
-  const audioRouting = useAudioRouting();
+  const [muted,        setMuted]        = useState(false);
+  const [speakerOn,    setSpeakerOn]    = useState(false);
+  const [duration,     setDuration]     = useState(0);
+  const [addOpen,      setAddOpen]      = useState(false);
+  const [callStatus,   setCallStatus]   = useState<string>('connecting');
+  const [showQuality,  setShowQuality]  = useState(false);
 
-  // Access streams directly from hooks
-  const localStream = isOutgoing ? outgoingCall.localStream : incomingCallAnswer.localStream;
-  const remoteStream = isOutgoing ? outgoingCall.remoteStream : incomingCallAnswer.remoteStream;
-  const networkQualityFromHook = isOutgoing ? outgoingCall.networkQuality : incomingCallAnswer.networkQuality;
+  // WebRTC hook for managing peer connection and streams
+  const {
+    connectionState,
+    networkQuality,
+    initializePeerConnection,
+    createOffer,
+    createAnswer,
+    setRemoteAnswer,
+    addIceCandidate,
+    toggleMute: toggleMuteWebRTC,
+    startNetworkMonitoring,
+    cleanup: cleanupWebRTC,
+  } = useWebRTC({
+    onConnectionStateChange: (state) => {
+      console.log('[AudioCall] Connection state:', state);
+      if (state === 'connected') {
+        setCallStatus('connected');
+        startNetworkMonitoring();
+      } else if (state === 'disconnected' || state === 'failed') {
+        setCallStatus('disconnected');
+      }
+    },
+    onNetworkQualityChange: (quality) => {
+      console.log('[AudioCall] Network quality:', quality);
+      if (quality === 'poor' || quality === 'fair') {
+        setShowQuality(true);
+        setTimeout(() => setShowQuality(false), 3000);
+      }
+    },
+  });
 
-  // Use the appropriate hook based on call direction
-  const callManager = isOutgoing ? outgoingCall : incomingCallAnswer;
+  // Build contact from otherParty
+  const contact: Contact = {
+    id: parseInt(otherParty.userId) || -2,
+    name: otherParty.displayName,
+    avatar: otherParty.displayName.split(' ').map((n) => n[0]).join('').toUpperCase(),
+    color: COLORS.blue,
+    status: 'online',
+    lastMsg: '',
+    time: '',
+    unread: 0,
+  };
 
-  const [cameraEnabled, setCameraEnabled] = useState(false); // Default off for audio calls
-  const [networkQuality, setNetworkQuality] = useState<NetworkQuality>('unknown');
-  const [addOpen, setAddOpen] = useState(false);
+  const [participants, setParticipants] = useState<Contact[]>([contact]);
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const callStartTimeRef = useRef<number>(0);
-  const callIdRef = useRef<string>(callId || activeCallId || '');
-  
-  // Reset call duration when screen mounts
+  const unsubscribeCallRef = useRef<(() => void) | null>(null);
+
+  // Initialize WebRTC and call setup
   useEffect(() => {
-    console.log('[AudioCallScreen] Component mounted - initializing');
-    setCallDuration(0);
-    
-    // Set the callId in the appropriate hook ONCE
-    const effectiveCallId = callId || activeCallId;
-    if (effectiveCallId) {
-      callIdRef.current = effectiveCallId;
-      if (isOutgoing) {
-        console.log('[AudioCallScreen] Setting callId in outgoingCall hook:', effectiveCallId);
-        outgoingCall.setCallId(effectiveCallId);
-      } else {
-        console.log('[AudioCallScreen] Setting callId in incomingCallAnswer hook:', effectiveCallId);
-        incomingCallAnswer.setCallId(effectiveCallId);
+    const setupCall = async () => {
+      try {
+        // Load stored duration from Firestore if continuing call
+        const callRef = doc(db, 'calls', callId);
+        const callSnapshot = await getDoc(callRef);
+        const callData = callSnapshot.data();
+        
+        // Set duration from stored value if exists
+        if (callData?.lastDuration) {
+          setDuration(callData.lastDuration);
+        } else if (callData?.startedAt) {
+          const startTime = callData.startedAt.toDate().getTime();
+          const currentTime = Date.now();
+          const elapsedSeconds = Math.floor((currentTime - startTime) / 1000);
+          setDuration(elapsedSeconds);
+        }
+
+        // Initialize WebRTC peer connection for audio only
+        await initializePeerConnection(false); // false for audio-only call
+
+        if (isOutgoing) {
+          // Caller: Create offer
+          console.log('[AudioCall] Creating offer as caller...');
+          const offer = await createOffer(false);
+          
+          // Update call document with offer
+          await updateDoc(callRef, {
+            offer: offer,
+            status: 'ringing',
+          });
+
+          // Listen for answer from callee
+          unsubscribeCallRef.current = onSnapshot(callRef, (snapshot) => {
+            const data = snapshot.data();
+            if (data?.answer) {
+              console.log('[AudioCall] Received answer, setting remote description...');
+              setRemoteAnswer(data.answer).catch(console.error);
+            }
+            if (data?.iceCandidates) {
+              data.iceCandidates.forEach((candidate: any) => {
+                if (candidate.from !== otherParty.userId) return;
+                addIceCandidate(candidate).catch(console.error);
+              });
+            }
+            if (data?.status === 'ended') {
+              navigation.goBack();
+            }
+          });
+        } else {
+          // Callee: Listen for offer and create answer
+          console.log('[AudioCall] Waiting for offer as callee...');
+          
+          unsubscribeCallRef.current = onSnapshot(callRef, async (snapshot) => {
+            const data = snapshot.data();
+            if (data?.offer) {
+              console.log('[AudioCall] Received offer, creating answer...');
+              const answer = await createAnswer(data.offer);
+              
+              await updateDoc(callRef, {
+                answer: answer,
+                status: 'active',
+              });
+            }
+            if (data?.iceCandidates) {
+              data.iceCandidates.forEach((candidate: any) => {
+                if (candidate.from === otherParty.userId) return;
+                addIceCandidate(candidate).catch(console.error);
+              });
+            }
+            if (data?.status === 'ended') {
+              navigation.goBack();
+            }
+          });
+        }
+
+        // Start call timer
+        timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
+      } catch (error) {
+        console.error('[AudioCall] Setup failed:', error);
+        setCallStatus('failed');
       }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run ONLY on mount
-
-  // Log stream changes
-  useEffect(() => {
-    console.log('[AudioCallScreen] Stream update - Local:', !!localStream, 'Remote:', !!remoteStream);
-    console.log('[AudioCallScreen] Using hook:', isOutgoing ? 'outgoingCall' : 'incomingCallAnswer');
-    
-    if (localStream) {
-      const videoTracks = localStream.getVideoTracks();
-      console.log('[AudioCallScreen] Local video tracks:', videoTracks.length, videoTracks.map(t => ({ id: t.id, enabled: t.enabled, readyState: t.readyState })));
-    }
-    if (remoteStream) {
-      const videoTracks = remoteStream.getVideoTracks();
-      console.log('[AudioCallScreen] Remote video tracks:', videoTracks.length, videoTracks.map(t => ({ id: t.id, enabled: t.enabled, readyState: t.readyState })));
-    }
-  }, [localStream, remoteStream, isOutgoing]);
-
-  // Initialize audio routing when screen mounts
-  useEffect(() => {
-    audioRouting.initializeAudioSession();
-    
-    return () => {
-      audioRouting.cleanup();
     };
-  }, []);
 
-  // Update network quality from call manager
-  useEffect(() => {
-    if (networkQualityFromHook) {
-      setNetworkQuality(networkQualityFromHook);
-    }
-  }, [networkQualityFromHook]);
-
-  // Start call timer when connected
-  useEffect(() => {
-    if (callStatus === 'connected' && !timerRef.current) {
-      callStartTimeRef.current = Date.now();
-      timerRef.current = setInterval(() => {
-        incrementCallDuration();
-      }, 1000);
-      console.log('[AudioCallScreen] Call timer started');
-    }
+    setupCall();
 
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (unsubscribeCallRef.current) unsubscribeCallRef.current();
+      cleanupWebRTC();
     };
-  }, [callStatus, incrementCallDuration]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Handle call status changes
+  // Handle Android back button - minimize call instead of ending it
   useEffect(() => {
-    if (callStatus === 'ended' || callStatus === 'rejected' || callStatus === 'missed' || callStatus === 'failed') {
-      console.log('[AudioCallScreen] Call ended with status:', callStatus);
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Minimize the call
+      minimizeCall({
+        callId,
+        displayName: contact.name,
+        avatar: contact.avatar,
+        color: contact.color,
+        duration: fmt(duration),
+        isVideo: false,
+        isOutgoing,
+        otherParty,
+      });
       
-      // Stop timer immediately
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      
-      // Navigate back immediately for ended status
-      if (callStatus === 'ended') {
-        console.log('[AudioCallScreen] Navigating back immediately');
-        navigation.goBack();
-        return;
-      }
-      
-      // Show alert for non-normal endings
-      if (callStatus === 'rejected') {
-        Alert.alert('Call Rejected', 'The other person rejected your call.', [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]);
-      } else if (callStatus === 'missed') {
-        Alert.alert('No Answer', 'The other person did not answer.', [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]);
-      } else if (callStatus === 'failed') {
-        Alert.alert('Call Failed', 'Unable to establish connection.', [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]);
-      }
+      // Navigate back without ending call
+      navigation.goBack();
+      return true; // Prevent default back behavior
+    });
+
+    return () => backHandler.remove();
+  }, [duration, callId, isOutgoing, otherParty, contact, minimizeCall, navigation]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update floating call duration while minimized
+  useEffect(() => {
+    updateDuration(fmt(duration));
+  }, [duration, updateDuration]);
+
+  const fmt = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+  const hangUp = async () => {
+    try {
+      // End call in Firestore
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        status: 'ended',
+        endedAt: new Date(),
+      });
+    } catch (error) {
+      console.error('[AudioCall] Failed to update call status:', error);
     }
-  }, [callStatus, navigation]);
-
-  const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  };
-
-  const getCallStatusText = () => {
-    if (callStatus === 'ringing') return isOutgoing ? 'Calling...' : 'Incoming call...';
-    if (callStatus === 'accepted') return 'Connecting...';
-    if (callStatus === 'connected') return formatDuration(callDuration);
-    return 'Call ended';
-  };
-
-  const getInitials = (name: string) => {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  };
-
-  const getNetworkQualityIcon = () => {
-    switch (networkQuality) {
-      case 'excellent':
-        return { name: 'wifi', color: '#4ade80' };
-      case 'good':
-        return { name: 'wifi', color: '#84cc16' };
-      case 'fair':
-        return { name: 'wifi', color: '#fbbf24' };
-      case 'poor':
-        return { name: 'wifi', color: '#f87171' };
-      default:
-        return null;
-    }
-  };
-
-  const handleMuteToggle = () => {
-    const newMuted = !isMuted;
-    setMuted(newMuted);
-    callManager.toggleMute(newMuted);
-  };
-
-  const handleSpeakerToggle = async () => {
-    const newSpeakerState = !isSpeakerOn;
-    setSpeakerOn(newSpeakerState);
-    await audioRouting.toggleSpeaker();
-    console.log('[AudioCallScreen] Speaker toggle:', newSpeakerState);
-  };
-
-  const handleCameraToggle = () => {
-    const newCameraState = !cameraEnabled;
-    setCameraEnabled(newCameraState);
-    callManager.toggleVideo(newCameraState);
-    console.log('[AudioCallScreen] Camera toggle:', newCameraState);
-  };
-
-  const handleFlipCamera = () => {
-    // TODO: Implement camera flip (front/back)
-    console.log('[AudioCallScreen] Flip camera');
-  };
-
-  const switchToVideo = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    navigation.replace('VideoCall', { callId, isOutgoing, otherParty });
+    
+    cleanupWebRTC();
+    navigation.goBack();
   };
 
   const openChat = async () => {
     try {
-      const currentUid = getAuth().currentUser?.uid;
-      if (!currentUid) {
-        Alert.alert('Chat unavailable', 'Could not open the chat.');
+      if (!user?.uid) {
+        console.error('[AudioCall] Cannot open chat: user not authenticated');
         return;
       }
-      const chatId = await getOrCreateDirectChat(currentUid, otherParty.userId);
-      // Push so the call keeps running underneath; back returns to the call.
-      navigation.push('Chat', {
-        chatId,
+      
+      // Get or create the actual chat ID for this conversation
+      const actualChatId = await getOrCreateDirectChat(user.uid, otherParty.userId);
+      
+      // Navigate to chat with the actual chat ID
+      navigation.navigate('Chat', {
+        chatId: actualChatId,
         displayName: otherParty.displayName,
         isGroup: false,
         otherUserId: otherParty.userId,
         otherUserPhoto: otherParty.photoUrl,
       });
     } catch (error) {
-      console.error('[AudioCallScreen] Error opening chat:', error);
-      Alert.alert('Error', 'Could not open chat. Please try again.');
+      console.error('[AudioCall] Failed to open chat:', error);
     }
   };
 
-  const handleHangUp = async () => {
-    console.log('[AudioCallScreen] Hanging up...');
-    console.log('[AudioCallScreen] Current call status:', callStatus);
-    console.log('[AudioCallScreen] Call ID from ref:', callIdRef.current);
-    console.log('[AudioCallScreen] Is outgoing:', isOutgoing);
+  // Switch to video — save duration and cleanly transition
+  const switchToVideo = async () => {
+    if (timerRef.current) clearInterval(timerRef.current);
     
-    // Ensure the hook has the callId before ending
-    if (callIdRef.current) {
-      if (isOutgoing) {
-        outgoingCall.setCallId(callIdRef.current);
-      } else {
-        incomingCallAnswer.setCallId(callIdRef.current);
-      }
+    // Save current duration to Firestore before switching
+    try {
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        lastDuration: duration,
+        videoUpgradeRequest: {
+          requestedBy: user?.uid || 'unknown',
+          timestamp: new Date(),
+        },
+      });
+    } catch (error) {
+      console.error('[AudioCall] Failed to save duration:', error);
     }
     
-    // Calculate duration if call was connected
-    const duration = callStatus === 'connected' 
-      ? Math.floor((Date.now() - callStartTimeRef.current) / 1000)
-      : 0;
-
-    console.log('[AudioCallScreen] Calculated duration:', duration);
-    console.log('[AudioCallScreen] Calling endCall on', isOutgoing ? 'outgoingCall' : 'incomingCallAnswer');
-
-    // End the call using the appropriate manager
-    await callManager.endCall(duration);
-
-    console.log('[AudioCallScreen] endCall completed, navigating back...');
-    navigation.goBack();
+    cleanupWebRTC();
+    navigation.replace('VideoCall', { callId, isOutgoing, otherParty });
   };
 
-  const networkIcon = getNetworkQualityIcon();
+  const handleMuteToggle = () => {
+    const newMuted = !muted;
+    setMuted(newMuted);
+    toggleMuteWebRTC(newMuted);
+  };
+
+  // Network quality indicator color
+  const getQualityColor = () => {
+    switch (networkQuality) {
+      case 'excellent': return '#10b981';
+      case 'good': return '#3b82f6';
+      case 'fair': return '#f59e0b';
+      case 'poor': return '#ef4444';
+      default: return 'transparent';
+    }
+  };
+
+  const getQualityText = () => {
+    switch (networkQuality) {
+      case 'excellent': return 'Excellent connection';
+      case 'good': return 'Good connection';
+      case 'fair': return 'Fair connection';
+      case 'poor': return 'Poor connection';
+      default: return 'Connecting...';
+    }
+  };
+
+  const addContact = (c: Contact) => {
+    if (participants.some((p) => p.id === c.id)) return;
+    setParticipants((prev) => [...prev, c]);
+    setAddOpen(false);
+  };
+
+  const availableContacts = CONTACTS.filter((c) => !participants.some((p) => p.id === c.id));
 
   return (
     <View style={styles.root}>
       <AppBg />
-      <LinearGradient
-        colors={['rgba(10,22,40,0.75)', 'rgba(13,34,68,0.85)', 'rgba(26,74,138,0.95)']}
-        style={styles.gradientOverlay}
-        start={{ x: 0.3, y: 0 }} 
-        end={{ x: 0.7, y: 1 }}
-      />
+      <View style={styles.overlay} />
 
-      {/* ── Top bar ── */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleHangUp} style={styles.backBtn}>
-          <AppIcon name="chevron-back" size={26} color="rgba(255,255,255,0.80)" fixedColor />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <AppText fixedColor style={styles.topName}>{otherParty.displayName}</AppText>
-          <AppText fixedColor style={styles.topStatus}>
-            {getCallStatusText()}
-            {callStatus === 'connected' && networkIcon && (
-              <>
-                {' · '}
-                <AppIcon 
-                  name={networkIcon.name as any} 
-                  size={11} 
-                  color={networkIcon.color} 
-                  fixedColor 
-                />
-              </>
-            )}
-          </AppText>
-        </View>
-        
-        {/* Top bar action buttons */}
-        <TouchableOpacity onPress={openChat} style={styles.topBtn} activeOpacity={0.75}>
-          <AppIcon name="chatbubble-outline" size={22} color="rgba(255,255,255,0.80)" fixedColor />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          onPress={switchToVideo} 
-          style={styles.topBtn} 
-          activeOpacity={0.75}
-          disabled={callStatus !== 'connected'}
-        >
-          <AppIcon name="videocam-outline" size={24} color="rgba(255,255,255,0.80)" fixedColor />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          onPress={() => setAddOpen(true)} 
-          style={[styles.topBtn, { opacity: 0.4 }]} 
-          activeOpacity={0.75}
-          disabled={true}
-        >
-          <AppIcon name="person-add-outline" size={22} color="rgba(255,255,255,0.80)" fixedColor />
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Main caller info ── */}
-      <View style={styles.callerSection}>
+      {/* ── Main area ── */}
+      <View style={styles.mainArea}>
         <View style={styles.avatarRing}>
-          <Avatar 
-            initials={getInitials(otherParty.displayName)} 
-            color={COLORS.blue} 
-            size={120} 
-          />
+          <Avatar initials={contact.avatar} color={contact.color} size={110} />
         </View>
-        <AppText fixedColor style={styles.callerName}>{otherParty.displayName}</AppText>
+        <AppText fixedColor style={styles.callerName}>{contact.name}</AppText>
         <AppText fixedColor style={styles.callStatus}>
-          {getCallStatusText()}
+          {callStatus === 'connecting' ? 'Connecting...' : 'Audio call'} · {fmt(duration)}
         </AppText>
+        {participants.length > 1 && (
+          <View style={styles.extraRow}>
+            {participants.slice(1).map((p) => (
+              <Avatar key={p.id} initials={p.avatar} color={p.color} size={36} />
+            ))}
+            <AppText fixedColor style={styles.extraLabel}>
+              +{participants.length - 1} on call
+            </AppText>
+          </View>
+        )}
+        {/* Network quality badge */}
+        {networkQuality !== 'unknown' && (
+          <View style={[styles.qualityBadge, { backgroundColor: getQualityColor() }]}>
+            <AppIcon 
+              name={networkQuality === 'excellent' || networkQuality === 'good' ? 'wifi' : 'wifi-outline'} 
+              size={16} 
+              color="#fff" 
+              fixedColor 
+            />
+            <AppText fixedColor style={styles.qualityBadgeText}>{getQualityText()}</AppText>
+          </View>
+        )}
       </View>
 
-      {/* ── Local Camera PiP (only when camera enabled) ── */}
-      {cameraEnabled && localStream && (
-        <View style={styles.pipContainer}>
-          <View style={styles.pipTile}>
-            <RTCView
-              streamURL={Platform.OS !== 'web' ? (localStream as any).toURL?.() : undefined}
-              stream={Platform.OS === 'web' ? localStream : undefined}
-              style={StyleSheet.absoluteFill}
-              objectFit="cover"
-              mirror={true}
-              zOrder={1}
-            />
-            {/* Camera flip button overlay */}
-            <TouchableOpacity 
-              style={styles.pipFlipBtn} 
-              onPress={handleFlipCamera}
-              activeOpacity={0.75}
-            >
-              <AppIcon name="camera-reverse-outline" size={18} color="#fff" fixedColor />
-            </TouchableOpacity>
-          </View>
+      {/* Network quality alert */}
+      {showQuality && (networkQuality === 'poor' || networkQuality === 'fair') && (
+        <View style={[styles.qualityAlert, { backgroundColor: getQualityColor() }]}>
+          <AppIcon name="warning-outline" size={16} color="#fff" fixedColor />
+          <AppText fixedColor style={styles.qualityText}>{getQualityText()}</AppText>
         </View>
       )}
 
-      {/* ── Bottom controls (4 buttons) ── */}
+      {/* ── Top bar ── */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={hangUp} style={styles.iconBtn}>
+          <AppIcon name="chevron-back" size={26} color="rgba(255,255,255,0.80)" fixedColor />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <AppText fixedColor style={styles.topName}>{contact.name}</AppText>
+          <AppText fixedColor style={styles.topStatus}>
+            {fmt(duration)} · {participants.length} participant{participants.length > 1 ? 's' : ''}
+          </AppText>
+        </View>
+
+        {/* Chat button */}
+        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass, bevel]} onPress={openChat}>
+          <AppIcon name="chatbubble-outline" size={20} color="#fff" fixedColor />
+        </TouchableOpacity>
+
+        {/* Add person */}
+        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass, bevel]}
+          onPress={() => setAddOpen(true)}>
+          <AppIcon name="person-add-outline" size={20} color="#fff" fixedColor />
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Controls ── */}
       <View style={styles.controls}>
         <View style={styles.controlCol}>
-          <TouchableOpacity
-            style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
-            onPress={handleMuteToggle}
-            disabled={callStatus !== 'connected'}
-          >
-            <AppIcon name={isMuted ? 'mic-off' : 'mic-outline'} size={24} color="#fff" fixedColor />
+          <TouchableOpacity style={[styles.controlBtn, muted && styles.controlBtnActive]}
+            onPress={handleMuteToggle}>
+            <AppIcon name={muted ? 'mic-off' : 'mic-outline'} size={24} color="#fff" fixedColor />
           </TouchableOpacity>
-          <AppText fixedColor style={styles.controlLabel}>{isMuted ? 'Unmute' : 'Mute'}</AppText>
+          <AppText fixedColor style={styles.controlLabel}>{muted ? 'Unmute' : 'Mute'}</AppText>
         </View>
 
         <View style={styles.controlCol}>
-          <TouchableOpacity
-            style={[styles.controlBtn, isSpeakerOn && styles.controlBtnActive]}
-            onPress={handleSpeakerToggle}
-            disabled={callStatus !== 'connected'}
-          >
-            <AppIcon name={isSpeakerOn ? 'volume-high-outline' : 'volume-mute-outline'} size={24} color="#fff" fixedColor />
+          <TouchableOpacity style={[styles.controlBtn, speakerOn && styles.controlBtnActive]}
+            onPress={() => setSpeakerOn((s) => !s)}>
+            <AppIcon name={speakerOn ? 'volume-high-outline' : 'volume-mute-outline'} size={24} color="#fff" fixedColor />
           </TouchableOpacity>
           <AppText fixedColor style={styles.controlLabel}>Speaker</AppText>
         </View>
 
         <View style={styles.controlCol}>
-          <TouchableOpacity
-            style={[styles.controlBtn, cameraEnabled && styles.controlBtnActive]}
-            onPress={handleCameraToggle}
-            disabled={callStatus !== 'connected'}
-          >
-            <AppIcon name={cameraEnabled ? 'videocam-outline' : 'videocam-off-outline'} size={24} color="#fff" fixedColor />
+          <TouchableOpacity style={styles.controlBtn} onPress={switchToVideo}>
+            <AppIcon name="videocam-outline" size={24} color="#fff" fixedColor />
           </TouchableOpacity>
-          <AppText fixedColor style={styles.controlLabel}>Camera</AppText>
+          <AppText fixedColor style={styles.controlLabel}>Video</AppText>
         </View>
 
         <View style={styles.controlCol}>
-          <TouchableOpacity style={styles.hangUpBtn} onPress={handleHangUp}>
-            <AppIcon name="call" size={28} color="#fff" fixedColor />
+          <TouchableOpacity style={styles.hangUpBtn} onPress={hangUp}>
+            <AppIcon name="call" size={26} color="#fff" fixedColor />
           </TouchableOpacity>
           <AppText fixedColor style={styles.controlLabel}>End</AppText>
         </View>
       </View>
 
-      {/* ── Add person modal (placeholder - disabled for now) ── */}
+      {/* ── Add person modal ── */}
       <Modal visible={addOpen} transparent animationType="slide"
         onRequestClose={() => setAddOpen(false)}>
         <Pressable style={styles.addOverlay} onPress={() => setAddOpen(false)} />
         <View style={styles.addSheet}>
           <View style={styles.addHandle} />
           <AppText fixedColor style={styles.addTitle}>Add to call</AppText>
-          <AppText fixedColor style={styles.addEmpty}>
-            Group calls are not available yet.
-          </AppText>
+          {availableContacts.length === 0 ? (
+            <AppText fixedColor style={styles.addEmpty}>All contacts are already in the call.</AppText>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {availableContacts.map((c) => (
+                <TouchableOpacity key={c.id} style={styles.addContactRow}
+                  onPress={() => addContact(c)} activeOpacity={0.8}>
+                  <Avatar initials={c.avatar} color={c.color} size={46} status={c.status} />
+                  <View style={styles.addContactMeta}>
+                    <AppText fixedColor style={styles.addContactName}>{c.name}</AppText>
+                    <AppText fixedColor style={styles.addContactSub}>
+                      {c.status === 'online' ? 'Online' : 'Tap to add'}
+                    </AppText>
+                  </View>
+                  <LinearGradient colors={GRADIENTS.primary} style={styles.addIconWrap}>
+                    <AppIcon name="call-outline" size={18} color="#fff" fixedColor />
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
       </Modal>
     </View>
@@ -435,152 +451,127 @@ export default function AudioCallScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000' },
-  gradientOverlay: { ...StyleSheet.absoluteFill },
+  root:    { flex: 1 },
+  overlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.55)' },
 
-  // Top bar — back button + name + timer + action buttons
-  topBar: {
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0,
-    flexDirection: 'row', 
-    alignItems: 'center',
-    paddingTop: Platform.OS === 'web' ? 16 : Platform.OS === 'ios' ? 54 : 36,
-    paddingBottom: 12, 
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(0,0,0,0.28)', 
-    gap: 10,
-  },
-  backBtn: { padding: 6 },
-  topName: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  topStatus: { fontSize: 11, color: 'rgba(255,255,255,0.60)', marginTop: 1 },
-  topBtn: { 
-    padding: 6,
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Main caller section
-  callerSection: { 
-    position: 'absolute',
-    top: Platform.OS === 'web' ? 140 : Platform.OS === 'ios' ? 180 : 160,
-    left: 0,
-    right: 0,
-    alignItems: 'center', 
-    gap: 14,
+  mainArea: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center', justifyContent: 'center', gap: 14,
   },
   avatarRing: {
-    padding: 6,
-    borderRadius: 70,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderTopColor: 'rgba(255,255,255,0.70)',
+    padding: 6, borderRadius: 68,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.30)',
     ...SHADOW.glow,
   },
-  callerName: { fontSize: 28, fontWeight: '700', color: '#fff' },
-  callStatus: { fontSize: 16, color: 'rgba(255,255,255,0.65)' },
+  callerName: { fontSize: 26, fontWeight: '700', color: '#fff' },
+  callStatus: { fontSize: 15, color: 'rgba(255,255,255,0.65)' },
+  extraRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  extraLabel: { fontSize: 13, color: 'rgba(255,255,255,0.65)' },
 
-  // Local camera PiP (top-right corner)
-  pipContainer: {
-    position: 'absolute',
-    top: Platform.OS === 'web' ? 72 : Platform.OS === 'ios' ? 110 : 90,
-    right: 10,
+  topBar: {
+    position: 'absolute', top: 0, left: 0, right: 0,
+    flexDirection: 'row', alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 54 : 36,
+    paddingBottom: 12, paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.30)', gap: 6,
   },
-  pipTile: {
-    width: PIP_W, 
-    height: PIP_H,
-    borderRadius: RADIUS.md, 
-    overflow: 'hidden',
-    borderWidth: 1.5, 
-    borderColor: 'rgba(255,255,255,0.30)',
-    ...SHADOW.glow,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+  iconBtn:      { padding: 8 },
+  iconBtnGlass: {
+    borderRadius: 20,
   },
-  pipFlipBtn: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.30)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Bottom controls (4 buttons in a row)
-  controls: {
-    position: 'absolute', 
-    bottom: 0, 
-    left: 0, 
-    right: 0,
-    flexDirection: 'row', 
-    justifyContent: 'space-around', 
-    alignItems: 'flex-end',
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    paddingTop: 16, 
-    paddingHorizontal: 8,
-    backgroundColor: 'rgba(0,0,0,0.42)',
-  },
-  controlCol: { alignItems: 'center', gap: 6 },
-  controlLabel: { fontSize: 10, color: 'rgba(255,255,255,0.70)' },
-  controlBtn: {
-    width: 54, 
-    height: 54, 
-    borderRadius: 27,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: 1, 
-    borderColor: 'rgba(255,255,255,0.25)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
-    alignItems: 'center', 
-    justifyContent: 'center',
-    ...SHADOW.card,
-  },
-  controlBtnActive: { 
+  iconBtnActive: {
     backgroundColor: 'rgba(30,156,240,0.35)',
     borderColor: 'rgba(30,156,240,0.55)',
   },
+  topName:   { fontSize: 15, fontWeight: '700', color: '#fff' },
+  topStatus: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 2 },
+
+  controls: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end',
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    paddingTop: 16, paddingHorizontal: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  controlCol:       { alignItems: 'center', gap: 6 },
+  controlLabel:     { fontSize: 10, color: 'rgba(255,255,255,0.70)' },
+  controlBtn: {
+    width: 54, height: 54, borderRadius: 27,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center', justifyContent: 'center',
+    ...SHADOW.card,
+  },
+  controlBtnActive: { backgroundColor: 'rgba(255,255,255,0.35)' },
   hangUpBtn: {
-    width: 64, 
-    height: 64, 
-    borderRadius: 32,
+    width: 64, height: 64, borderRadius: 32,
     backgroundColor: '#e84343',
-    alignItems: 'center', 
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
     transform: [{ rotate: '135deg' }],
     ...SHADOW.button,
   },
 
-  // Add modal
   addOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.50)' },
   addSheet: {
     backgroundColor: '#0d2040',
-    borderTopLeftRadius: 24, 
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
     maxHeight: height * 0.65,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    paddingHorizontal: 16, 
-    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    paddingHorizontal: 16, paddingTop: 12,
     ...SHADOW.glow,
   },
   addHandle: {
-    width: 40, 
-    height: 4, 
-    borderRadius: 2,
+    width: 40, height: 4, borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.25)',
-    alignSelf: 'center', 
-    marginBottom: 14,
+    alignSelf: 'center', marginBottom: 14,
   },
   addTitle: { fontSize: 17, fontWeight: '700', color: '#fff', marginBottom: 14 },
-  addEmpty: { 
-    fontSize: 14, 
-    color: 'rgba(255,255,255,0.55)', 
-    textAlign: 'center', 
-    paddingVertical: 24 
+  addEmpty: { fontSize: 14, color: 'rgba(255,255,255,0.55)', textAlign: 'center', paddingVertical: 24 },
+  addContactRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  addContactMeta: { flex: 1 },
+  addContactName: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  addContactSub:  { fontSize: 12, color: 'rgba(255,255,255,0.55)', marginTop: 2 },
+  addIconWrap: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    ...SHADOW.button,
+  },
+
+  // Network quality indicator
+  qualityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.full,
+    marginTop: 8,
+    ...SHADOW.card,
+  },
+  qualityBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  qualityAlert: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 100 : 82,
+    left: 12, right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: RADIUS.md,
+    ...SHADOW.card,
+  },
+  qualityText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

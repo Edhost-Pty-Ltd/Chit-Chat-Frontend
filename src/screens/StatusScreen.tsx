@@ -1,20 +1,21 @@
 ﻿// ─── Screen: Status ──────────────────────────────────────────────────────────
 import React from 'react';
-import { View, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, FlatList, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar, BottomNav, UserAvatar } from '../components';
 import { STATUSES } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { StatusUpdate } from '../types';
 
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 
 export default function StatusScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
   const renderStatus = ({ item }: { item: StatusUpdate }) => (
     <TouchableOpacity
-      style={[styles.statusCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+      style={[styles.statusCard, bevel]}
       activeOpacity={0.75}
     >
       <LinearGradient colors={[item.color, COLORS.blue]} style={styles.ring} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
@@ -34,13 +35,13 @@ export default function StatusScreen() {
     <View style={styles.root}>
       <AppBg />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1 }]}>
         <AppText style={[styles.title, { color: textColor, fontFamily }]}>Updates</AppText>
       </View>
 
       {/* My Status glass card */}
       <TouchableOpacity
-        style={[styles.myCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+        style={[styles.myCard, bevel]}
         activeOpacity={0.8}
       >
         <View style={styles.meAvatarWrap}>
@@ -72,11 +73,11 @@ export default function StatusScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+  root: { flex: 1 },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14,
+    paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14,
   },
   title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
 
@@ -84,8 +85,7 @@ const styles = StyleSheet.create({
   myCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     marginHorizontal: 14, marginBottom: 18,
-    ...GLASS.card, borderRadius: RADIUS.lg, padding: 14,
-    ...SHADOW.card,
+    borderRadius: RADIUS.lg, padding: 14,
   },
   meAvatarWrap: { position: 'relative' },
   mePlusBadge: {
@@ -110,14 +110,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    ...GLASS.card,
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    ...SHADOW.card,
   },
   ring:       { borderRadius: 999, padding: 2.5 },
-  ringInner:  { backgroundColor: COLORS.sky1, borderRadius: 999, padding: 2 },
+  ringInner:  { borderRadius: 999, padding: 2, backgroundColor: 'transparent' },
   statusMeta: { flex: 1 },
   statusName: { fontSize: 14, fontWeight: '700', color: COLORS.text },
   statusTime: { fontSize: 12, color: COLORS.sub, marginTop: 2 },
