@@ -16,11 +16,11 @@
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { useWebRTC, WebRTCHandlers, NetworkQuality } from '../useWebRTC';
-import { MediaStream, mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } from 'react-native-webrtc';
+import { MediaStream, mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } from '@livekit/react-native-webrtc';
 import * as fc from 'fast-check';
 
-// Mock react-native-webrtc
-jest.mock('react-native-webrtc', () => ({
+// Mock @livekit/react-native-webrtc
+jest.mock('@livekit/react-native-webrtc', () => ({
   RTCPeerConnection: jest.fn(),
   RTCSessionDescription: jest.fn((desc) => desc),
   RTCIceCandidate: jest.fn((candidate) => candidate),

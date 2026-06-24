@@ -222,3 +222,5 @@ const styles = StyleSheet.create({
 export { IncomingCallOverlay } from './IncomingCallOverlay';
 export { IncomingCallManager } from './IncomingCallManager';
 export { LocationMessageBubble } from './LocationMessageBubble';
+export { default as RTCView } from './RTCView';
+export { default as WebView } from './WebView';

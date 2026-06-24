@@ -9,7 +9,7 @@ import {
   RTCIceCandidate,
   mediaDevices,
   MediaStream,
-} from 'react-native-webrtc';
+} from '@livekit/react-native-webrtc';
 
 // Public STUN servers (Google)
 const ICE_SERVERS = {

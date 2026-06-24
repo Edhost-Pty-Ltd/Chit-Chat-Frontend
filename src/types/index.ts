@@ -158,6 +158,16 @@ export type RootStackParamList = {
     displayName: string;
     audioOnly?: boolean;
     chatId?: string;
+    callId?: string;
+  };
+  GroupCall: {
+    roomName: string;
+    displayName: string;
+    audioOnly: boolean;
+    groupName: string;
+    memberCount: number;
+    chatId?: string;
+    callId?: string;
   };
   AudioCall: { 
     callId: string;

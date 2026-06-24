@@ -3,12 +3,14 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { View, StyleSheet, Platform, ActivityIndicator, Alert, BackHandler } from 'react-native';
-import { WebView } from 'react-native-webview';
+import WebView from '../components/WebView';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../types';
 import { COLORS } from '../types/theme';
+import { useAuth } from '../hooks/useAuth';
+import { useGroupCall } from '../hooks/useGroupCall';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'JitsiCall'>;
 type RoutePropType = RouteProp<RootStackParamList, 'JitsiCall'>;
@@ -18,8 +20,17 @@ export default function JitsiCallScreen() {
   const route = useRoute<RoutePropType>();
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const { joinGroupCall, leaveGroupCall } = useGroupCall();
 
-  const { roomName, displayName, audioOnly, chatId } = route.params;
+  const { roomName, displayName, audioOnly, chatId, callId } = route.params;
+
+  // Join group call when screen mounts (if callId provided)
+  useEffect(() => {
+    if (callId && user?.uid) {
+      joinGroupCall(callId, user.uid);
+    }
+  }, [callId, user?.uid, joinGroupCall]);
 
   // Handle back button - confirm before leaving call
   useEffect(() => {
@@ -31,6 +42,15 @@ export default function JitsiCallScreen() {
     return () => backHandler.remove();
   }, []);
 
+  // Leave group call when component unmounts
+  useEffect(() => {
+    return () => {
+      if (callId && user?.uid) {
+        leaveGroupCall(callId, user.uid);
+      }
+    };
+  }, [callId, user?.uid, leaveGroupCall]);
+
   const handleEndCall = () => {
     Alert.alert(
       'End Call',
@@ -40,8 +60,14 @@ export default function JitsiCallScreen() {
         {
           text: 'Leave',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
             console.log('[JitsiCallScreen] User ended call');
+            
+            // Leave group call
+            if (callId && user?.uid) {
+              await leaveGroupCall(callId, user.uid);
+            }
+            
             navigation.goBack();
           },
         },
@@ -172,7 +198,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   loadingContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',

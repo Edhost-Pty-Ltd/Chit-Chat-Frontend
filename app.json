@@ -29,12 +29,13 @@
             ]
           },
           "android": {
-            "enableProguardInReleaseBuilds": false,
-            "ndkVersion": "27.1.12297006"
+            "enableProguardInReleaseBuilds": false
           }
         }
       ],
       "@react-native-firebase/app",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
       "expo-contacts",
       "expo-font",
       [

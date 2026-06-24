@@ -24,7 +24,7 @@ import * as fc from 'fast-check';
 let webrtcInstanceCounter = 0;
 const webrtcInstances: any[] = [];
 
-jest.mock('react-native-webrtc', () => {
+jest.mock('@livekit/react-native-webrtc', () => {
   const mockMediaStream = () => ({
     id: `stream-${Date.now()}-${Math.random()}`,
     getTracks: jest.fn().mockReturnValue([

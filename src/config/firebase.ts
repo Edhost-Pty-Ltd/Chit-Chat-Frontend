@@ -12,6 +12,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getAuth as getWebAuth } from 'firebase/auth';
+import { Platform } from 'react-native';
 
 const firebaseConfig = {
   apiKey:            'AIzaSyBzstwF1NgQWASsqVa4R5IiZpFLoKZnSJQ',
@@ -31,18 +33,23 @@ export const db = getFirestore(app);
 // Firebase Storage — voice note audio file hosting
 export const storage = getStorage(app);
 
+// Firebase Auth — initialize for web platform
+export const auth = Platform.OS === 'web' ? getWebAuth(app) : null;
+
 // Enable offline persistence for better reliability
 // This allows Firestore to work offline and sync when connection is restored
-try {
-  enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-      console.warn('[Firebase] Persistence failed: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-      console.warn('[Firebase] Persistence not available in this browser');
-    }
-  });
-} catch (error) {
-  console.warn('[Firebase] Persistence initialization error:', error);
+if (Platform.OS === 'web') {
+  try {
+    enableIndexedDbPersistence(db).catch((err) => {
+      if (err.code === 'failed-precondition') {
+        console.warn('[Firebase] Persistence failed: Multiple tabs open');
+      } else if (err.code === 'unimplemented') {
+        console.warn('[Firebase] Persistence not available in this browser');
+      }
+    });
+  } catch (error) {
+    console.warn('[Firebase] Persistence initialization error:', error);
+  }
 }
 
 export default app;

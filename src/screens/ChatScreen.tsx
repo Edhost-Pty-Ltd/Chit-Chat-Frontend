@@ -11,9 +11,30 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { usePermissions as useMediaLibraryPermissions } from 'expo-media-library';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Platform-specific imports for native-only modules
+let CameraView: any = null;
+let useCameraPermissions: any = null;
+let useMediaLibraryPermissions: any = null;
+
+if (Platform.OS !== 'web') {
+  try {
+    const camera = require('expo-camera');
+    CameraView = camera.CameraView;
+    useCameraPermissions = camera.useCameraPermissions;
+    
+    const mediaLibrary = require('expo-media-library');
+    useMediaLibraryPermissions = mediaLibrary.usePermissions;
+  } catch (err) {
+    console.warn('[ChatScreen] Native modules not available:', err);
+  }
+} else {
+  // Web fallbacks
+  useCameraPermissions = () => [null, () => Promise.resolve({ status: 'denied' })];
+  useMediaLibraryPermissions = () => [null, () => Promise.resolve({ status: 'denied' })];
+}
+
 import { collection, doc, getDoc, getDocs, writeBatch, query, where, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Avatar } from '../components';
@@ -27,6 +48,7 @@ import { useVoicePlayer } from '../hooks/useVoicePlayer';
 import { useVoiceRecorder, RecordingResult } from '../hooks/useVoiceRecorder';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useLocationSharing } from '../hooks/useLocationSharing';
+import { useGroupCall } from '../hooks/useGroupCall';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
@@ -152,6 +174,9 @@ export default function ChatScreen() {
 
   // ── Outgoing call ──────────────────────────────────────────────
   const outgoingCall = useOutgoingCall();
+
+  // ── Group call ──────────────────────────────────────────────────
+  const groupCall = useGroupCall();
 
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
@@ -565,15 +590,49 @@ export default function ChatScreen() {
 
     // Handle group calls with Jitsi
     if (isGroup) {
-      const roomName = `chitchat-${chatId}`;
-      const userDisplayName = user?.phoneNumber || 'Unknown';
-      
-      navigation.navigate('JitsiCall', {
-        roomName,
-        displayName: userDisplayName,
-        audioOnly: true,
-        chatId,
-      });
+      try {
+        console.log('[ChatScreen] Initiating group voice call');
+        
+        // Get group members
+        const chatRef = doc(db, 'chats', chatId);
+        const chatSnap = await getDoc(chatRef);
+        
+        if (!chatSnap.exists()) {
+          Alert.alert('Error', 'Could not load group information');
+          return;
+        }
+
+        const chatData = chatSnap.data();
+        const memberIds = (chatData.members as string[]) || [];
+        const userDisplayName = user?.phoneNumber || user?.displayName || 'Unknown';
+
+        // Initiate group call and send notifications
+        const result = await groupCall.initiateGroupCall(
+          chatId,
+          userId,
+          userDisplayName,
+          memberIds,
+          'audio'
+        );
+
+        if (result) {
+          // Navigate to Group call screen with custom UI
+          navigation.navigate('GroupCall', {
+            roomName: result.roomName,
+            displayName: userDisplayName,
+            audioOnly: true,
+            groupName: displayName,
+            memberCount: memberIds.length,
+            chatId,
+            callId: result.callId,
+          });
+        } else {
+          Alert.alert('Error', groupCall.error || 'Failed to start group call');
+        }
+      } catch (error) {
+        console.error('[ChatScreen] Error initiating group call:', error);
+        Alert.alert('Error', 'Failed to start group call');
+      }
       return;
     }
 
@@ -631,7 +690,7 @@ export default function ChatScreen() {
       console.error('[ChatScreen] Error initiating call:', error);
       Alert.alert('Call Failed', 'An error occurred while trying to start the call');
     }
-  }, [userId, otherUserId, isGroup, chatId, displayName, otherUserPhoto, user, outgoingCall, navigation]);
+  }, [userId, otherUserId, isGroup, chatId, displayName, otherUserPhoto, user, outgoingCall, groupCall, navigation]);
 
   // ── Video call handler ──────────────────────────────────────────────────────
   const handleVideoCall = useCallback(async () => {
@@ -642,15 +701,49 @@ export default function ChatScreen() {
 
     // Handle group calls with Jitsi
     if (isGroup) {
-      const roomName = `chitchat-${chatId}`;
-      const userDisplayName = user?.phoneNumber || 'Unknown';
-      
-      navigation.navigate('JitsiCall', {
-        roomName,
-        displayName: userDisplayName,
-        audioOnly: false,
-        chatId,
-      });
+      try {
+        console.log('[ChatScreen] Initiating group video call');
+        
+        // Get group members
+        const chatRef = doc(db, 'chats', chatId);
+        const chatSnap = await getDoc(chatRef);
+        
+        if (!chatSnap.exists()) {
+          Alert.alert('Error', 'Could not load group information');
+          return;
+        }
+
+        const chatData = chatSnap.data();
+        const memberIds = (chatData.members as string[]) || [];
+        const userDisplayName = user?.phoneNumber || user?.displayName || 'Unknown';
+
+        // Initiate group call and send notifications
+        const result = await groupCall.initiateGroupCall(
+          chatId,
+          userId,
+          userDisplayName,
+          memberIds,
+          'video'
+        );
+
+        if (result) {
+          // Navigate to Group call screen with custom UI
+          navigation.navigate('GroupCall', {
+            roomName: result.roomName,
+            displayName: userDisplayName,
+            audioOnly: false,
+            groupName: displayName,
+            memberCount: memberIds.length,
+            chatId,
+            callId: result.callId,
+          });
+        } else {
+          Alert.alert('Error', groupCall.error || 'Failed to start group call');
+        }
+      } catch (error) {
+        console.error('[ChatScreen] Error initiating group call:', error);
+        Alert.alert('Error', 'Failed to start group call');
+      }
       return;
     }
 

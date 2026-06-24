@@ -12,7 +12,24 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as LocalAuthentication from 'expo-local-authentication';
+
+// Platform-specific import for native-only modules
+let LocalAuthentication: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    LocalAuthentication = require('expo-local-authentication');
+  } catch (err) {
+    console.warn('[CreateAccountScreen] expo-local-authentication not available:', err);
+  }
+} else {
+  // Web fallback
+  LocalAuthentication = {
+    authenticateAsync: () => Promise.resolve({ success: false }),
+    hasHardwareAsync: () => Promise.resolve(false),
+    isEnrolledAsync: () => Promise.resolve(false),
+  };
+}
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useRegistration } from '../hooks/useRegistration';

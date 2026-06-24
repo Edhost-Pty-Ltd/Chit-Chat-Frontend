@@ -25,11 +25,11 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { useOutgoingCall } from '../useOutgoingCall';
 import { useIncomingCallAnswer } from '../useIncomingCallAnswer';
-import { MediaStream, mediaDevices, RTCPeerConnection } from 'react-native-webrtc';
+import { MediaStream, mediaDevices, RTCPeerConnection } from '@livekit/react-native-webrtc';
 import * as fc from 'fast-check';
 
 // Mock modules
-jest.mock('react-native-webrtc', () => ({
+jest.mock('@livekit/react-native-webrtc', () => ({
   RTCPeerConnection: jest.fn(),
   RTCSessionDescription: jest.fn((desc) => desc),
   RTCIceCandidate: jest.fn((candidate) => candidate),

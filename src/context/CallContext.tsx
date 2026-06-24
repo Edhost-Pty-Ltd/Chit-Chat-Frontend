@@ -2,10 +2,13 @@
 // Global call state management for WebRTC calls
 
 import React, { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
+import { Platform } from 'react-native';
 import type { CallState, IncomingCallData, CallStatus } from '../types/call';
 import { useWebRTC, type NetworkQuality, type WebRTCHandlers } from '../hooks/useWebRTC';
-import type { MediaStream } from 'react-native-webrtc';
 import { SignalingService } from '../services/signalingService';
+
+// Platform-agnostic MediaStream type
+type MediaStream = any;
 
 interface CallContextValue extends CallState {
   // Call state setters
@@ -27,7 +30,7 @@ interface CallContextValue extends CallState {
   networkQuality: NetworkQuality;
 
   // WebRTC instance methods
-  initializePeerConnection: (isVideo: boolean) => Promise<import('react-native-webrtc').RTCPeerConnection>;
+  initializePeerConnection: (isVideo: boolean) => Promise<RTCPeerConnection>;
   createOffer: (isVideo: boolean) => Promise<RTCSessionDescriptionInit>;
   createAnswer: (offer: RTCSessionDescriptionInit) => Promise<RTCSessionDescriptionInit>;
   setRemoteAnswer: (answer: RTCSessionDescriptionInit) => Promise<void>;

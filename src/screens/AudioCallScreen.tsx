@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RTCView } from 'react-native-webrtc';
+import RTCView from '../components/RTCView';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
 import { Avatar } from '../components';
@@ -336,7 +336,8 @@ export default function AudioCallScreen() {
         <View style={styles.pipContainer}>
           <View style={styles.pipTile}>
             <RTCView
-              streamURL={localStream.toURL()}
+              streamURL={Platform.OS !== 'web' ? (localStream as any).toURL?.() : undefined}
+              stream={Platform.OS === 'web' ? localStream : undefined}
               style={StyleSheet.absoluteFill}
               objectFit="cover"
               mirror={true}

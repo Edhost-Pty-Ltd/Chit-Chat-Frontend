@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RTCView } from 'react-native-webrtc';
+import RTCView from '../components/RTCView';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
 import { Avatar } from '../components';
@@ -62,24 +62,20 @@ function PipTile({
     ]).start(onTap);
   };
 
+  // Determine if we should show the stream
+  const shouldShowStream = stream && (p.isLocal ? cameraEnabled : true);
+
   return (
     <Animated.View style={[styles.pipTile, { transform: [{ scale: scaleAnim }] }]}>
       {/* WebRTC feed or dark background */}
-      {p.isLocal && stream && cameraEnabled ? (
+      {shouldShowStream ? (
         <RTCView
-          streamURL={stream.toURL()}
+          streamURL={Platform.OS !== 'web' ? (stream as any).toURL?.() : undefined}
+          stream={Platform.OS === 'web' ? stream : undefined}
           style={StyleSheet.absoluteFill}
           objectFit="cover"
-          mirror={true}
-          zOrder={1}
-        />
-      ) : !p.isLocal && stream ? (
-        <RTCView
-          streamURL={stream.toURL()}
-          style={StyleSheet.absoluteFill}
-          objectFit="cover"
-          mirror={false}
-          zOrder={0}
+          mirror={p.isLocal}
+          zOrder={p.isLocal ? 1 : 0}
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)' }]} />
@@ -88,7 +84,7 @@ function PipTile({
       {/* Full-tile touchable — tap to become main */}
       <TouchableOpacity style={styles.pipTouch} onPress={handleTap} activeOpacity={0.8}>
         {/* Show avatar if no stream or camera disabled */}
-        {(!stream || (p.isLocal && !cameraEnabled)) && (
+        {!shouldShowStream && (
           <View style={styles.pipAvatarWrap}>
             <Avatar initials={p.initials} color={COLORS.blue} size={42} />
             <AppText fixedColor style={styles.pipNamePill} numberOfLines={1}>
@@ -274,6 +270,7 @@ export default function VideoCallScreen() {
       if (idx <= 0) return prev;
       const next = [...prev];
       [next[0], next[idx]] = [next[idx], next[0]];
+      console.log('[VideoCallScreen] Swapped to main:', next[0].displayName);
       return next;
     });
   }, []);
@@ -369,7 +366,8 @@ export default function VideoCallScreen() {
       <View style={styles.mainView}>
         {mainP.isLocal && localStream && cameraEnabled ? (
           <RTCView
-            streamURL={localStream.toURL()}
+            streamURL={Platform.OS !== 'web' ? (localStream as any).toURL?.() : undefined}
+            stream={Platform.OS === 'web' ? localStream : undefined}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror={true}
@@ -377,7 +375,8 @@ export default function VideoCallScreen() {
           />
         ) : !mainP.isLocal && remoteStream ? (
           <RTCView
-            streamURL={remoteStream.toURL()}
+            streamURL={Platform.OS !== 'web' ? (remoteStream as any).toURL?.() : undefined}
+            stream={Platform.OS === 'web' ? remoteStream : undefined}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror={false}
@@ -423,15 +422,19 @@ export default function VideoCallScreen() {
       {/* ── Right-side vertical panel: PiPs then action icons ── */}
       <View style={styles.rightPanel}>
         {/* PiP tiles */}
-        {pipList.map((p) => (
-          <PipTile
-            key={p.id}
-            participant={p}
-            stream={p.isLocal ? localStream : remoteStream}
-            cameraEnabled={cameraEnabled}
-            onTap={() => swapToMain(p.id)}
-          />
-        ))}
+        {pipList.map((p) => {
+          // Determine which stream to show based on actual participant, not just isLocal flag
+          const pipStream = p.isLocal ? localStream : remoteStream;
+          return (
+            <PipTile
+              key={p.id}
+              participant={p}
+              stream={pipStream}
+              cameraEnabled={cameraEnabled}
+              onTap={() => swapToMain(p.id)}
+            />
+          );
+        })}
 
         {/* Divider between PiPs and action icons */}
         <View style={styles.panelDivider} />

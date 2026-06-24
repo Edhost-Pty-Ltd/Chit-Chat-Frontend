@@ -161,30 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // On web, also check whenever the tab becomes visible again
-    if (Platform.OS === 'web') {
-      const handleVisibilityChange = async () => {
-        if (document.visibilityState === 'visible') {
-          const [signedIn, lastActiveStr] = await Promise.all([
-            AsyncStorage.getItem(KEYS.signedIn),
-            AsyncStorage.getItem(KEYS.lastActive),
-          ]);
-          if (signedIn === 'true' && lastActiveStr) {
-            const elapsed = Date.now() - parseInt(lastActiveStr, 10);
-            if (elapsed >= WEB_SESSION_TIMEOUT_MS) {
-              await doSignOut();
-            } else {
-              scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
-            }
-          }
-        }
-      };
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      return () => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        unsubscribe();
-      };
-    }
+    // REMOVED: Web visibility check code - will re-implement later if needed for web platform
     
     return () => unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
