@@ -17,7 +17,7 @@ import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { useCallContext } from '../../context/CallContext';
 import * as fc from 'fast-check';
-import { RTCPeerConnection, mediaDevices } from 'react-native-webrtc';
+import { RTCPeerConnection, mediaDevices } from '@livekit/react-native-webrtc';
 
 // ─── Minimal renderHook for node environment ──────────────────────────────────
 
@@ -44,8 +44,8 @@ function renderHook<T>(hookFn: () => T): { result: { current: T }; unmount: () =
   };
 }
 
-// Mock react-native-webrtc
-jest.mock('react-native-webrtc', () => ({
+// Mock @livekit/react-native-webrtc
+jest.mock('@livekit/react-native-webrtc', () => ({
   RTCPeerConnection: jest.fn(),
   RTCSessionDescription: jest.fn((desc) => desc),
   RTCIceCandidate: jest.fn((candidate) => candidate),

@@ -15,6 +15,7 @@ import { FloatingCallProvider } from './src/context/FloatingCallContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import ToastOverlay from './src/components/ToastNotification';
 import { FloatingCallManager } from './src/components/FloatingCallManager';
+import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -31,6 +32,8 @@ if (Platform.OS === 'web') {
     style.appendChild(document.createTextNode(css));
     document.head.appendChild(style);
   }
+} else {
+  enableScreens(true);
 }
 
 // On web, refresh the inactivity timer on any user interaction
@@ -107,6 +110,7 @@ export default function App() {
                 <AppNavigator />
                 <ToastOverlay />
                 <FloatingCallManager />
+                <GroupCallNotificationManager />
               </NavigationContainer>
             </FloatingCallProvider>
           </NotificationProvider>
