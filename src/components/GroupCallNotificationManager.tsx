@@ -10,6 +10,7 @@ import { db } from '../config/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useGroupCallNotifications } from '../hooks/useGroupCallNotifications';
 import { useGroupCall } from '../hooks/useGroupCall';
+import { useActiveCall } from '../context/ActiveCallContext';
 import GroupCallNotification from './GroupCallNotification';
 import { RootStackParamList } from '../types';
 
@@ -20,6 +21,7 @@ export default function GroupCallNotificationManager() {
   const { user } = useAuth();
   const { notifications, dismissNotification } = useGroupCallNotifications(user?.uid || null);
   const { joinGroupCall } = useGroupCall();
+  const { startCall: startActiveCall } = useActiveCall();
   const [currentNotification, setCurrentNotification] = useState<typeof notifications[0] | null>(null);
 
   // Show the most recent notification
@@ -60,9 +62,9 @@ export default function GroupCallNotificationManager() {
         // Dismiss notification
         await dismissNotification(currentNotification.callId);
 
-        // Navigate to Group call screen with custom UI
+        // Start the call via the app-level host (supports minimize)
         const userDisplayName = user.phoneNumber || user.displayName || 'Unknown';
-        navigation.navigate('GroupCall', {
+        startActiveCall({
           roomName: currentNotification.roomName,
           displayName: userDisplayName,
           audioOnly: currentNotification.callType === 'audio',
@@ -73,11 +75,11 @@ export default function GroupCallNotificationManager() {
         });
       } catch (error) {
         console.error('[GroupCallNotificationManager] Error fetching group info:', error);
-        // Fallback: still navigate with default values
+        // Fallback: still start with default values
         await dismissNotification(currentNotification.callId);
-        
+
         const userDisplayName = user.phoneNumber || user.displayName || 'Unknown';
-        navigation.navigate('GroupCall', {
+        startActiveCall({
           roomName: currentNotification.roomName,
           displayName: userDisplayName,
           audioOnly: currentNotification.callType === 'audio',

@@ -50,6 +50,7 @@ import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useLocationSharing } from '../hooks/useLocationSharing';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { usePhoneBook } from '../hooks/usePhoneBook';
+import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
@@ -179,6 +180,9 @@ export default function ChatScreen() {
 
   // ── Group call ──────────────────────────────────────────────────
   const groupCall = useGroupCall();
+
+  // ── Active call (app-level LiveKit host; supports minimize) ──────
+  const { startCall: startActiveCall } = useActiveCall();
 
   // ── Phone book name resolver (saved contact name, else phone number) ──
   const { resolveName } = usePhoneBook();
@@ -628,7 +632,7 @@ export default function ChatScreen() {
       );
 
       if (result) {
-        navigation.navigate('GroupCall', {
+        startActiveCall({
           roomName: result.roomName,
           displayName: userDisplayName,
           audioOnly: callType === 'audio',
@@ -645,7 +649,7 @@ export default function ChatScreen() {
       console.error('[ChatScreen] Error initiating call:', error);
       Alert.alert('Error', 'Failed to start call');
     }
-  }, [userId, isGroup, chatId, otherUserId, displayName, user, groupCall, navigation]);
+  }, [userId, isGroup, chatId, otherUserId, displayName, user, groupCall, startActiveCall]);
 
   const handleVoiceCall = useCallback(() => startCall('audio'), [startCall]);
 

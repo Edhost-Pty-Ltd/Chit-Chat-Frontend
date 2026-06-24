@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Alert, Platform,
   Dimensions, Animated, Modal, Pressable, ActivityIndicator, PermissionsAndroid, FlatList,
+  PanResponder, GestureResponderEvent, PanResponderGestureState,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -32,13 +33,16 @@ import { useGroupCall } from '../hooks/useGroupCall';
 import { useAuth } from '../hooks/useAuth';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
+import { ActiveCallParams } from '../context/ActiveCallContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'GroupCall'>;
 type RouteP = RouteProp<RootStackParamList, 'GroupCall'>;
 
-const { height } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const PIP_W = 100;
 const PIP_H = 140;
+const FLOAT_W = 110;
+const FLOAT_H = 150;
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -52,12 +56,24 @@ function formatDuration(s: number): string {
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-// ─── Outer screen: fetch token + provide LiveKit room ───────────────────────
-export default function GroupCallScreen() {
-  const navigation = useNavigation<NavProp>();
-  const route = useRoute<RouteP>();
+// ─── GroupCallContent: token + audio + LiveKit room (hosted at app level) ────
+// Renders the full call UI or the floating overlay inside a single persistent
+// <LiveKitRoom>, so the connection survives minimize/maximize.
+export function GroupCallContent({
+  params,
+  minimized,
+  onMinimize,
+  onMaximize,
+  onEnded,
+}: {
+  params: ActiveCallParams;
+  minimized: boolean;
+  onMinimize: () => void;
+  onMaximize: () => void;
+  onEnded: () => void;
+}) {
   const { user } = useAuth();
-  const { roomName, displayName, audioOnly, groupName, memberCount, callId, chatId } = route.params;
+  const { roomName, displayName, audioOnly, groupName, memberCount, callId, chatId } = params;
 
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,14 +86,10 @@ export default function GroupCallScreen() {
 
     const setup = async () => {
       try {
-        // Android: request runtime mic (and camera for video) permission.
-        // Without RECORD_AUDIO granted, LiveKit can't publish the mic track,
-        // so other participants can't hear this user.
         if (Platform.OS === 'android') {
           const perms = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
           if (!audioOnly) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
           const result = await PermissionsAndroid.requestMultiple(perms);
-
           const micGranted =
             result[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] ===
             PermissionsAndroid.RESULTS.GRANTED;
@@ -87,8 +99,6 @@ export default function GroupCallScreen() {
           }
         }
 
-        // Configure communication-mode audio (must be before connecting),
-        // defaulting output to speaker.
         await AudioSession.configureAudio({
           android: {
             preferredOutputList: ['speaker'],
@@ -100,8 +110,7 @@ export default function GroupCallScreen() {
 
         if (mounted) setReady(true);
       } catch (e) {
-        console.error('[GroupCallScreen] Audio setup failed:', e);
-        // Still allow the call to proceed; audio may be degraded.
+        console.error('[GroupCall] Audio setup failed:', e);
         if (mounted) setReady(true);
       }
     };
@@ -121,7 +130,7 @@ export default function GroupCallScreen() {
         const t = await generateLiveKitToken({ roomName, displayName });
         if (mounted) setToken(t);
       } catch (e: any) {
-        console.error('[GroupCallScreen] Token fetch failed:', e);
+        console.error('[GroupCall] Token fetch failed:', e);
         if (mounted) setError(e?.message || 'Failed to join call');
       }
     };
@@ -135,8 +144,8 @@ export default function GroupCallScreen() {
         <AppBg />
         <View style={styles.center}>
           <AppText fixedColor style={styles.errorText}>{error}</AppText>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => navigation.goBack()}>
-            <AppText fixedColor style={styles.retryText}>Go Back</AppText>
+          <TouchableOpacity style={styles.retryBtn} onPress={onEnded}>
+            <AppText fixedColor style={styles.retryText}>Close</AppText>
           </TouchableOpacity>
         </View>
       </View>
@@ -144,6 +153,15 @@ export default function GroupCallScreen() {
   }
 
   if (!token || !ready) {
+    // While connecting, if the user minimized, show a tiny placeholder instead
+    // of the full-screen connecting view.
+    if (minimized) {
+      return (
+        <View style={styles.connectingPill} pointerEvents="box-none">
+          <ActivityIndicator size="small" color="#fff" />
+        </View>
+      );
+    }
     return (
       <View style={styles.root}>
         <AppBg />
@@ -168,29 +186,48 @@ export default function GroupCallScreen() {
       connect={true}
       audio={true}
       video={!audioOnly}
-      // Disable adaptiveStream + dynacast: with our PiP-tile layout these would
-      // pause/limit video for small or not-actively-viewed tiles, so a feed only
-      // appeared after being tapped into the main view. For a small group (<=8)
-      // we stream all subscribed feeds continuously instead.
       options={{ adaptiveStream: false, dynacast: false }}
-      onDisconnected={() => {
-        if (callId && user?.uid) {
-          // best-effort Firestore cleanup handled in RoomView's end handler
-        }
-        navigation.goBack();
-      }}
+      onDisconnected={onEnded}
     >
-      <RoomView
-        audioOnly={!!audioOnly}
-        groupName={groupName}
-        memberCount={memberCount}
-        callId={callId}
-        chatId={chatId}
-        userId={user?.uid ?? null}
-        roomName={roomName}
-        localDisplayName={displayName}
-      />
+      {minimized ? (
+        <FloatingCallView
+          groupName={groupName}
+          onMaximize={onMaximize}
+          onEnded={onEnded}
+          callId={callId}
+          userId={user?.uid ?? null}
+        />
+      ) : (
+        <RoomView
+          audioOnly={!!audioOnly}
+          groupName={groupName}
+          memberCount={memberCount}
+          callId={callId}
+          chatId={chatId}
+          userId={user?.uid ?? null}
+          roomName={roomName}
+          localDisplayName={displayName}
+          onMinimize={onMinimize}
+          onEnded={onEnded}
+        />
+      )}
     </LiveKitRoom>
+  );
+}
+
+// ─── Default route export (back-compat; primary path is the app-level host) ──
+export default function GroupCallScreen() {
+  const navigation = useNavigation<NavProp>();
+  const route = useRoute<RouteP>();
+  const goBack = () => navigation.goBack();
+  return (
+    <GroupCallContent
+      params={route.params as ActiveCallParams}
+      minimized={false}
+      onMinimize={goBack}
+      onMaximize={() => {}}
+      onEnded={goBack}
+    />
   );
 }
 
@@ -256,6 +293,8 @@ function RoomView({
   userId,
   roomName,
   localDisplayName,
+  onMinimize,
+  onEnded,
 }: {
   audioOnly: boolean;
   groupName: string;
@@ -265,6 +304,8 @@ function RoomView({
   userId: string | null;
   roomName: string;
   localDisplayName: string;
+  onMinimize: () => void;
+  onEnded: () => void;
 }) {
   const navigation = useNavigation<NavProp>();
   const room = useRoomContext();
@@ -384,15 +425,16 @@ function RoomView({
     }
   }, [localParticipant]);
 
-  // Open the group chat. Pushes the Chat screen on top so the call keeps
-  // running underneath (back returns to the call).
+  // Open the group chat. Minimizes the call to the floating widget so the chat
+  // is visible underneath; the call keeps running.
   const openChat = useCallback(() => {
     if (!chatId) {
       Alert.alert('Chat unavailable', 'Could not open the group chat.');
       return;
     }
-    navigation.push('Chat', { chatId, displayName: groupName, isGroup: true });
-  }, [chatId, groupName, navigation]);
+    onMinimize();
+    navigation.navigate('Chat', { chatId, displayName: groupName, isGroup: true });
+  }, [chatId, groupName, navigation, onMinimize]);
 
   // Invite a contact to the in-progress call.
   const handleInvite = useCallback(
@@ -437,11 +479,11 @@ function RoomView({
             if (callId && userId) await groupCall.leaveGroupCall(callId, userId);
           } catch {}
           try { await room.disconnect(); } catch {}
-          navigation.goBack();
+          onEnded();
         },
       },
     ]);
-  }, [room, callId, userId, groupCall, navigation]);
+  }, [room, callId, userId, groupCall, onEnded]);
 
   const isMuted = !isMicrophoneEnabled;
 
@@ -459,8 +501,8 @@ function RoomView({
 
         {/* Top bar */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={handleHangUp} style={styles.backBtn}>
-            <AppIcon name="chevron-back" size={26} color="rgba(255,255,255,0.80)" fixedColor />
+          <TouchableOpacity onPress={onMinimize} style={styles.backBtn}>
+            <AppIcon name="chevron-down" size={26} color="rgba(255,255,255,0.80)" fixedColor />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <AppText fixedColor style={styles.topName}>{headerTitle}</AppText>
@@ -570,8 +612,8 @@ function RoomView({
 
       {/* Top bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleHangUp} style={styles.backBtn}>
-          <AppIcon name="chevron-back" size={26} color="rgba(255,255,255,0.80)" fixedColor />
+        <TouchableOpacity onPress={onMinimize} style={styles.backBtn}>
+          <AppIcon name="chevron-down" size={26} color="rgba(255,255,255,0.80)" fixedColor />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <AppText fixedColor style={styles.topName}>{headerTitle}</AppText>
@@ -704,6 +746,103 @@ function AddContactModal({
   );
 }
 
+// ─── Floating (minimized) call view — draggable, tap to maximize ────────────
+function FloatingCallView({
+  groupName,
+  onMaximize,
+  onEnded,
+  callId,
+  userId,
+}: {
+  groupName: string;
+  onMaximize: () => void;
+  onEnded: () => void;
+  callId?: string;
+  userId: string | null;
+}) {
+  const room = useRoomContext();
+  const groupCall = useGroupCall();
+  const participants = useParticipants();
+  const cameraTracks = useTracks([Track.Source.Camera]);
+
+  // Prefer a remote participant's camera for the thumbnail; fall back to avatar.
+  const remote = participants.find((p) => !p.isLocal);
+  const target = remote || participants[0];
+  const camTrack = target
+    ? cameraTracks.find((t) => isTrackReference(t) && t.participant.identity === target.identity)
+    : undefined;
+  const hasVideo = !!(camTrack && isTrackReference(camTrack));
+
+  const position = useRef(new Animated.ValueXY({ x: width - FLOAT_W - 16, y: 90 })).current;
+  const offset = useRef({ x: width - FLOAT_W - 16, y: 90 });
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_e: GestureResponderEvent, g: PanResponderGestureState) =>
+        Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4,
+      onPanResponderGrant: () => {
+        position.setOffset({ x: offset.current.x, y: offset.current.y });
+        position.setValue({ x: 0, y: 0 });
+      },
+      onPanResponderMove: Animated.event([null, { dx: position.x, dy: position.y }], {
+        useNativeDriver: false,
+      }),
+      onPanResponderRelease: (_e: GestureResponderEvent, g: PanResponderGestureState) => {
+        position.flattenOffset();
+        const isTap = Math.abs(g.dx) < 8 && Math.abs(g.dy) < 8;
+        if (isTap) {
+          onMaximize();
+          return;
+        }
+        const finalX = offset.current.x + g.dx;
+        const finalY = offset.current.y + g.dy;
+        const maxY = height - FLOAT_H - 16;
+        const targetX = finalX > width / 2 ? width - FLOAT_W - 16 : 16;
+        const targetY = Math.max(50, Math.min(maxY, finalY));
+        offset.current = { x: targetX, y: targetY };
+        Animated.spring(position, {
+          toValue: { x: targetX, y: targetY },
+          useNativeDriver: false,
+          friction: 8,
+        }).start();
+      },
+    })
+  ).current;
+
+  const handleEnd = async () => {
+    try {
+      if (callId && userId) await groupCall.leaveGroupCall(callId, userId);
+    } catch {}
+    try {
+      await room.disconnect();
+    } catch {}
+    onEnded();
+  };
+
+  return (
+    <Animated.View
+      style={[styles.floatContainer, { transform: position.getTranslateTransform() }]}
+      {...panResponder.panHandlers}
+    >
+      <View style={styles.floatInner}>
+        {hasVideo ? (
+          <VideoTrack trackRef={camTrack as any} style={StyleSheet.absoluteFill} objectFit="cover" />
+        ) : (
+          <View style={styles.floatAvatarWrap}>
+            <Avatar initials={getInitials(groupName)} color={COLORS.blue} size={44} />
+          </View>
+        )}
+        <View style={styles.floatBadge}>
+          <AppIcon name="call" size={11} color="#fff" fixedColor />
+        </View>
+        <TouchableOpacity style={styles.floatEndBtn} onPress={handleEnd} activeOpacity={0.8}>
+          <AppIcon name="call" size={14} color="#fff" fixedColor />
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+}
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
@@ -817,4 +956,60 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.12)',
   },
   contactName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' },
+
+  // Floating (minimized) call widget
+  connectingPill: {
+    position: 'absolute',
+    top: 90,
+    right: 16,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(10,26,48,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOW.glow,
+  },
+  floatContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: FLOAT_W,
+    height: FLOAT_H,
+    zIndex: 9999,
+  },
+  floatInner: {
+    flex: 1,
+    backgroundColor: 'rgba(10,26,48,0.95)',
+    borderRadius: RADIUS.lg,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden',
+    ...SHADOW.glow,
+  },
+  floatAvatarWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  floatBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatEndBtn: {
+    position: 'absolute',
+    bottom: 8,
+    left: (FLOAT_W - 32) / 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#e84343',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ rotate: '135deg' }],
+    ...SHADOW.button,
+  },
 });

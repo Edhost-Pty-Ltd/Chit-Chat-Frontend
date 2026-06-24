@@ -76,7 +76,8 @@
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
-      ]
+      ],
+      "expo-video"
     ],
     "android": {
       "adaptiveIcon": {
