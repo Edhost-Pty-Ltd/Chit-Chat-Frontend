@@ -2,8 +2,11 @@
 // Global listener for group call notifications that shows UI for incoming calls
 
 import React, { useState, useEffect } from 'react';
+import { Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useGroupCallNotifications } from '../hooks/useGroupCallNotifications';
 import { useGroupCall } from '../hooks/useGroupCall';
@@ -39,18 +42,18 @@ export default function GroupCallNotificationManager() {
     if (joined) {
       // Fetch group info from chat document
       try {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const { db } = await import('../config/firebase');
-        
         const chatRef = doc(db, 'chats', currentNotification.chatId);
         const chatSnap = await getDoc(chatRef);
         
-        let groupName = 'Group Call';
+        let groupName = currentNotification.initiatorName || 'Call';
         let memberCount = 2;
-        
+
         if (chatSnap.exists()) {
           const chatData = chatSnap.data();
-          groupName = chatData.groupName || chatData.name || 'Group Call';
+          // Group chats have a name; for direct (1-on-1) chats fall back to the
+          // caller's name so the call header shows who you're talking to.
+          groupName =
+            chatData.groupName || chatData.name || currentNotification.initiatorName || 'Call';
           memberCount = (chatData.members as string[])?.length || 2;
         }
 
@@ -78,14 +81,19 @@ export default function GroupCallNotificationManager() {
           roomName: currentNotification.roomName,
           displayName: userDisplayName,
           audioOnly: currentNotification.callType === 'audio',
-          groupName: 'Group Call',
+          groupName: currentNotification.initiatorName || 'Call',
           memberCount: 2,
           chatId: currentNotification.chatId,
           callId: currentNotification.callId,
         });
       }
     } else {
-      console.error('[GroupCallNotificationManager] Failed to join call');
+      // The call has already ended (or no longer exists) — this is an expected
+      // condition for a stale/ghost notification, not an error. Clear it so it
+      // stops showing, and let the user know.
+      console.warn('[GroupCallNotificationManager] Call is no longer available; dismissing notification');
+      await dismissNotification(currentNotification.callId);
+      Alert.alert('Call ended', 'This group call has already ended.');
     }
 
     setCurrentNotification(null);

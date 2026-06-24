@@ -127,14 +127,14 @@ export function useGroupCall() {
         const callSnap = await getDoc(groupCallRef);
 
         if (!callSnap.exists()) {
-          console.error('[useGroupCall] Call does not exist:', callId);
+          console.warn('[useGroupCall] Call does not exist:', callId);
           return false;
         }
 
         const callData = callSnap.data() as GroupCallData;
 
         if (callData.status !== 'active') {
-          console.error('[useGroupCall] Call is not active:', callData.status);
+          console.warn('[useGroupCall] Call is not active:', callData.status);
           return false;
         }
 
@@ -220,11 +220,74 @@ export function useGroupCall() {
     []
   );
 
+  /**
+   * Invite an additional contact to an in-progress group call by creating a
+   * pending notification for them pointing at the current call/room.
+   */
+  const inviteToGroupCall = useCallback(
+    async (params: {
+      callId: string;
+      chatId: string;
+      roomName: string;
+      initiatorId: string;
+      initiatorName: string;
+      callType: 'audio' | 'video';
+      inviteeId: string;
+    }): Promise<boolean> => {
+      try {
+        const notificationRef = doc(
+          db,
+          'users',
+          params.inviteeId,
+          'groupCallNotifications',
+          params.callId
+        );
+
+        await setDoc(notificationRef, {
+          callId: params.callId,
+          chatId: params.chatId,
+          roomName: params.roomName,
+          initiatorId: params.initiatorId,
+          initiatorName: params.initiatorName,
+          callType: params.callType,
+          status: 'pending',
+          createdAt: serverTimestamp(),
+        });
+
+        // Best-effort: add the invitee to the call's participant list so they
+        // appear as expected and the count stays consistent.
+        try {
+          const groupCallRef = doc(db, 'groupCalls', params.callId);
+          const snap = await getDoc(groupCallRef);
+          if (snap.exists()) {
+            const data = snap.data() as GroupCallData;
+            const members = data.participants || [];
+            if (!members.includes(params.inviteeId)) {
+              await updateDoc(groupCallRef, {
+                participants: [...members, params.inviteeId],
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[useGroupCall] Could not update participants on invite:', e);
+        }
+
+        console.log('[useGroupCall] Invited contact to call:', params.inviteeId);
+        return true;
+      } catch (err) {
+        console.error('[useGroupCall] Failed to invite contact:', err);
+        return false;
+      }
+    },
+    []
+  );
+
   return {
     initiateGroupCall,
     joinGroupCall,
     leaveGroupCall,
     endGroupCall,
+    inviteToGroupCall,
     isCreating,
     error,
   };

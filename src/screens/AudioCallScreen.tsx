@@ -19,6 +19,8 @@ import { useCallContext } from '../context/CallContext';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useIncomingCallAnswer } from '../hooks/useIncomingCallAnswer';
 import { useAudioRouting } from '../hooks/useAudioRouting';
+import { getOrCreateDirectChat } from '../hooks/useChatActions';
+import { getAuth } from '@react-native-firebase/auth';
 import { COLORS, RADIUS, SHADOW } from '../types/theme';
 import { RootStackParamList } from '../types';
 import type { NetworkQuality } from '../hooks/useWebRTC';
@@ -223,8 +225,26 @@ export default function AudioCallScreen() {
     navigation.replace('VideoCall', { callId, isOutgoing, otherParty });
   };
 
-  const openChat = () => {
-    Alert.alert('Chat', 'Chat feature not available during audio call');
+  const openChat = async () => {
+    try {
+      const currentUid = getAuth().currentUser?.uid;
+      if (!currentUid) {
+        Alert.alert('Chat unavailable', 'Could not open the chat.');
+        return;
+      }
+      const chatId = await getOrCreateDirectChat(currentUid, otherParty.userId);
+      // Push so the call keeps running underneath; back returns to the call.
+      navigation.push('Chat', {
+        chatId,
+        displayName: otherParty.displayName,
+        isGroup: false,
+        otherUserId: otherParty.userId,
+        otherUserPhoto: otherParty.photoUrl,
+      });
+    } catch (error) {
+      console.error('[AudioCallScreen] Error opening chat:', error);
+      Alert.alert('Error', 'Could not open chat. Please try again.');
+    }
   };
 
   const handleHangUp = async () => {

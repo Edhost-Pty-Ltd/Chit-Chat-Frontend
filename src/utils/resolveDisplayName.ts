@@ -2,9 +2,12 @@
 // Pure utility that resolves a human-readable display name for chat participants.
 // Priority chain:
 //   1. Group chat → groupName or "Group"
-//   2. Direct chat → phone book contact name (if phone in contacts map)
-//   3. Direct chat → Firestore displayName (if exists and differs from phone)
-//   4. Direct chat → raw phone number
+//   2. Direct chat → phone book contact name (if phone is saved in contacts)
+//   3. Direct chat → raw phone number (if NOT saved in contacts)
+//
+// Note: a user's self-set Firestore displayName is intentionally NOT used for
+// direct chats — names come only from the viewer's own phone book, falling back
+// to the phone number.
 
 /**
  * Minimal chat shape required for display name resolution.
@@ -27,8 +30,7 @@ export interface FirestoreUserInfo {
  * Resolves the display name for a chat based on the following priority:
  *  1. Group chat → groupName (or "Group" if null)
  *  2. Direct chat → contact name from device phone book
- *  3. Direct chat → Firestore displayName (if it differs from the raw phone)
- *  4. Direct chat → raw phone number
+ *  3. Direct chat → raw phone number
  *
  * @param chat - Chat data with type, members, and groupName
  * @param currentUserId - The current authenticated user's UID
@@ -47,22 +49,17 @@ export function resolveDisplayName(
     return chat.groupName ?? 'Group';
   }
 
-  // 2-4. Direct chats — find the other member
+  // 2-3. Direct chats — find the other member
   const otherMemberId = chat.members.find((id) => id !== currentUserId);
   if (!otherMemberId) return 'Unknown';
 
   const otherUser = firestoreUsers.get(otherMemberId);
   if (!otherUser) return 'Unknown';
 
-  // Priority 2: Phone book contact name
+  // Priority 2: Phone book contact name (only if saved in this device's contacts)
   const contactName = contactsMap.get(otherUser.phone);
   if (contactName) return contactName;
 
-  // Priority 3: Firestore displayName (only if it's a real name, not just the phone number)
-  if (otherUser.displayName && otherUser.displayName !== otherUser.phone) {
-    return otherUser.displayName;
-  }
-
-  // Priority 4: Raw phone number
+  // Priority 3: Raw phone number (contact not saved on this device)
   return otherUser.phone;
 }

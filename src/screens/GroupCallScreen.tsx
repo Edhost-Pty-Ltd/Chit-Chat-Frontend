@@ -5,13 +5,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Alert, Platform,
-  Dimensions, Animated, Modal, Pressable, ActivityIndicator,
+  Dimensions, Animated, Modal, Pressable, ActivityIndicator, PermissionsAndroid, FlatList,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   AudioSession,
+  AndroidAudioTypePresets,
   LiveKitRoom,
   VideoTrack,
   isTrackReference,
@@ -29,6 +30,8 @@ import { LIVEKIT_CONFIG } from '../config/livekit';
 import { generateLiveKitToken } from '../utils/livekitToken';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { useAuth } from '../hooks/useAuth';
+import { useContacts, AppContact } from '../hooks/useContacts';
+import { usePhoneBook } from '../hooks/usePhoneBook';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'GroupCall'>;
 type RouteP = RouteProp<RootStackParamList, 'GroupCall'>;
@@ -54,27 +57,61 @@ export default function GroupCallScreen() {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RouteP>();
   const { user } = useAuth();
-  const { roomName, displayName, audioOnly, groupName, memberCount, callId } = route.params;
+  const { roomName, displayName, audioOnly, groupName, memberCount, callId, chatId } = route.params;
 
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false); // permissions + audio session configured
 
-  // Start audio session for the duration of the call
+  // Request permissions, configure audio for communication, then start session.
+  // configureAudio MUST run before connecting for mic capture + routing to work.
   useEffect(() => {
     let mounted = true;
-    const start = async () => {
+
+    const setup = async () => {
       try {
+        // Android: request runtime mic (and camera for video) permission.
+        // Without RECORD_AUDIO granted, LiveKit can't publish the mic track,
+        // so other participants can't hear this user.
+        if (Platform.OS === 'android') {
+          const perms = [PermissionsAndroid.PERMISSIONS.RECORD_AUDIO];
+          if (!audioOnly) perms.push(PermissionsAndroid.PERMISSIONS.CAMERA);
+          const result = await PermissionsAndroid.requestMultiple(perms);
+
+          const micGranted =
+            result[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] ===
+            PermissionsAndroid.RESULTS.GRANTED;
+          if (!micGranted) {
+            if (mounted) setError('Microphone permission is required for calls.');
+            return;
+          }
+        }
+
+        // Configure communication-mode audio (must be before connecting),
+        // defaulting output to speaker.
+        await AudioSession.configureAudio({
+          android: {
+            preferredOutputList: ['speaker'],
+            audioTypeOptions: AndroidAudioTypePresets.communication,
+          },
+          ios: { defaultOutput: 'speaker' },
+        });
         await AudioSession.startAudioSession();
+
+        if (mounted) setReady(true);
       } catch (e) {
-        console.error('[GroupCallScreen] Failed to start audio session:', e);
+        console.error('[GroupCallScreen] Audio setup failed:', e);
+        // Still allow the call to proceed; audio may be degraded.
+        if (mounted) setReady(true);
       }
     };
-    start();
+
+    setup();
     return () => {
       mounted = false;
       AudioSession.stopAudioSession();
     };
-  }, []);
+  }, [audioOnly]);
 
   // Fetch access token from backend
   useEffect(() => {
@@ -106,7 +143,7 @@ export default function GroupCallScreen() {
     );
   }
 
-  if (!token) {
+  if (!token || !ready) {
     return (
       <View style={styles.root}>
         <AppBg />
@@ -131,7 +168,11 @@ export default function GroupCallScreen() {
       connect={true}
       audio={true}
       video={!audioOnly}
-      options={{ adaptiveStream: { pixelDensity: 'screen' } }}
+      // Disable adaptiveStream + dynacast: with our PiP-tile layout these would
+      // pause/limit video for small or not-actively-viewed tiles, so a feed only
+      // appeared after being tapped into the main view. For a small group (<=8)
+      // we stream all subscribed feeds continuously instead.
+      options={{ adaptiveStream: false, dynacast: false }}
       onDisconnected={() => {
         if (callId && user?.uid) {
           // best-effort Firestore cleanup handled in RoomView's end handler
@@ -144,7 +185,10 @@ export default function GroupCallScreen() {
         groupName={groupName}
         memberCount={memberCount}
         callId={callId}
+        chatId={chatId}
         userId={user?.uid ?? null}
+        roomName={roomName}
+        localDisplayName={displayName}
       />
     </LiveKitRoom>
   );
@@ -208,19 +252,26 @@ function RoomView({
   groupName,
   memberCount,
   callId,
+  chatId,
   userId,
+  roomName,
+  localDisplayName,
 }: {
   audioOnly: boolean;
   groupName: string;
   memberCount: number;
   callId?: string;
+  chatId?: string;
   userId: string | null;
+  roomName: string;
+  localDisplayName: string;
 }) {
   const navigation = useNavigation<NavProp>();
   const room = useRoomContext();
   const groupCall = useGroupCall();
   const participants = useParticipants();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
+  const { resolveName } = usePhoneBook();
 
   const [callDuration, setCallDuration] = useState(0);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
@@ -233,8 +284,26 @@ function RoomView({
     return () => clearInterval(t);
   }, []);
 
-  // Build display name for a participant
-  const nameFor = (p: any) => p?.name || p?.identity || 'Guest';
+  // Ensure the mic is publishing once we've connected (safety net in addition
+  // to LiveKitRoom audio={true}). Runs once when the local participant appears.
+  const micInitRef = useRef(false);
+  useEffect(() => {
+    if (localParticipant && !micInitRef.current) {
+      micInitRef.current = true;
+      localParticipant
+        .setMicrophoneEnabled(true)
+        .catch((e) => console.warn('[GroupCallScreen] Failed to enable mic:', e));
+    }
+  }, [localParticipant]);
+
+  // Build display name for a participant. The LiveKit participant name is the
+  // person's phone number, so resolve it against the device phone book: saved
+  // contact name if available, otherwise the phone number.
+  const nameFor = (p: any) => resolveName(p?.name || p?.identity, 'Guest');
+
+  // Header title: a real group name passes through unchanged; a 1-on-1's
+  // phone-number title resolves to the saved contact name when available.
+  const headerTitle = resolveName(groupName, groupName);
 
   // Separate local + remote
   const remotes = participants.filter((p) => !p.isLocal);
@@ -254,20 +323,56 @@ function RoomView({
   const mainCameraTrack = useCameraTrackFor(effectiveMain);
   const activeCount = Math.max(participants.length, 1);
 
+  // Dynamic layout: show the video layout whenever ANY participant has a camera
+  // on. So when someone enables their camera during an audio call, everyone's
+  // UI switches to video. A call started as video always uses the video layout.
+  const allCameraTracks = useTracks([Track.Source.Camera]);
+  const anyCameraOn = allCameraTracks.some((t) => isTrackReference(t));
+  const isVideoMode = !audioOnly || anyCameraOn;
+
   // ── Controls ──────────────────────────────────────────────────────────────
   const handleMuteToggle = useCallback(() => {
     localParticipant?.setMicrophoneEnabled(!isMicrophoneEnabled);
   }, [localParticipant, isMicrophoneEnabled]);
 
-  const handleCameraToggle = useCallback(() => {
-    localParticipant?.setCameraEnabled(!isCameraEnabled);
+  const handleCameraToggle = useCallback(async () => {
+    const enabling = !isCameraEnabled;
+
+    // Enabling the camera during an audio call needs CAMERA permission, which
+    // wasn't requested when the audio call started.
+    if (enabling && Platform.OS === 'android') {
+      try {
+        const res = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
+        if (res !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Camera permission needed', 'Enable camera access to turn on video.');
+          return;
+        }
+      } catch (e) {
+        console.warn('[GroupCallScreen] Camera permission request failed:', e);
+        return;
+      }
+    }
+
+    try {
+      await localParticipant?.setCameraEnabled(enabling);
+    } catch (e) {
+      console.warn('[GroupCallScreen] Camera toggle failed:', e);
+    }
   }, [localParticipant, isCameraEnabled]);
 
-  const handleSpeakerToggle = useCallback(() => {
-    // Note: full speaker/earpiece routing requires native audio config.
-    // Kept as UI state for now, mirroring the 1-on-1 VideoCallScreen behavior.
-    setIsSpeakerOn((prev) => !prev);
-  }, []);
+  const handleSpeakerToggle = useCallback(async () => {
+    const next = !isSpeakerOn;
+    setIsSpeakerOn(next);
+    try {
+      if (Platform.OS === 'ios') {
+        await AudioSession.selectAudioOutput(next ? 'force_speaker' : 'default');
+      } else {
+        await AudioSession.selectAudioOutput(next ? 'speaker' : 'earpiece');
+      }
+    } catch (e) {
+      console.warn('[GroupCallScreen] Speaker toggle failed:', e);
+    }
+  }, [isSpeakerOn]);
 
   const handleFlipCamera = useCallback(async () => {
     try {
@@ -278,6 +383,48 @@ function RoomView({
       console.warn('[GroupCallScreen] Flip camera failed:', e);
     }
   }, [localParticipant]);
+
+  // Open the group chat. Pushes the Chat screen on top so the call keeps
+  // running underneath (back returns to the call).
+  const openChat = useCallback(() => {
+    if (!chatId) {
+      Alert.alert('Chat unavailable', 'Could not open the group chat.');
+      return;
+    }
+    navigation.push('Chat', { chatId, displayName: groupName, isGroup: true });
+  }, [chatId, groupName, navigation]);
+
+  // Invite a contact to the in-progress call.
+  const handleInvite = useCallback(
+    async (contact: AppContact) => {
+      if (!callId || !chatId || !userId) {
+        Alert.alert('Cannot invite', 'Call information is missing.');
+        return;
+      }
+      const ok = await groupCall.inviteToGroupCall({
+        callId,
+        chatId,
+        roomName,
+        initiatorId: userId,
+        initiatorName: localDisplayName,
+        callType: audioOnly ? 'audio' : 'video',
+        inviteeId: contact.userId,
+      });
+      setAddOpen(false);
+      Alert.alert(
+        ok ? 'Invitation sent' : 'Error',
+        ok
+          ? `${contact.displayName} has been invited to the call.`
+          : 'Could not invite this contact. Please try again.'
+      );
+    },
+    [callId, chatId, roomName, userId, localDisplayName, audioOnly, groupCall]
+  );
+
+  // Identities already in the call (plus self) — excluded from the invite list.
+  const excludeIds = [userId, ...participants.map((p) => p.identity)].filter(
+    (x): x is string => !!x
+  );
 
   const handleHangUp = useCallback(() => {
     Alert.alert('End Call', 'Leave this call?', [
@@ -299,7 +446,7 @@ function RoomView({
   const isMuted = !isMicrophoneEnabled;
 
   // ── AUDIO-ONLY LAYOUT (matches AudioCallScreen) ─────────────────────────────
-  if (audioOnly) {
+  if (!isVideoMode) {
     return (
       <View style={styles.root}>
         <AppBg />
@@ -316,12 +463,12 @@ function RoomView({
             <AppIcon name="chevron-back" size={26} color="rgba(255,255,255,0.80)" fixedColor />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <AppText fixedColor style={styles.topName}>{groupName}</AppText>
+            <AppText fixedColor style={styles.topName}>{headerTitle}</AppText>
             <AppText fixedColor style={styles.topStatus}>
               {formatDuration(callDuration)} · {activeCount} participant{activeCount !== 1 ? 's' : ''}
             </AppText>
           </View>
-          <TouchableOpacity style={styles.topBtn} activeOpacity={0.75} onPress={() => Alert.alert('Chat', 'Not available during call')}>
+          <TouchableOpacity style={styles.topBtn} activeOpacity={0.75} onPress={openChat}>
             <AppIcon name="chatbubble-outline" size={22} color="rgba(255,255,255,0.80)" fixedColor />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setAddOpen(true)} style={styles.topBtn} activeOpacity={0.75}>
@@ -383,7 +530,13 @@ function RoomView({
           </View>
         </View>
 
-        <AddModal visible={addOpen} onClose={() => setAddOpen(false)} />
+        {addOpen && (
+          <AddContactModal
+            onClose={() => setAddOpen(false)}
+            onInvite={handleInvite}
+            excludeIds={excludeIds}
+          />
+        )}
       </View>
     );
   }
@@ -421,7 +574,7 @@ function RoomView({
           <AppIcon name="chevron-back" size={26} color="rgba(255,255,255,0.80)" fixedColor />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <AppText fixedColor style={styles.topName}>{groupName}</AppText>
+          <AppText fixedColor style={styles.topName}>{headerTitle}</AppText>
           <AppText fixedColor style={styles.topStatus}>
             {formatDuration(callDuration)} · {activeCount} participant{activeCount !== 1 ? 's' : ''}
           </AppText>
@@ -443,6 +596,10 @@ function RoomView({
         <TouchableOpacity style={[styles.sideBtn, localIsMain && styles.sideBtnActive]} onPress={handleFlipCamera} activeOpacity={0.75} disabled={!localIsMain || !isCameraEnabled}>
           <AppIcon name="camera-reverse-outline" size={22} color="#fff" fixedColor />
           <AppText fixedColor style={styles.sideBtnLabel}>Flip</AppText>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.sideBtn} onPress={openChat} activeOpacity={0.75}>
+          <AppIcon name="chatbubble-outline" size={20} color="#fff" fixedColor />
+          <AppText fixedColor style={styles.sideBtnLabel}>Chat</AppText>
         </TouchableOpacity>
         <TouchableOpacity style={styles.sideBtn} onPress={() => setAddOpen(true)} activeOpacity={0.75}>
           <AppIcon name="person-add-outline" size={20} color="#fff" fixedColor />
@@ -478,22 +635,70 @@ function RoomView({
         </View>
       </View>
 
-      <AddModal visible={addOpen} onClose={() => setAddOpen(false)} />
+      {addOpen && (
+        <AddContactModal
+          onClose={() => setAddOpen(false)}
+          onInvite={handleInvite}
+          excludeIds={excludeIds}
+        />
+      )}
     </View>
   );
 }
 
-// ─── Add participant modal (placeholder) ─────────────────────────────────────
-function AddModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+// ─── Add participant modal — pick a contact to invite to the call ───────────
+function AddContactModal({
+  onClose,
+  onInvite,
+  excludeIds,
+}: {
+  onClose: () => void;
+  onInvite: (contact: AppContact) => void;
+  excludeIds: string[];
+}) {
+  const { contacts, loading, error } = useContacts();
+  const available = contacts.filter((c) => !excludeIds.includes(c.userId));
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.addOverlay} onPress={onClose} />
       <View style={styles.addSheet}>
         <View style={styles.addHandle} />
         <AppText fixedColor style={styles.addTitle}>Add to call</AppText>
-        <AppText fixedColor style={styles.addEmpty}>
-          Share the group and start a call — members can join from the call notification.
-        </AppText>
+
+        {loading ? (
+          <ActivityIndicator color="#fff" style={{ paddingVertical: 28 }} />
+        ) : error ? (
+          <AppText fixedColor style={styles.addEmpty}>{error}</AppText>
+        ) : available.length === 0 ? (
+          <AppText fixedColor style={styles.addEmpty}>
+            No contacts available to add.
+          </AppText>
+        ) : (
+          <FlatList
+            data={available}
+            keyExtractor={(c) => c.userId}
+            style={{ maxHeight: height * 0.5 }}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.contactRow}
+                onPress={() => onInvite(item)}
+                activeOpacity={0.7}
+              >
+                <Avatar
+                  initials={getInitials(item.displayName)}
+                  color={COLORS.blue}
+                  size={40}
+                />
+                <AppText fixedColor style={styles.contactName} numberOfLines={1}>
+                  {item.displayName}
+                </AppText>
+                <AppIcon name="add-circle-outline" size={24} color="#fff" fixedColor />
+              </TouchableOpacity>
+            )}
+          />
+        )}
       </View>
     </Modal>
   );
@@ -602,4 +807,14 @@ const styles = StyleSheet.create({
   addHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', alignSelf: 'center', marginBottom: 14 },
   addTitle: { fontSize: 17, fontWeight: '700', color: '#fff', marginBottom: 14 },
   addEmpty: { fontSize: 14, color: 'rgba(255,255,255,0.55)', textAlign: 'center', paddingVertical: 24 },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.12)',
+  },
+  contactName: { flex: 1, fontSize: 15, fontWeight: '600', color: '#fff' },
 });
