@@ -12,7 +12,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -224,8 +224,9 @@ interface DeviceCardProps {
   onLogout?: () => void;
 }
 function DeviceCard({ device, FG, textColor, fontFamily, onLogout }: DeviceCardProps) {
+  const { bevel } = useGlass();
   return (
-    <View style={[styles.card, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+    <View style={[styles.card, bevel]}>
       {/* Icon */}
       <View style={[styles.deviceIconWrap, { backgroundColor: 'rgba(30,156,240,0.12)', borderColor: 'rgba(30,156,240,0.25)' }]}>
         <AppIcon name={DEVICE_ICON[device.type]} size={22} color={COLORS.blue} fixedColor />
@@ -303,9 +304,8 @@ const styles = StyleSheet.create({
 
   card: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    borderRadius: RADIUS.lg, borderWidth: 1,
+    borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 14,
-    ...SHADOW.card,
   },
 
   deviceIconWrap: {

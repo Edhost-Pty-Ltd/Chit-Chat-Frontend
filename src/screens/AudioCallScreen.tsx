@@ -18,7 +18,7 @@ import { db } from '../config/firebase';
 import { doc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 
-import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
+import { AppText, AppIcon, AppBg, useGlass } from '../context/ThemeContext';
 import { Avatar } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList, Contact } from '../types';
@@ -35,6 +35,7 @@ export default function AudioCallScreen() {
   const { callId, isOutgoing, otherParty } = route.params;
   const { user } = useAuth();
   const { minimizeCall, updateDuration } = useFloatingCall();
+  const { bevel } = useGlass();
 
   const [muted,        setMuted]        = useState(false);
   const [speakerOn,    setSpeakerOn]    = useState(false);
@@ -371,12 +372,12 @@ export default function AudioCallScreen() {
         </View>
 
         {/* Chat button */}
-        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass]} onPress={openChat}>
+        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass, bevel]} onPress={openChat}>
           <AppIcon name="chatbubble-outline" size={20} color="#fff" fixedColor />
         </TouchableOpacity>
 
         {/* Add person */}
-        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass]}
+        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass, bevel]}
           onPress={() => setAddOpen(true)}>
           <AppIcon name="person-add-outline" size={20} color="#fff" fixedColor />
         </TouchableOpacity>
@@ -477,8 +478,6 @@ const styles = StyleSheet.create({
   iconBtn:      { padding: 8 },
   iconBtnGlass: {
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
   },
   iconBtnActive: {
     backgroundColor: 'rgba(30,156,240,0.35)',

@@ -25,6 +25,7 @@ import { useAuth as useAuthContext } from '../context/AuthContext';
 import { useAuth } from '../hooks/useAuth';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useGlass } from '../context/ThemeContext';
 
 // ─── Stub API helpers ─────────────────────────────────────────────────────────
 // Removed - now using Firebase Phone Authentication via useAuth hook
@@ -123,6 +124,8 @@ export default function SignInScreen() {
   const { signIn: signInToContext } = useAuthContext();
   const { sendOTP, verifyOTP, error: authError } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'SignIn'>>();
+
+  const { bevel } = useGlass();
 
   const [step, setStep] = useState<Step>('phone');
   const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
@@ -289,7 +292,7 @@ export default function SignInScreen() {
             </View>
 
             {/* ── Sign-in card ── */}
-            <View style={styles.card}>
+            <View style={[styles.card, bevel]}>
 
               {step === 'phone' ? (
                 <>
@@ -471,12 +474,8 @@ const styles = StyleSheet.create({
 
   // ── Card ──────────────────────────────────────────────────────────────────
   card: {
-    backgroundColor: 'rgba(180,225,245,0.22)',
     borderRadius: RADIUS.xl,
     padding: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    ...SHADOW.card,
   },
   cardTitle: {
     fontSize: 20,

@@ -234,6 +234,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
     height: 24,
+    overflow: 'hidden',
   },
   waveBar: {
     width: 3,
@@ -242,7 +243,9 @@ const styles = StyleSheet.create({
   duration: {
     fontSize: 11,
     fontWeight: '500',
-    minWidth: 32,
+    minWidth: 34,
+    textAlign: 'right',
+    flexShrink: 0,
   },
   errorContainer: {
     flexDirection: 'row',

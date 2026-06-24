@@ -39,6 +39,7 @@ import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/
 import { validateUsername, validatePhone, validateImage } from '../utils/validationUtils';
 import { AvatarPreview } from '../components/AvatarPreview';
 import { Text } from 'react-native';
+import { useGlass } from '../context/ThemeContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'CreateAccount'>;
 type Step = 'details' | 'otp' | 'biometric';
@@ -118,8 +119,7 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
 
 export default function CreateAccountScreen() {
   const navigation = useNavigation<NavProp>();
-  const { signIn, setDisplayName, setAvatarUri } = useAuth();
-  const {
+  const { signIn, setDisplayName, setAvatarUri } = useAuth();  const {
     registrationStep,
     error: hookError,
     isLoading: hookLoading,
@@ -132,6 +132,8 @@ export default function CreateAccountScreen() {
     retryProfileCreation,
     proceedWithoutPhoto,
   } = useRegistration();
+
+  const { bevel } = useGlass();
 
   const [step,        setStep]        = useState<Step>('details');
   const [name,        setName]        = useState('');
@@ -300,7 +302,7 @@ export default function CreateAccountScreen() {
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
 
-          <View style={styles.card}>
+          <View style={[styles.card, bevel]}>
             {step === 'details' ? (
               <>
                 <Text style={styles.cardTitle}>Create Account</Text>
@@ -517,7 +519,7 @@ const styles = StyleSheet.create({
   backRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   backText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
-  card: { backgroundColor: 'rgba(180,225,245,0.22)', borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)', ...SHADOW.card },
+  card: { borderRadius: RADIUS.xl, padding: 22 },
   cardTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text, marginBottom: 6 },
   cardSub:   { fontSize: 13, color: COLORS.sub, marginBottom: 20, lineHeight: 19 },
 

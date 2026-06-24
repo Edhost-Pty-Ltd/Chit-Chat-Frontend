@@ -20,7 +20,7 @@ const EDGE_PADDING = 16;
 // Try to load RTCView for native video rendering
 let RTCView: any = null;
 try {
-  const rtc = require('react-native-webrtc');
+  const rtc = require('@livekit/react-native-webrtc');
   RTCView = rtc.RTCView;
 } catch {
   RTCView = null;

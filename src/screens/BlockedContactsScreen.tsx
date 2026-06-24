@@ -17,7 +17,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useBlockedContacts, BlockedContact } from '../hooks/useBlockedContacts';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList } from '../types';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'BlockedContacts'>;
 
@@ -26,6 +26,7 @@ export default function BlockedContactsScreen() {
   const { user } = useAuth();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
   const { blockedContacts, loading, unblockContact } = useBlockedContacts(user?.uid ?? null);
   const [unblocking, setUnblocking] = useState<string | null>(null);
 
@@ -74,7 +75,7 @@ export default function BlockedContactsScreen() {
     const isUnblocking = unblocking === item.userId;
 
     return (
-      <View style={[styles.contactItem, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+      <View style={[styles.contactItem, bevel]}>
         <Avatar size={50} name={item.displayName} uri={item.photoURL} />
         
         <View style={styles.contactInfo}>
@@ -204,9 +205,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     gap: 12,
-    ...SHADOW.card,
   },
   contactInfo: {
     flex: 1,

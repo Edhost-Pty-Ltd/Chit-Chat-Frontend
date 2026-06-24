@@ -12,7 +12,7 @@ try { Calendar = require('expo-calendar'); } catch { /* Expo Go / web */ }
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -353,7 +353,7 @@ function SideMenu({ visible, active, onChange, onClose }: SideMenuProps) {
                   colors={isActive ? GRADIENTS.primary : ['rgba(30,156,240,0.10)', 'rgba(30,156,240,0.06)']}
                   style={side.iconWrap}
                 >
-                  <AppIcon name={icon} size={20} color={isActive ? '#fff' : COLORS.blue} fixedColor />
+                  <AppIcon name={icon} size={20} color={isActive ? '#fff' : undefined} fixedColor={isActive} />
                 </LinearGradient>
                 <AppText style={[
                   side.menuLabel,
@@ -384,6 +384,7 @@ interface YearViewProps {
 function YearView({ year, today, eventsByYearMonth, onSelectMonth }: YearViewProps) {
   const { FG } = useForeground();
   const { textColor, fontFamily } = useTypography();
+  const { bevel } = useGlass();
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={yearStyles.grid}>
@@ -401,7 +402,7 @@ function YearView({ year, today, eventsByYearMonth, onSelectMonth }: YearViewPro
 
         return (
           <TouchableOpacity key={mIdx} onPress={() => onSelectMonth(mIdx)}
-            style={[yearStyles.monthCard, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+            style={[yearStyles.monthCard, bevel]}
             activeOpacity={0.75}>
             <AppText style={[yearStyles.monthName, { color: textColor, fontFamily }]}>{mName}</AppText>
             {/* Day-of-week header row */}
@@ -545,7 +546,7 @@ function DayView({ date, today, events, onEditEvent, onNewEvent }: DayViewProps)
           {WEEK_DAYS[date.getDay()]}, {MONTHS_SHORT[date.getMonth()]} {date.getDate()}, {date.getFullYear()}
         </AppText>
         <TouchableOpacity onPress={onNewEvent} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <AppIcon name="add-circle-outline" size={24} color={COLORS.blue} fixedColor />
+          <AppIcon name="add-circle-outline" size={24} />
         </TouchableOpacity>
       </View>
 
@@ -661,6 +662,7 @@ function ScheduleView({ events, calendars, onEditEvent }: ScheduleViewProps) {
 export default function CalendarScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
   const navigation = useNavigation();
 
   const today = new Date();
@@ -935,7 +937,7 @@ export default function CalendarScreen() {
       <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
         {/* Left: back arrow */}
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.navBtn}>
-          <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
+          <AppIcon name="chevron-back" size={26} />
         </TouchableOpacity>
         <AppText style={[styles.monthYear, { color: textColor, fontFamily }]}>
           {headerLabel}
@@ -1042,7 +1044,7 @@ export default function CalendarScreen() {
                 {WEEK_DAYS[new Date(year, month, selDay).getDay()]}, {MONTHS[month].slice(0, 3)} {selDay}
               </AppText>
               <TouchableOpacity onPress={openNew} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <AppIcon name="add-circle-outline" size={22} color={COLORS.blue} fixedColor />
+                <AppIcon name="add-circle-outline" size={22} />
               </TouchableOpacity>
             </View>
 
@@ -1053,7 +1055,7 @@ export default function CalendarScreen() {
               </View>
             ) : dayEvents.map((ev) => (
               <TouchableOpacity key={ev.id}
-                style={[styles.dayEventRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+                style={[styles.dayEventRow, bevel]}
                 onPress={() => openEdit(ev)} activeOpacity={0.8}>
                 <View style={[styles.dayEventAccent, { backgroundColor: ev.color }]} />
                 <View style={{ flex: 1, paddingVertical: 10, paddingHorizontal: 12 }}>
@@ -1162,7 +1164,7 @@ const styles = StyleSheet.create({
 
   noDayEvents:    { alignItems: 'center', paddingVertical: 20 },
   noDayEventsTxt: { fontSize: 13 },
-  dayEventRow:    { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, borderRadius: RADIUS.lg, borderWidth: 1, overflow: 'hidden', ...SHADOW.card },
+  dayEventRow:    { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, borderRadius: RADIUS.lg, overflow: 'hidden' },
   dayEventAccent: { width: 5, alignSelf: 'stretch' },
   dayEventTitle:  { fontSize: 14, fontWeight: '600' },
   dayEventTime:   { fontSize: 12, marginTop: 2 },
@@ -1232,7 +1234,6 @@ const yearStyles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, paddingBottom: 40 },
   monthCard: {
     width: '48%', margin: '1%', borderRadius: RADIUS.md, padding: 10,
-    borderWidth: 1, ...SHADOW.card,
   },
   monthName:     { fontSize: 13, fontWeight: '700', marginBottom: 6 },
   miniWeekRow:   { flexDirection: 'row', marginBottom: 2 },

@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Import Firebase config FIRST to ensure it's initialized before any contexts
 import './src/config/firebase';
@@ -99,23 +100,25 @@ export default function App() {
   }, []);
 
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <CallProvider>
-          <NotificationProvider>
-            <FloatingCallProvider>
-              <ActivityWatcher />
-              <NavigationContainer>
-                <StatusBar style="auto" />
-                <AppNavigator />
-                <ToastOverlay />
-                <FloatingCallManager />
-                <GroupCallNotificationManager />
-              </NavigationContainer>
-            </FloatingCallProvider>
-          </NotificationProvider>
-        </CallProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <CallProvider>
+            <NotificationProvider>
+              <FloatingCallProvider>
+                <ActivityWatcher />
+                <NavigationContainer>
+                  <StatusBar style="auto" />
+                  <AppNavigator />
+                  <ToastOverlay />
+                  <FloatingCallManager />
+                  <GroupCallNotificationManager />
+                </NavigationContainer>
+              </FloatingCallProvider>
+            </NotificationProvider>
+          </CallProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

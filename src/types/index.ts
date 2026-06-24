@@ -152,13 +152,6 @@ export type RootStackParamList = {
   Notifications: undefined;
   LinkedDevices: undefined;
   BlockedContacts: undefined;
-  JitsiCall: {
-    roomName: string;
-    displayName: string;
-    audioOnly?: boolean;
-    chatId?: string;
-    callId?: string;
-  };
   GroupCall: {
     roomName: string;
     displayName: string;

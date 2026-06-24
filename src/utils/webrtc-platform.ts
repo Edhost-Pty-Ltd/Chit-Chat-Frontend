@@ -62,8 +62,10 @@ if (Platform.OS === 'web') {
     toURL() { return ''; }
   };
 } else {
-  // Use real react-native-webrtc on native platforms
-  const webrtc = require('react-native-webrtc');
+  // Use LiveKit's react-native-webrtc on native platforms.
+  // @livekit/react-native-webrtc is a drop-in replacement for react-native-webrtc
+  // exposing the same RTCPeerConnection / mediaDevices / MediaStream API.
+  const webrtc = require('@livekit/react-native-webrtc');
   RTCPeerConnection = webrtc.RTCPeerConnection;
   RTCSessionDescription = webrtc.RTCSessionDescription;
   RTCIceCandidate = webrtc.RTCIceCandidate;

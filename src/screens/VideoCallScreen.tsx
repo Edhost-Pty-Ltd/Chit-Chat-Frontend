@@ -35,7 +35,7 @@ try {
   useCameraPermissions = cam.useCameraPermissions;
   // Try to load RTCView for native remote/local stream rendering
   try {
-    const rtc = require('react-native-webrtc');
+    const rtc = require('@livekit/react-native-webrtc');
     RTCView = rtc.RTCView;
   } catch {
     // Use MediaStream/<video> if RTCView not available (e.g. on web)
@@ -48,7 +48,7 @@ function useCameraPerms(): [any, () => Promise<any>] {
   return [null, async () => ({ granted: false })];
 }
 
-import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
+import { AppText, AppIcon, AppBg, useGlass } from '../context/ThemeContext';
 import { Avatar } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList, Contact } from '../types';
@@ -184,6 +184,7 @@ export default function VideoCallScreen() {
   const { callId, isOutgoing, otherParty } = route.params;
   const { user } = useAuth();
   const { minimizeCall, updateDuration } = useFloatingCall();
+  const { bevel } = useGlass();
 
   const [permission, requestPermission] = useCameraPerms();
   const [muted,      setMuted]          = useState(false);
@@ -674,7 +675,7 @@ export default function VideoCallScreen() {
           </View>
           <View style={styles.cameraToggleButtons}>
             <TouchableOpacity 
-              style={[styles.cameraToggleBtn, styles.cameraToggleBtnSecondary]}
+              style={[styles.cameraToggleBtn, bevel]}
               onPress={() => {
                 setCameraEnabled(false);
                 toggleVideo(false);
@@ -951,11 +952,6 @@ const styles = StyleSheet.create({
   },
   cameraToggleBtnPrimary: {
     backgroundColor: '#3b82f6',
-  },
-  cameraToggleBtnSecondary: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   cameraToggleBtnText: {
     fontSize: 13,

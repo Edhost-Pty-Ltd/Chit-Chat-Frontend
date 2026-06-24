@@ -3,13 +3,14 @@ import React from 'react';
 import {
   View, TouchableOpacity, StyleSheet, ViewStyle, Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList, ContactStatus } from '../types';
-import { AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -70,40 +71,45 @@ interface BottomNavProps { active: TabKey; }
 export function BottomNav({ active }: BottomNavProps) {
   const navigation = useNavigation<NavProp>();
   const { FG } = useForeground();
-  const { fontFamily, textColor } = useTypography();
+  const { fontFamily } = useTypography();
+  const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
+
+  // Sit the pill just above the device's system navigation bar / gesture area.
+  // insets.bottom adapts per device (0 on devices w/o a system bar, larger for
+  // gesture/3-button bars). Falls back to a sensible minimum.
+  const bottomSpace = Math.max(insets.bottom, 10) + 8;
 
   return (
-    <View style={styles.navBarWrapper}>
-      <View style={[styles.navBar, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
-        {TABS.map((t) => {
-          const isActive = active === t.id;
-          return (
-            <TouchableOpacity
-              key={t.id}
-              style={styles.navItem}
-              activeOpacity={0.75}
-              onPress={() => navigation.navigate(t.screen as any)}
-            >
-              {isActive ? (
-                <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
-                  <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
-                </LinearGradient>
-              ) : (
-                <View style={styles.iconTileInactive}>
-                  <AppIcon name={t.icon} size={20} color={FG.secondary} />
-                </View>
-              )}
-              <AppText style={[
-                styles.navLabel,
-                { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
-                isActive && styles.navLabelActive,
-              ]}>
-                {t.label}
-              </AppText>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+    <View style={[styles.navBar, bevel, { marginBottom: bottomSpace }]}>
+      {TABS.map((t) => {
+        const isActive = active === t.id;
+        return (
+          <TouchableOpacity
+            key={t.id}
+            style={styles.navItem}
+            activeOpacity={0.75}
+            onPress={() => navigation.navigate(t.screen as any)}
+          >
+            {isActive ? (
+              <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
+                <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
+              </LinearGradient>
+            ) : (
+              <View style={styles.iconTileInactive}>
+                <AppIcon name={t.icon} size={20} color={FG.secondary} />
+              </View>
+            )}
+            <AppText style={[
+              styles.navLabel,
+              { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
+              isActive && styles.navLabelActive,
+            ]}>
+              {t.label}
+            </AppText>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
@@ -170,17 +176,13 @@ const styles = StyleSheet.create({
   avatarText: { color: '#fff', fontWeight: '700' },
   statusDot:  { position: 'absolute', borderWidth: 2, borderColor: COLORS.sky1 },
 
-  navBarWrapper: {
-    paddingHorizontal: 20,
-    paddingBottom: 18,
-    paddingTop: 6,
-  },
   navBar: {
     flexDirection: 'row',
-    borderWidth: 1,
     borderRadius: 50,
     paddingVertical: 10,
     paddingHorizontal: 8,
+    marginHorizontal: 20,
+    marginTop: 6,
   },
   navItem: {
     flex: 1,
@@ -224,5 +226,4 @@ export { IncomingCallManager } from './IncomingCallManager';
 export { LocationMessageBubble } from './LocationMessageBubble';
 export { FloatingCallOverlay } from './FloatingCallOverlay';
 export { default as RTCView } from './RTCView';
-export { default as WebView } from './WebView';
 

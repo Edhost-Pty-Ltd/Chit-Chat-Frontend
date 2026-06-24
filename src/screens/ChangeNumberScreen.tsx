@@ -19,7 +19,7 @@ import { getAuth } from '@react-native-firebase/auth';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { sendNumberChangeNotification } from '../hooks/useChatActions';
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { RootStackParamList } from '../types';
@@ -84,6 +84,7 @@ export default function ChangeNumberScreen() {
   const { sendOTP, verifyOTP } = useFirebaseAuth();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
 
   const [step,        setStep]        = useState<Step>('number');
   const [country,     setCountry]     = useState<Country>(DEFAULT_COUNTRY);
@@ -200,7 +201,7 @@ export default function ChangeNumberScreen() {
         {/* ── Web-only notice ── */}
         {Platform.OS === 'web' ? (
           <ScrollView contentContainerStyle={styles.scroll}>
-            <View style={[styles.card, { alignItems: 'center', gap: 16 }]}>
+            <View style={[styles.card, bevel, { alignItems: 'center', gap: 16 }]}>
               <View style={styles.webNoticeIcon}>
                 <Ionicons name="phone-portrait-outline" size={40} color={COLORS.blue} />
               </View>
@@ -221,7 +222,7 @@ export default function ChangeNumberScreen() {
           </ScrollView>
         ) : (
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <View style={styles.card}>
+          <View style={[styles.card, bevel]}>
 
             {step === 'number' ? (
               <>
@@ -335,7 +336,7 @@ const styles = StyleSheet.create({
   },
 
   scroll:  { padding: 20, paddingBottom: 48 },
-  card:    { backgroundColor: 'transparent', borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: 'rgba(30,156,240,0.18)', ...SHADOW.card },
+  card:    { borderRadius: RADIUS.xl, padding: 22 },
   cardTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 6 },
   cardSub:   { fontSize: 13, color: COLORS.sub, marginBottom: 20, lineHeight: 19 },
 

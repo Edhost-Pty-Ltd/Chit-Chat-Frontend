@@ -7,17 +7,15 @@ import { STATUSES } from '../data/mockData';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { StatusUpdate } from '../types';
 
-import { AppBg, AppText, AppIcon, useForeground, useTypography } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 
 export default function StatusScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
   const renderStatus = ({ item }: { item: StatusUpdate }) => (
     <TouchableOpacity
-      style={[styles.statusCard, {
-        backgroundColor: 'transparent',
-        borderColor: 'rgba(30,156,240,0.18)',
-      }]}
+      style={[styles.statusCard, bevel]}
       activeOpacity={0.75}
     >
       <LinearGradient colors={[item.color, COLORS.blue]} style={styles.ring} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
@@ -43,10 +41,7 @@ export default function StatusScreen() {
 
       {/* My Status glass card */}
       <TouchableOpacity
-        style={[styles.myCard, {
-        backgroundColor: 'transparent',
-        borderColor: 'rgba(30,156,240,0.18)',
-      }]}
+        style={[styles.myCard, bevel]}
         activeOpacity={0.8}
       >
         <View style={styles.meAvatarWrap}>
@@ -90,8 +85,7 @@ const styles = StyleSheet.create({
   myCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     marginHorizontal: 14, marginBottom: 18,
-    ...GLASS.card, borderRadius: RADIUS.lg, padding: 14,
-    ...SHADOW.card,
+    borderRadius: RADIUS.lg, padding: 14,
   },
   meAvatarWrap: { position: 'relative' },
   mePlusBadge: {
@@ -116,11 +110,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    ...GLASS.card,
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    ...SHADOW.card,
   },
   ring:       { borderRadius: 999, padding: 2.5 },
   ringInner:  { borderRadius: 999, padding: 2, backgroundColor: 'transparent' },

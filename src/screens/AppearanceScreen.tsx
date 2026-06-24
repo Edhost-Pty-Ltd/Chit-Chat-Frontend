@@ -8,7 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import {
-  AppBg, AppText, AppIcon, useTheme,
+  AppBg, AppText, AppIcon, useTheme, useGlass,
   GRADIENT_PRESETS, AppBackground,
   FONT_PRESETS, TEXT_COLOR_PRESETS, ICON_COLOR_PRESETS, TypographyPrefs,
 } from '../context/ThemeContext';
@@ -28,6 +28,7 @@ const SOLID_COLORS = [
 export default function AppearanceScreen() {
   const navigation = useNavigation();
   const { background, setBackground, typography, setTypography } = useTheme();
+  const { bevel } = useGlass();
 
   const [bgPreview, setBgPreview] = useState<AppBackground>(background);
   // typoPreview reads directly from context so it's always current
@@ -95,7 +96,7 @@ export default function AppearanceScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
         {/* ── Live preview ── */}
-        <View style={styles.previewCard}>
+        <View style={[styles.previewCard, bevel]}>
           <View style={styles.previewBg}>
             {bgPreview.type === 'image' && bgPreview.imageUri ? (
               <Image source={{ uri: bgPreview.imageUri }} style={styles.previewImg} resizeMode="cover" />
@@ -244,7 +245,7 @@ export default function AppearanceScreen() {
         {/* ── CUSTOM IMAGE ── */}
         <View style={styles.section}>
           <AppText style={styles.sectionLabel}>CUSTOM IMAGE</AppText>
-          <TouchableOpacity style={styles.photoPickerBtn} onPress={pickImage} activeOpacity={0.8}>
+          <TouchableOpacity style={[styles.photoPickerBtn, bevel]} onPress={pickImage} activeOpacity={0.8}>
             <View style={styles.photoPickerIcon}>
               <AppIcon name="image-outline" size={26} color={COLORS.blue} />
             </View>
@@ -326,16 +327,8 @@ const styles = StyleSheet.create({
 
   // ── Preview ──────────────────────────────────────────────────────────────
   previewCard:  { 
-    backgroundColor: 'rgba(180,225,245,0.22)',
     borderRadius: RADIUS.xl, 
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   previewBg:    { height: 180, overflow: 'hidden' },
   previewImg:   { ...StyleSheet.absoluteFill },
@@ -406,16 +399,8 @@ const styles = StyleSheet.create({
   // ── Photo picker ──────────────────────────────────────────────────────────
   photoPickerBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: 'rgba(180,225,245,0.22)',
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
     paddingHorizontal: 14, paddingVertical: 14,
-    shadowColor: '#0e6ea8',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 4,
   },
   photoPickerIcon: {
     width: 46, height: 46, borderRadius: RADIUS.md,

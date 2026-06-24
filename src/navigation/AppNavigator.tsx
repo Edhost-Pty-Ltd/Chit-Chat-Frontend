@@ -26,7 +26,6 @@ import ProfileScreen     from '../screens/ProfileScreen';
 import CreateAccountScreen from '../screens/CreateAccountScreen';
 import VideoCallScreen    from '../screens/VideoCallScreen';
 import AudioCallScreen    from '../screens/AudioCallScreen';
-import JitsiCallScreen    from '../screens/JitsiCallScreen';
 import GroupCallScreen    from '../screens/GroupCallScreen';
 import AccountSettingsScreen      from '../screens/AccountSettingsScreen';
 import PrivacySettingsScreen      from '../screens/PrivacySettingsScreen';
@@ -198,7 +197,6 @@ export default function AppNavigator() {
             <Stack.Screen name="Profile"         component={ProfileScreen}         />
             <Stack.Screen name="VideoCall"       component={VideoCallScreen}       />
             <Stack.Screen name="AudioCall"       component={AudioCallScreen}       />
-            <Stack.Screen name="JitsiCall"       component={JitsiCallScreen}       />
             <Stack.Screen name="GroupCall"       component={GroupCallScreen}       />
             <Stack.Screen name="AccountSettings"      component={AccountSettingsScreen}      />
             <Stack.Screen name="PrivacySettings"      component={PrivacySettingsScreen}      />
