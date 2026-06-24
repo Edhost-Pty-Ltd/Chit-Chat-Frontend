@@ -197,15 +197,11 @@ export default function SignInScreen() {
           await signInToContext(fullNumber);
           console.log('[SignInScreen] Sign-in to context successful');
           
-          // Force navigation to reset the stack and ensure we go to chats
-          // This fixes the issue on physical devices where auth state might not update immediately
+          // Don't manually navigate - let AppNavigator handle it automatically
+          // when the auth state changes. This prevents navigation errors.
           setLoading(false);
           
-          // Use replace to reset navigation stack
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Chats' }],
-          });
+          // AppNavigator will automatically show Chats screen when isSignedIn becomes true
         } catch (contextError: any) {
           console.error('[SignInScreen] Error signing in to context:', contextError);
           setErrorMsg(contextError.message || 'Failed to complete sign-in. Please try again.');

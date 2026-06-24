@@ -48,17 +48,17 @@ export default function AppNavigator() {
   const [profileCheckError, setProfileCheckError] = useState<boolean>(false);
 
   const checkProfileExists = useCallback(async () => {
-    const authInstance = getAuth();
-    const currentUser = authInstance.currentUser;
-    console.log('[AppNavigator] checkProfileExists - currentUser:', currentUser?.uid);
-    
-    if (!currentUser) {
-      console.log('[AppNavigator] No current user, setting profileExists to false');
-      setProfileExists(false);
-      return;
-    }
-
     try {
+      const authInstance = getAuth();
+      const currentUser = authInstance.currentUser;
+      console.log('[AppNavigator] checkProfileExists - currentUser:', currentUser?.uid);
+      
+      if (!currentUser) {
+        console.log('[AppNavigator] No current user, setting profileExists to false');
+        setProfileExists(false);
+        return;
+      }
+
       setProfileCheckError(false);
       setProfileExists(null); // reset to loading state
       console.log('[AppNavigator] Checking profile existence for user:', currentUser.uid);

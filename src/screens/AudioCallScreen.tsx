@@ -6,24 +6,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Dimensions,
-  Platform, Modal, ScrollView, Pressable,
+  Platform, Modal, ScrollView, Pressable, BackHandler,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-
-let CameraView: any = null;
-let useCameraPermissions: (() => [any, () => Promise<any>]) | null = null;
-try {
-  const cam = require('expo-camera');
-  CameraView = cam.CameraView;
-  useCameraPermissions = cam.useCameraPermissions;
-} catch { /* Expo Go */ }
-
-function useCameraPerms(): [any, () => Promise<any>] {
-  if (useCameraPermissions) return useCameraPermissions(); // eslint-disable-line react-hooks/rules-of-hooks
-  return [null, async () => ({ granted: false })];
-}
+import { useWebRTC } from '../hooks/useWebRTC';
+import { useAuth } from '../hooks/useAuth';
+import { useFloatingCall } from '../context/FloatingCallContext';
+import { db } from '../config/firebase';
+import { doc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import { getOrCreateDirectChat } from '../hooks/useChatActions';
 
 import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
 import { Avatar } from '../components';
@@ -35,50 +28,280 @@ type NavProp = NativeStackNavigationProp<RootStackParamList, 'AudioCall'>;
 type RouteP  = RouteProp<RootStackParamList, 'AudioCall'>;
 
 const { height } = Dimensions.get('window');
-const PIP_W = 110;
-const PIP_H = 150;
-
-function CameraTile({ facing }: { facing: 'front' | 'back' }) {
-  if (!CameraView) return <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1a1a2e' }]} />;
-  return <CameraView style={StyleSheet.absoluteFill} facing={facing} />;
-}
 
 export default function AudioCallScreen() {
   const navigation = useNavigation<NavProp>();
   const route      = useRoute<RouteP>();
-  const { contact, duration: initialDuration = 0, participants: initialParticipants } = route.params;
+  const { callId, isOutgoing, otherParty } = route.params;
+  const { user } = useAuth();
+  const { minimizeCall, updateDuration } = useFloatingCall();
 
-  const [permission, requestPermission] = useCameraPerms();
   const [muted,        setMuted]        = useState(false);
   const [speakerOn,    setSpeakerOn]    = useState(false);
-  const [duration,     setDuration]     = useState(initialDuration);
+  const [duration,     setDuration]     = useState(0);
   const [addOpen,      setAddOpen]      = useState(false);
-  const [showCamera,   setShowCamera]   = useState(false);
-  const [facing,       setFacing]       = useState<'front' | 'back'>('front');
-  // Start with group members if provided, otherwise just the single contact
-  const [participants, setParticipants] = useState<Contact[]>(
-    initialParticipants && initialParticipants.length > 0 ? initialParticipants : [contact]
-  );
+  const [callStatus,   setCallStatus]   = useState<string>('connecting');
+  const [showQuality,  setShowQuality]  = useState(false);
+
+  // WebRTC hook for managing peer connection and streams
+  const {
+    connectionState,
+    networkQuality,
+    initializePeerConnection,
+    createOffer,
+    createAnswer,
+    setRemoteAnswer,
+    addIceCandidate,
+    toggleMute: toggleMuteWebRTC,
+    startNetworkMonitoring,
+    cleanup: cleanupWebRTC,
+  } = useWebRTC({
+    onConnectionStateChange: (state) => {
+      console.log('[AudioCall] Connection state:', state);
+      if (state === 'connected') {
+        setCallStatus('connected');
+        startNetworkMonitoring();
+      } else if (state === 'disconnected' || state === 'failed') {
+        setCallStatus('disconnected');
+      }
+    },
+    onNetworkQualityChange: (quality) => {
+      console.log('[AudioCall] Network quality:', quality);
+      if (quality === 'poor' || quality === 'fair') {
+        setShowQuality(true);
+        setTimeout(() => setShowQuality(false), 3000);
+      }
+    },
+  });
+
+  // Build contact from otherParty
+  const contact: Contact = {
+    id: parseInt(otherParty.userId) || -2,
+    name: otherParty.displayName,
+    avatar: otherParty.displayName.split(' ').map((n) => n[0]).join('').toUpperCase(),
+    color: COLORS.blue,
+    status: 'online',
+    lastMsg: '',
+    time: '',
+    unread: 0,
+  };
+
+  const [participants, setParticipants] = useState<Contact[]>([contact]);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const unsubscribeCallRef = useRef<(() => void) | null>(null);
 
+  // Initialize WebRTC and call setup
   useEffect(() => {
-    if (Platform.OS !== 'web' && !permission?.granted) requestPermission();
-    timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    const setupCall = async () => {
+      try {
+        // Load stored duration from Firestore if continuing call
+        const callRef = doc(db, 'calls', callId);
+        const callSnapshot = await getDoc(callRef);
+        const callData = callSnapshot.data();
+        
+        // Set duration from stored value if exists
+        if (callData?.lastDuration) {
+          setDuration(callData.lastDuration);
+        } else if (callData?.startedAt) {
+          const startTime = callData.startedAt.toDate().getTime();
+          const currentTime = Date.now();
+          const elapsedSeconds = Math.floor((currentTime - startTime) / 1000);
+          setDuration(elapsedSeconds);
+        }
+
+        // Initialize WebRTC peer connection for audio only
+        await initializePeerConnection(false); // false for audio-only call
+
+        if (isOutgoing) {
+          // Caller: Create offer
+          console.log('[AudioCall] Creating offer as caller...');
+          const offer = await createOffer(false);
+          
+          // Update call document with offer
+          await updateDoc(callRef, {
+            offer: offer,
+            status: 'ringing',
+          });
+
+          // Listen for answer from callee
+          unsubscribeCallRef.current = onSnapshot(callRef, (snapshot) => {
+            const data = snapshot.data();
+            if (data?.answer) {
+              console.log('[AudioCall] Received answer, setting remote description...');
+              setRemoteAnswer(data.answer).catch(console.error);
+            }
+            if (data?.iceCandidates) {
+              data.iceCandidates.forEach((candidate: any) => {
+                if (candidate.from !== otherParty.userId) return;
+                addIceCandidate(candidate).catch(console.error);
+              });
+            }
+            if (data?.status === 'ended') {
+              navigation.goBack();
+            }
+          });
+        } else {
+          // Callee: Listen for offer and create answer
+          console.log('[AudioCall] Waiting for offer as callee...');
+          
+          unsubscribeCallRef.current = onSnapshot(callRef, async (snapshot) => {
+            const data = snapshot.data();
+            if (data?.offer) {
+              console.log('[AudioCall] Received offer, creating answer...');
+              const answer = await createAnswer(data.offer);
+              
+              await updateDoc(callRef, {
+                answer: answer,
+                status: 'active',
+              });
+            }
+            if (data?.iceCandidates) {
+              data.iceCandidates.forEach((candidate: any) => {
+                if (candidate.from === otherParty.userId) return;
+                addIceCandidate(candidate).catch(console.error);
+              });
+            }
+            if (data?.status === 'ended') {
+              navigation.goBack();
+            }
+          });
+        }
+
+        // Start call timer
+        timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
+      } catch (error) {
+        console.error('[AudioCall] Setup failed:', error);
+        setCallStatus('failed');
+      }
+    };
+
+    setupCall();
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (unsubscribeCallRef.current) unsubscribeCallRef.current();
+      cleanupWebRTC();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle Android back button - minimize call instead of ending it
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Minimize the call
+      minimizeCall({
+        callId,
+        displayName: contact.name,
+        avatar: contact.avatar,
+        color: contact.color,
+        duration: fmt(duration),
+        isVideo: false,
+        isOutgoing,
+        otherParty,
+      });
+      
+      // Navigate back without ending call
+      navigation.goBack();
+      return true; // Prevent default back behavior
+    });
+
+    return () => backHandler.remove();
+  }, [duration, callId, isOutgoing, otherParty, contact, minimizeCall, navigation]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update floating call duration while minimized
+  useEffect(() => {
+    updateDuration(fmt(duration));
+  }, [duration, updateDuration]);
 
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-  const hangUp      = () => navigation.goBack();
-  const openChat    = () => navigation.navigate('Chat', { contact });
-  const canShowCam  = Platform.OS === 'web' || !!permission?.granted;
+  const hangUp = async () => {
+    try {
+      // End call in Firestore
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        status: 'ended',
+        endedAt: new Date(),
+      });
+    } catch (error) {
+      console.error('[AudioCall] Failed to update call status:', error);
+    }
+    
+    cleanupWebRTC();
+    navigation.goBack();
+  };
 
-  // Switch to video — stop local timer, pass current duration
-  const switchToVideo = () => {
+  const openChat = async () => {
+    try {
+      if (!user?.uid) {
+        console.error('[AudioCall] Cannot open chat: user not authenticated');
+        return;
+      }
+      
+      // Get or create the actual chat ID for this conversation
+      const actualChatId = await getOrCreateDirectChat(user.uid, otherParty.userId);
+      
+      // Navigate to chat with the actual chat ID
+      navigation.navigate('Chat', {
+        chatId: actualChatId,
+        displayName: otherParty.displayName,
+        isGroup: false,
+        otherUserId: otherParty.userId,
+        otherUserPhoto: otherParty.photoUrl,
+      });
+    } catch (error) {
+      console.error('[AudioCall] Failed to open chat:', error);
+    }
+  };
+
+  // Switch to video — save duration and cleanly transition
+  const switchToVideo = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    navigation.replace('VideoCall', { contact, duration, participants });
+    
+    // Save current duration to Firestore before switching
+    try {
+      const callRef = doc(db, 'calls', callId);
+      await updateDoc(callRef, {
+        lastDuration: duration,
+        videoUpgradeRequest: {
+          requestedBy: user?.uid || 'unknown',
+          timestamp: new Date(),
+        },
+      });
+    } catch (error) {
+      console.error('[AudioCall] Failed to save duration:', error);
+    }
+    
+    cleanupWebRTC();
+    navigation.replace('VideoCall', { callId, isOutgoing, otherParty });
+  };
+
+  const handleMuteToggle = () => {
+    const newMuted = !muted;
+    setMuted(newMuted);
+    toggleMuteWebRTC(newMuted);
+  };
+
+  // Network quality indicator color
+  const getQualityColor = () => {
+    switch (networkQuality) {
+      case 'excellent': return '#10b981';
+      case 'good': return '#3b82f6';
+      case 'fair': return '#f59e0b';
+      case 'poor': return '#ef4444';
+      default: return 'transparent';
+    }
+  };
+
+  const getQualityText = () => {
+    switch (networkQuality) {
+      case 'excellent': return 'Excellent connection';
+      case 'good': return 'Good connection';
+      case 'fair': return 'Fair connection';
+      case 'poor': return 'Poor connection';
+      default: return 'Connecting...';
+    }
   };
 
   const addContact = (c: Contact) => {
@@ -100,7 +323,9 @@ export default function AudioCallScreen() {
           <Avatar initials={contact.avatar} color={contact.color} size={110} />
         </View>
         <AppText fixedColor style={styles.callerName}>{contact.name}</AppText>
-        <AppText fixedColor style={styles.callStatus}>Audio call · {fmt(duration)}</AppText>
+        <AppText fixedColor style={styles.callStatus}>
+          {callStatus === 'connecting' ? 'Connecting...' : 'Audio call'} · {fmt(duration)}
+        </AppText>
         {participants.length > 1 && (
           <View style={styles.extraRow}>
             {participants.slice(1).map((p) => (
@@ -111,7 +336,27 @@ export default function AudioCallScreen() {
             </AppText>
           </View>
         )}
+        {/* Network quality badge */}
+        {networkQuality !== 'unknown' && (
+          <View style={[styles.qualityBadge, { backgroundColor: getQualityColor() }]}>
+            <AppIcon 
+              name={networkQuality === 'excellent' || networkQuality === 'good' ? 'wifi' : 'wifi-outline'} 
+              size={16} 
+              color="#fff" 
+              fixedColor 
+            />
+            <AppText fixedColor style={styles.qualityBadgeText}>{getQualityText()}</AppText>
+          </View>
+        )}
       </View>
+
+      {/* Network quality alert */}
+      {showQuality && (networkQuality === 'poor' || networkQuality === 'fair') && (
+        <View style={[styles.qualityAlert, { backgroundColor: getQualityColor() }]}>
+          <AppIcon name="warning-outline" size={16} color="#fff" fixedColor />
+          <AppText fixedColor style={styles.qualityText}>{getQualityText()}</AppText>
+        </View>
+      )}
 
       {/* ── Top bar ── */}
       <View style={styles.topBar}>
@@ -126,13 +371,8 @@ export default function AudioCallScreen() {
         </View>
 
         {/* Chat button */}
-        <TouchableOpacity style={styles.iconBtn} onPress={openChat}>
+        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass]} onPress={openChat}>
           <AppIcon name="chatbubble-outline" size={20} color="#fff" fixedColor />
-        </TouchableOpacity>
-
-        {/* Switch to video */}
-        <TouchableOpacity style={[styles.iconBtn, styles.iconBtnGlass]} onPress={switchToVideo}>
-          <AppIcon name="videocam-outline" size={22} color="#fff" fixedColor />
         </TouchableOpacity>
 
         {/* Add person */}
@@ -142,25 +382,11 @@ export default function AudioCallScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Local camera PiP ── */}
-      {showCamera && canShowCam && (
-        <View style={styles.pipTile}>
-          <CameraTile facing={facing} />
-          {/* Flip icon top-right */}
-          <TouchableOpacity style={styles.pipFlipBtn}
-            onPress={() => setFacing((f) => f === 'front' ? 'back' : 'front')}
-            activeOpacity={0.8}>
-            <AppIcon name="camera-reverse-outline" size={18} color="#fff" fixedColor />
-          </TouchableOpacity>
-          <AppText fixedColor style={styles.pipName}>You</AppText>
-        </View>
-      )}
-
       {/* ── Controls ── */}
       <View style={styles.controls}>
         <View style={styles.controlCol}>
           <TouchableOpacity style={[styles.controlBtn, muted && styles.controlBtnActive]}
-            onPress={() => setMuted((m) => !m)}>
+            onPress={handleMuteToggle}>
             <AppIcon name={muted ? 'mic-off' : 'mic-outline'} size={24} color="#fff" fixedColor />
           </TouchableOpacity>
           <AppText fixedColor style={styles.controlLabel}>{muted ? 'Unmute' : 'Mute'}</AppText>
@@ -174,17 +400,11 @@ export default function AudioCallScreen() {
           <AppText fixedColor style={styles.controlLabel}>Speaker</AppText>
         </View>
 
-        {/* Camera toggle */}
         <View style={styles.controlCol}>
-          <TouchableOpacity
-            style={[styles.controlBtn, showCamera && styles.controlBtnActive]}
-            onPress={() => {
-              if (!canShowCam && Platform.OS !== 'web') { requestPermission(); return; }
-              setShowCamera((c) => !c);
-            }}>
-            <AppIcon name="camera-outline" size={24} color="#fff" fixedColor />
+          <TouchableOpacity style={styles.controlBtn} onPress={switchToVideo}>
+            <AppIcon name="videocam-outline" size={24} color="#fff" fixedColor />
           </TouchableOpacity>
-          <AppText fixedColor style={styles.controlLabel}>Camera</AppText>
+          <AppText fixedColor style={styles.controlLabel}>Video</AppText>
         </View>
 
         <View style={styles.controlCol}>
@@ -260,27 +480,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.18)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
   },
+  iconBtnActive: {
+    backgroundColor: 'rgba(30,156,240,0.35)',
+    borderColor: 'rgba(30,156,240,0.55)',
+  },
   topName:   { fontSize: 15, fontWeight: '700', color: '#fff' },
   topStatus: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 2 },
-
-  pipTile: {
-    position: 'absolute', top: 120, right: 12,
-    width: PIP_W, height: PIP_H,
-    borderRadius: RADIUS.md, overflow: 'hidden',
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)',
-    ...SHADOW.glow,
-  },
-  pipFlipBtn: {
-    position: 'absolute', top: 6, right: 6,
-    backgroundColor: 'rgba(0,0,0,0.50)',
-    borderRadius: RADIUS.sm, padding: 5,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
-  },
-  pipName: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    textAlign: 'center', fontSize: 10, color: '#fff',
-    backgroundColor: 'rgba(0,0,0,0.45)', paddingVertical: 3,
-  },
 
   controls: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -335,5 +540,39 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
     ...SHADOW.button,
+  },
+
+  // Network quality indicator
+  qualityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.full,
+    marginTop: 8,
+    ...SHADOW.card,
+  },
+  qualityBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  qualityAlert: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 100 : 82,
+    left: 12, right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: RADIUS.md,
+    ...SHADOW.card,
+  },
+  qualityText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

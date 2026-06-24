@@ -2472,7 +2472,7 @@ const styles = StyleSheet.create({
   },
   cameraCloseBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   cameraShutterBtn: { alignItems: 'center', justifyContent: 'center' },
-  cameraShutter: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
+  cameraShutter: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.95)', borderWidth: 4, borderColor: 'rgba(255,255,255,0.60)' },
 
   // ── Recording overlay ─────────────────────────────────────────────────────
   recordingOverlayContainer: {

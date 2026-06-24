@@ -222,3 +222,6 @@ const styles = StyleSheet.create({
 export { IncomingCallOverlay } from './IncomingCallOverlay';
 export { IncomingCallManager } from './IncomingCallManager';
 export { LocationMessageBubble } from './LocationMessageBubble';
+
+// ─── Export Floating Call Overlay ────────────────────────────────────────────
+export { FloatingCallOverlay } from './FloatingCallOverlay';

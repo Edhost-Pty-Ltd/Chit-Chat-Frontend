@@ -11,8 +11,10 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { CallProvider } from './src/context/CallContext';
 import { NotificationProvider } from './src/context/NotificationContext';
+import { FloatingCallProvider } from './src/context/FloatingCallContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import ToastOverlay from './src/components/ToastNotification';
+import { FloatingCallManager } from './src/components/FloatingCallManager';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -46,17 +48,67 @@ function ActivityWatcher() {
 }
 
 export default function App() {
+  // Global handler for unhandled promise rejections
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Web-specific promise rejection handler
+      const handleRejection = (event: PromiseRejectionEvent) => {
+        const error = event.reason;
+        // Suppress auth/no-current-user errors as they're expected before sign-in
+        if (error?.code === 'auth/no-current-user' || error?.message?.includes('no-current-user')) {
+          console.warn('[App] Suppressed expected auth error:', error.message);
+          event.preventDefault();
+          return;
+        }
+        // Let other errors through
+        console.error('[App] Unhandled promise rejection:', error);
+      };
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('unhandledrejection', handleRejection as any);
+        return () => window.removeEventListener('unhandledrejection', handleRejection as any);
+      }
+    } else {
+      // React Native - use global error handler
+      const ErrorUtils = (global as any).ErrorUtils;
+      if (ErrorUtils) {
+        const originalHandler = ErrorUtils.getGlobalHandler();
+        
+        ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+          // Suppress auth/no-current-user errors
+          if (error?.code === 'auth/no-current-user' || error?.message?.includes('no-current-user')) {
+            console.warn('[App] Suppressed expected auth error:', error.message);
+            return;
+          }
+          // Pass other errors to original handler
+          if (originalHandler) {
+            originalHandler(error, isFatal);
+          }
+        });
+        
+        return () => {
+          if (originalHandler) {
+            ErrorUtils.setGlobalHandler(originalHandler);
+          }
+        };
+      }
+    }
+  }, []);
+
   return (
     <ThemeProvider>
       <AuthProvider>
         <CallProvider>
           <NotificationProvider>
-            <ActivityWatcher />
-            <NavigationContainer>
-              <StatusBar style="auto" />
-              <AppNavigator />
-              <ToastOverlay />
-            </NavigationContainer>
+            <FloatingCallProvider>
+              <ActivityWatcher />
+              <NavigationContainer>
+                <StatusBar style="auto" />
+                <AppNavigator />
+                <ToastOverlay />
+                <FloatingCallManager />
+              </NavigationContainer>
+            </FloatingCallProvider>
           </NotificationProvider>
         </CallProvider>
       </AuthProvider>

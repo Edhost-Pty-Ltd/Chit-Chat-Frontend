@@ -16,7 +16,7 @@ import React, {
 } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAuth, signOut as firebaseSignOut } from '@react-native-firebase/auth';
+import auth from '@react-native-firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -82,8 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const doSignOut = async () => {
     clearWebTimer();
     // Sign out from Firebase Auth
-    const authInstance = getAuth();
-    await firebaseSignOut(authInstance);
+    await auth().signOut();
     // Clear AsyncStorage session data
     await AsyncStorage.multiRemove([
       KEYS.phone,
@@ -146,24 +145,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
 
     // Listen to Firebase auth state changes
-    const authInstance = getAuth();
-    const unsubscribe = authInstance.onAuthStateChanged(async (user) => {
-      console.log('[AuthContext] Firebase auth state changed:', user?.uid);
-      
-      if (!user) {
-        // User signed out in Firebase, sync with local state
-        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
-        if (signedIn === 'true') {
-          console.log('[AuthContext] Firebase signed out but local state says signed in, cleaning up...');
-          await doSignOut();
+    const unsubscribe = auth().onAuthStateChanged(async (user) => {
+      try {
+        console.log('[AuthContext] Firebase auth state changed:', user?.uid);
+        
+        if (!user) {
+          // User signed out in Firebase, sync with local state
+          const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+          if (signedIn === 'true') {
+            console.log('[AuthContext] Firebase signed out but local state says signed in, cleaning up...');
+            await doSignOut();
+          }
+        } else {
+          // User signed in to Firebase
+          const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
+          if (signedIn !== 'true') {
+            console.log('[AuthContext] Firebase signed in but local state not updated');
+            // This case is handled by explicit signIn() call
+          }
         }
-      } else {
-        // User signed in to Firebase
-        const signedIn = await AsyncStorage.getItem(KEYS.signedIn);
-        if (signedIn !== 'true') {
-          console.log('[AuthContext] Firebase signed in but local state not updated');
-          // This case is handled by explicit signIn() call
-        }
+      } catch (error: any) {
+        // Catch and log any errors from auth state listener
+        // Don't let these crash the app
+        console.error('[AuthContext] Error in auth state listener:', error);
       }
     });
 
@@ -216,8 +220,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Fetch user profile from Firestore and populate displayName and avatarUri
       try {
-        const authInstance = getAuth();
-        const currentUser = authInstance.currentUser;
+        const currentUser = auth().currentUser;
         
         console.log('[AuthContext] Current Firebase user:', currentUser?.uid);
         

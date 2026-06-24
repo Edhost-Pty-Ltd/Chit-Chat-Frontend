@@ -14,6 +14,10 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
+// Initialize React Native Firebase (native module)
+// This ensures the native auth module is loaded before we use it
+import './firebaseNative';
+
 const firebaseConfig = {
   apiKey:            'AIzaSyBzstwF1NgQWASsqVa4R5IiZpFLoKZnSJQ',
   authDomain:        'chit-chat-67a7f.firebaseapp.com',
