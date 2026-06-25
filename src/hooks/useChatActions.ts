@@ -119,6 +119,7 @@ export async function sendMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy:    [senderId],
+      deliveredTo: [],
     });
 
     // 2. Update chat lastMessage + increment unread for other members
@@ -191,6 +192,7 @@ export async function sendVoiceMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy:    [senderId],
+      deliveredTo: [],
     });
 
     // 2. Update chat lastMessage + increment unread for other members
@@ -258,6 +260,7 @@ export async function sendImageMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy: [senderId],
+      deliveredTo: [],
     });
     
     // Update chat
@@ -338,6 +341,7 @@ export async function sendVideoMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy: [senderId],
+      deliveredTo: [],
     });
     
     // Update chat
@@ -409,6 +413,7 @@ export async function sendFileMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy: [senderId],
+      deliveredTo: [],
     });
     
     // Update chat
@@ -546,6 +551,7 @@ export async function sendCurrentLocationMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy: [senderId],
+      deliveredTo: [],
     });
     
     // Update chat
@@ -617,6 +623,7 @@ export async function sendLiveLocationMessage(
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy: [senderId],
+      deliveredTo: [],
     });
     
     // Update chat

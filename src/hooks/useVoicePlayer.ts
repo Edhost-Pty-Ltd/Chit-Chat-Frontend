@@ -24,6 +24,7 @@ export interface UseVoicePlayerReturn {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<void>;
+  seek: (positionMs: number) => Promise<void>;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -288,5 +289,22 @@ export function useVoicePlayer(): UseVoicePlayerReturn {
     }
   }, [player, currentSource]);
 
-  return { state, play, pause, resume, stop };
+  // ── Seek ────────────────────────────────────────────────────────────────
+
+  const seek = useCallback(async (positionMs: number) => {
+    try {
+      if (player && activeMessageIdRef.current) {
+        const positionSeconds = positionMs / 1000;
+        player.seekTo(positionSeconds);
+        setState((prev) => ({
+          ...prev,
+          positionMs,
+        }));
+      }
+    } catch (err) {
+      console.error('[useVoicePlayer] Seek error:', err);
+    }
+  }, [player]);
+
+  return { state, play, pause, resume, stop, seek };
 }

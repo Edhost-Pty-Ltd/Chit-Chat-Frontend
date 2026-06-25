@@ -35,13 +35,15 @@ if (Platform.OS !== 'web') {
   useMediaLibraryPermissions = () => [null, () => Promise.resolve({ status: 'denied' })];
 }
 
-import { collection, doc, getDoc, getDocs, writeBatch, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, writeBatch, query, where, serverTimestamp, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Avatar } from '../components';
 import { VoiceMessageBubble } from '../components/VoiceMessageBubble';
 import { FileMessageBubble } from '../components/FileMessageBubble';
 import { LocationMessageBubble } from '../components/LocationMessageBubble';
 import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
+import { ForwardModal } from '../components/ForwardModal';
+import { MessageInfoModal } from '../components/MessageInfoModal';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages, FireMessage } from '../hooks/useMessages';
 import { useVoicePlayer } from '../hooks/useVoicePlayer';
@@ -123,6 +125,53 @@ function formatLeftDate(date: Date): string {
     return `Left ${months} ${months === 1 ? 'month' : 'months'} ago`;
   } else {
     return `Left ${date.toLocaleDateString([], { year: 'numeric', month: 'short' })}`;
+  }
+}
+
+/** Determine message tick status */
+type TickStatus = 'sent' | 'delivered' | 'read';
+function getTickStatus(
+  message: FireMessage,
+  currentUserId: string | null,
+  isGroup: boolean
+): TickStatus {
+  // Only show ticks for outgoing messages
+  if (message.senderId !== currentUserId) return 'read';
+
+  const deliveredTo = message.deliveredTo || [];
+  const readBy = message.readBy || [];
+
+  // Remove sender from counts
+  const deliveredCount = deliveredTo.filter(id => id !== currentUserId).length;
+  const readCount = readBy.filter(id => id !== currentUserId).length;
+
+  // For direct chats
+  if (!isGroup) {
+    if (readCount > 0) return 'read';
+    if (deliveredCount > 0) return 'delivered';
+    return 'sent';
+  }
+
+  // For group chats - any member read = blue ticks
+  if (readCount > 0) return 'read';
+  // All members delivered = grey double tick
+  if (deliveredCount > 0) return 'delivered';
+  // Otherwise single tick
+  return 'sent';
+}
+
+/** Get tick icon and color based on status */
+function getTickIcon(status: TickStatus): {
+  icon: 'checkmark' | 'checkmark-done';
+  color: string;
+} {
+  switch (status) {
+    case 'sent':
+      return { icon: 'checkmark', color: COLORS.sub };
+    case 'delivered':
+      return { icon: 'checkmark-done', color: COLORS.sub };
+    case 'read':
+      return { icon: 'checkmark-done', color: COLORS.blue };
   }
 }
 
@@ -229,6 +278,21 @@ export default function ChatScreen() {
   // ── Image viewer state ──────────────────────────────────────────
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
+
+  // ── Selected message state (for long-press actions) ────────────
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [showMessageActions, setShowMessageActions] = useState(false);
+
+  // ── Reply state ─────────────────────────────────────────────────
+  const [replyingTo, setReplyingTo] = useState<FireMessage | null>(null);
+
+  // ── Forward state ───────────────────────────────────────────────
+  const [forwardModalVisible, setForwardModalVisible] = useState(false);
+  const [messageToForward, setMessageToForward] = useState<FireMessage | null>(null);
+
+  // ── Message info state ──────────────────────────────────────────
+  const [messageInfoVisible, setMessageInfoVisible] = useState(false);
+  const [messageForInfo, setMessageForInfo] = useState<FireMessage | null>(null);
 
   // ── Camera ref ──────────────────────────────────────────────────
   const cameraRef = useRef<any>(null);
@@ -575,10 +639,207 @@ export default function ChatScreen() {
     const trimmed = (text ?? input).trim();
     if (!trimmed) return;
 
-    const success = await sendMessage(trimmed);
-    if (success) {
-      setInput('');
-      setShowEmoji(false);
+    try {
+      // If replying to a message, include reply metadata
+      if (replyingTo) {
+        await addDoc(collection(db, 'chats', chatId, 'messages'), {
+          senderId: userId,
+          text: trimmed,
+          type: 'text',
+          timestamp: serverTimestamp(),
+          readBy: [userId],
+          deliveredTo: [],
+          replyTo: {
+            messageId: replyingTo.messageId,
+            senderId: replyingTo.senderId,
+            text: replyingTo.text,
+            type: replyingTo.type,
+          },
+        });
+
+        // Update chat's lastMessage
+        const chatRef = doc(db, 'chats', chatId);
+        await updateDoc(chatRef, {
+          'lastMessage.text': trimmed,
+          'lastMessage.senderId': userId,
+          'lastMessage.timestamp': serverTimestamp(),
+        });
+
+        setReplyingTo(null);
+        setInput('');
+        setShowEmoji(false);
+      } else {
+        // Regular message without reply
+        const success = await sendMessage(trimmed);
+        if (success) {
+          setInput('');
+          setShowEmoji(false);
+        }
+      }
+    } catch (error) {
+      console.error('[ChatScreen] Error sending message:', error);
+      Alert.alert('Error', 'Failed to send message');
+    }
+  };
+
+  // ── Message selection and actions ───────────────────────────────
+  const handleLongPressMessage = (messageId: string) => {
+    setSelectedMessageId(messageId);
+    setShowMessageActions(true);
+    setShowEmoji(false); // Close emoji panel if open
+  };
+
+  const handleClearSelection = () => {
+    setSelectedMessageId(null);
+    setShowMessageActions(false);
+  };
+
+  const handleDeleteMessage = async () => {
+    if (!selectedMessageId) return;
+    
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete from Firestore
+              const messageRef = doc(db, 'chats', chatId, 'messages', selectedMessageId);
+              await writeBatch(db).delete(messageRef).commit();
+              console.log('[ChatScreen] Message deleted successfully');
+              handleClearSelection();
+            } catch (error) {
+              console.error('[ChatScreen] Error deleting message:', error);
+              Alert.alert('Error', 'Failed to delete message.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReplyMessage = () => {
+    if (!selectedMessageId) return;
+    const message = messages.find(m => m.messageId === selectedMessageId);
+    if (message) {
+      setReplyingTo(message);
+      handleClearSelection();
+    }
+  };
+
+  const handleForwardMessage = () => {
+    if (!selectedMessageId) return;
+    const message = messages.find(m => m.messageId === selectedMessageId);
+    if (message) {
+      setMessageToForward(message);
+      setForwardModalVisible(true);
+      handleClearSelection();
+    }
+  };
+
+  const handleCopyMessage = async () => {
+    if (!selectedMessageId) return;
+    const message = messages.find(m => m.messageId === selectedMessageId);
+    if (message?.text) {
+      try {
+        // Use React Native's built-in Clipboard (available in react-native)
+        const { Clipboard } = await import('react-native');
+        Clipboard.setString(message.text);
+        console.log('[ChatScreen] Message copied to clipboard');
+        Alert.alert('Copied', 'Message copied to clipboard');
+        handleClearSelection();
+      } catch (error) {
+        console.error('[ChatScreen] Error copying message:', error);
+        Alert.alert('Error', 'Failed to copy message.');
+      }
+    }
+  };
+
+  const handleShowMessageInfo = () => {
+    if (!selectedMessageId) return;
+    const message = messages.find(m => m.messageId === selectedMessageId);
+    if (message) {
+      setMessageForInfo(message);
+      setMessageInfoVisible(true);
+      handleClearSelection();
+    }
+  };
+
+  // ── Forward to selected chats handler ───────────────────────────
+  const handleForwardToChats = async (selectedChatIds: string[]) => {
+    if (!messageToForward || !userId) return;
+
+    try {
+      console.log('[ChatScreen] Forwarding message to', selectedChatIds.length, 'chats');
+
+      // Forward to each selected chat
+      for (const targetChatId of selectedChatIds) {
+        const messageData: any = {
+          senderId: userId,
+          type: messageToForward.type,
+          timestamp: serverTimestamp(),
+          readBy: [userId],
+        };
+
+        // Copy relevant fields based on message type
+        if (messageToForward.type === 'text' && messageToForward.text) {
+          messageData.text = messageToForward.text;
+        } else if (messageToForward.type === 'image' && messageToForward.imageUrl) {
+          messageData.imageUrl = messageToForward.imageUrl;
+          messageData.text = messageToForward.text || null;
+        } else if (messageToForward.type === 'voice' && messageToForward.voiceUrl) {
+          messageData.voiceUrl = messageToForward.voiceUrl;
+          messageData.duration = messageToForward.duration;
+        } else if (messageToForward.type === 'file' && messageToForward.fileUrl) {
+          messageData.fileUrl = messageToForward.fileUrl;
+          messageData.fileName = messageToForward.fileName;
+          messageData.fileSize = messageToForward.fileSize;
+          messageData.mimeType = messageToForward.mimeType;
+        } else if (messageToForward.type === 'location' && messageToForward.location) {
+          messageData.location = messageToForward.location;
+          messageData.isLiveLocation = false; // Don't forward live location status
+        }
+
+        // Add message to target chat
+        await addDoc(collection(db, 'chats', targetChatId, 'messages'), messageData);
+
+        // Update target chat's lastMessage
+        const chatRef = doc(db, 'chats', targetChatId);
+        const lastMessageText = 
+          messageToForward.type === 'text' 
+            ? messageToForward.text 
+            : messageToForward.type === 'voice'
+              ? '🎤 Voice message'
+              : messageToForward.type === 'image'
+                ? '📷 Image'
+                : messageToForward.type === 'file'
+                  ? `📎 ${messageToForward.fileName || 'File'}`
+                  : messageToForward.type === 'location'
+                    ? '📍 Location'
+                    : 'Message';
+
+        await updateDoc(chatRef, {
+          'lastMessage.text': lastMessageText,
+          'lastMessage.senderId': userId,
+          'lastMessage.timestamp': serverTimestamp(),
+        });
+      }
+
+      console.log('[ChatScreen] Message forwarded successfully');
+      Alert.alert(
+        'Message Forwarded',
+        `Message forwarded to ${selectedChatIds.length} ${selectedChatIds.length === 1 ? 'chat' : 'chats'}`
+      );
+      
+      setMessageToForward(null);
+      setForwardModalVisible(false);
+    } catch (error) {
+      console.error('[ChatScreen] Error forwarding message:', error);
+      Alert.alert('Error', 'Failed to forward message. Please try again.');
     }
   };
 
@@ -1381,6 +1642,11 @@ export default function ChatScreen() {
   // ── Render a single message bubble ──────────────────────────────
   const renderMessage = ({ item }: { item: FireMessage }) => {
     const isOut = item.senderId === userId;
+    const isSelected = selectedMessageId === item.messageId;
+    
+    // Get tick status for outgoing messages
+    const tickStatus = getTickStatus(item, userId, isGroup);
+    const tickIcon = getTickIcon(tickStatus);
     
     // Debug logging for file messages
     if (item.type === 'file') {
@@ -1393,7 +1659,7 @@ export default function ChatScreen() {
       });
     }
     
-    return (
+    const messageContent = (
       <View style={[styles.msgRow, isOut ? styles.msgRowOut : styles.msgRowIn]}>
         {!isOut && (
           item.type === 'voice' && item.voiceUrl && item.duration ? (
@@ -1411,6 +1677,8 @@ export default function ChatScreen() {
                 }
               }}
               onPause={() => player.pause()}
+              onSeek={(positionMs) => player.seek(positionMs)}
+              timestamp={item.timestamp}
             />
           ) : item.type === 'file' && item.fileUrl && item.fileName ? (
             <FileMessageBubble
@@ -1427,9 +1695,10 @@ export default function ChatScreen() {
               liveLocationExpiry={item.liveLocationExpiry}
               isSender={false}
               onStopSharing={() => handleStopLiveLocation(item.messageId)}
+              timestamp={item.timestamp}
             />
           ) : item.type === 'image' && item.imageUrl ? (
-            <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+            <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
               <TouchableOpacity 
                 activeOpacity={0.9}
                 onPress={() => {
@@ -1443,10 +1712,47 @@ export default function ChatScreen() {
                   resizeMode="cover"
                 />
               </TouchableOpacity>
-              <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
+              <View style={styles.imageTimeOverlay}>
+                <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
+              </View>
             </LinearGradient>
           ) : (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+              {item.replyTo && (
+                <TouchableOpacity 
+                  style={styles.replyBubble}
+                  onPress={() => {
+                    const originalMsg = messages.find(m => m.messageId === item.replyTo!.messageId);
+                    if (originalMsg) {
+                      const index = messages.findIndex(m => m.messageId === item.replyTo!.messageId);
+                      if (index !== -1 && listRef.current) {
+                        listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+                      }
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.replyBubbleBar} />
+                  <View style={{ flex: 1 }}>
+                    <AppText fixedColor style={styles.replyBubbleSender}>
+                      {item.replyTo.senderId === userId ? 'You' : 'Unknown'}
+                    </AppText>
+                    <AppText fixedColor style={styles.replyBubbleText} numberOfLines={1}>
+                      {item.replyTo.type === 'text' && item.replyTo.text 
+                        ? item.replyTo.text 
+                        : item.replyTo.type === 'voice' 
+                          ? '🎤 Voice message'
+                          : item.replyTo.type === 'image'
+                            ? '📷 Image'
+                            : item.replyTo.type === 'file'
+                              ? '📎 File'
+                              : item.replyTo.type === 'location'
+                                ? '📍 Location'
+                                : 'Message'}
+                    </AppText>
+                  </View>
+                </TouchableOpacity>
+              )}
               {item.text && <AppText fixedColor style={styles.bubbleTextIn}>{item.text}</AppText>}
               <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
             </LinearGradient>
@@ -1468,6 +1774,9 @@ export default function ChatScreen() {
                 }
               }}
               onPause={() => player.pause()}
+              onSeek={(positionMs) => player.seek(positionMs)}
+              timestamp={item.timestamp}
+              tickIcon={tickIcon}
             />
           ) : item.type === 'file' && item.fileUrl && item.fileName ? (
             <FileMessageBubble
@@ -1484,9 +1793,11 @@ export default function ChatScreen() {
               liveLocationExpiry={item.liveLocationExpiry}
               isSender={true}
               onStopSharing={() => handleStopLiveLocation(item.messageId)}
+              timestamp={item.timestamp}
+              tickIcon={tickIcon}
             />
           ) : item.type === 'image' && item.imageUrl ? (
-            <View style={[styles.bubble, styles.bubbleOut]}>
+            <View style={[styles.bubble, styles.bubbleOut, styles.imageBubble]}>
               <TouchableOpacity 
                 activeOpacity={0.9}
                 onPress={() => {
@@ -1500,25 +1811,60 @@ export default function ChatScreen() {
                   resizeMode="cover"
                 />
               </TouchableOpacity>
-              <View style={styles.timeOutRow}>
+              <View style={styles.imageTimeOverlay}>
                 <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
                 <AppIcon
-                  name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
+                  name={tickIcon.icon}
                   size={13}
-                  color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
+                  color={tickIcon.color}
                   fixedColor
                 />
               </View>
             </View>
           ) : (
             <View style={[styles.bubble, styles.bubbleOut]}>
+              {item.replyTo && (
+                <TouchableOpacity 
+                  style={[styles.replyBubble, { backgroundColor: 'rgba(30,156,240,0.08)' }]}
+                  onPress={() => {
+                    const originalMsg = messages.find(m => m.messageId === item.replyTo!.messageId);
+                    if (originalMsg) {
+                      const index = messages.findIndex(m => m.messageId === item.replyTo!.messageId);
+                      if (index !== -1 && listRef.current) {
+                        listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+                      }
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.replyBubbleBar, { backgroundColor: COLORS.blue }]} />
+                  <View style={{ flex: 1 }}>
+                    <AppText style={[styles.replyBubbleSender, { color: COLORS.blue }]}>
+                      {item.replyTo.senderId === userId ? 'You' : 'Unknown'}
+                    </AppText>
+                    <AppText style={[styles.replyBubbleText, { color: textColor, opacity: 0.7 }]} numberOfLines={1}>
+                      {item.replyTo.type === 'text' && item.replyTo.text 
+                        ? item.replyTo.text 
+                        : item.replyTo.type === 'voice' 
+                          ? '🎤 Voice message'
+                          : item.replyTo.type === 'image'
+                            ? '📷 Image'
+                            : item.replyTo.type === 'file'
+                              ? '📎 File'
+                              : item.replyTo.type === 'location'
+                                ? '📍 Location'
+                                : 'Message'}
+                    </AppText>
+                  </View>
+                </TouchableOpacity>
+              )}
               {item.text && <AppText style={[styles.bubbleTextOut, { color: textColor, fontFamily }]}>{item.text}</AppText>}
               <View style={styles.timeOutRow}>
                 <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
                 <AppIcon
-                  name={item.readBy.length > 1 ? 'checkmark-done' : 'checkmark'}
+                  name={tickIcon.icon}
                   size={13}
-                  color={item.readBy.length > 1 ? COLORS.blue : COLORS.sub}
+                  color={tickIcon.color}
                   fixedColor
                 />
               </View>
@@ -1526,6 +1872,18 @@ export default function ChatScreen() {
           )
         )}
       </View>
+    );
+
+    return (
+      <TouchableOpacity
+        activeOpacity={1}
+        onLongPress={() => handleLongPressMessage(item.messageId)}
+        delayLongPress={300}
+      >
+        <View style={[isSelected && styles.selectedMessage]}>
+          {messageContent}
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -1708,6 +2066,42 @@ export default function ChatScreen() {
             </View>
           )}
 
+          {/* ── Message Action Toolbar ── */}
+          {showMessageActions && selectedMessageId && (
+            <View style={[styles.actionToolbar, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
+              <View style={styles.actionToolbarContent}>
+                <TouchableOpacity style={styles.actionToolbarBtn} onPress={handleReplyMessage}>
+                  <AppIcon name="arrow-undo-outline" size={22} color={COLORS.blue} />
+                  <AppText style={[styles.actionToolbarLabel, { color: textColor }]}>Reply</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionToolbarBtn} onPress={handleForwardMessage}>
+                  <AppIcon name="arrow-redo-outline" size={22} color={COLORS.blue} />
+                  <AppText style={[styles.actionToolbarLabel, { color: textColor }]}>Forward</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionToolbarBtn} onPress={handleCopyMessage}>
+                  <AppIcon name="copy-outline" size={22} color={COLORS.blue} />
+                  <AppText style={[styles.actionToolbarLabel, { color: textColor }]}>Copy</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionToolbarBtn} onPress={handleShowMessageInfo}>
+                  <AppIcon name="information-circle-outline" size={22} color={COLORS.blue} />
+                  <AppText style={[styles.actionToolbarLabel, { color: textColor }]}>Info</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionToolbarBtn} onPress={handleDeleteMessage}>
+                  <AppIcon name="trash-outline" size={22} color={COLORS.missed} fixedColor />
+                  <AppText style={[styles.actionToolbarLabel, { color: COLORS.missed }]}>Delete</AppText>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionToolbarClose} onPress={handleClearSelection}>
+                  <AppIcon name="close-circle" size={24} color={FG.secondary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {/* ── Emoji panel ── */}
           {showEmoji && (
             <View style={[styles.emojiPanel, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
@@ -1720,6 +2114,36 @@ export default function ChatScreen() {
                   ))}
                 </View>
               </ScrollView>
+            </View>
+          )}
+
+          {/* ── Reply Preview ── */}
+          {replyingTo && (
+            <View style={[styles.replyPreview, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
+              <View style={styles.replyPreviewBar} />
+              <View style={styles.replyPreviewContent}>
+                <View style={{ flex: 1 }}>
+                  <AppText style={[styles.replyPreviewLabel, { color: COLORS.blue }]}>
+                    Replying to {replyingTo.senderId === userId ? 'yourself' : messages.find(m => m.senderId === replyingTo.senderId)?.senderId || 'Unknown'}
+                  </AppText>
+                  <AppText style={[styles.replyPreviewText, { color: FG.secondary }]} numberOfLines={1}>
+                    {replyingTo.type === 'text' && replyingTo.text 
+                      ? replyingTo.text 
+                      : replyingTo.type === 'voice' 
+                        ? '🎤 Voice message'
+                        : replyingTo.type === 'image'
+                          ? '📷 Image'
+                          : replyingTo.type === 'file'
+                            ? `📎 ${replyingTo.fileName || 'File'}`
+                            : replyingTo.type === 'location'
+                              ? '📍 Location'
+                              : 'Message'}
+                  </AppText>
+                </View>
+                <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.replyPreviewClose}>
+                  <AppIcon name="close-circle" size={22} color={FG.secondary} />
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -1898,27 +2322,29 @@ export default function ChatScreen() {
               
               {/* Duration Selector */}
               <View style={styles.durationButtons}>
-                {[5, 15, 30, 60].map((duration) => (
-                  <TouchableOpacity
-                    key={duration}
-                    style={[
-                      styles.durationButton,
-                      { backgroundColor: selectedDuration === duration ? COLORS.blue : FG.glassBg },
-                      { borderColor: FG.glassBorder },
-                    ]}
-                    onPress={() => setSelectedDuration(duration)}
-                  >
-                    <AppText 
+                {[5, 15, 30, 60].map((duration) => {
+                  const isSelected = selectedDuration === duration;
+                  return (
+                    <TouchableOpacity
+                      key={duration}
                       style={[
-                        styles.durationText,
-                        { color: selectedDuration === duration ? '#fff' : textColor }
+                        styles.durationButton,
+                        isSelected ? { backgroundColor: COLORS.blue } : bevel,
                       ]}
-                      fixedColor={selectedDuration === duration}
+                      onPress={() => setSelectedDuration(duration)}
                     >
-                      {duration}m
-                    </AppText>
-                  </TouchableOpacity>
-                ))}
+                      <AppText 
+                        style={[
+                          styles.durationText,
+                          { color: isSelected ? '#fff' : textColor }
+                        ]}
+                        fixedColor={isSelected}
+                      >
+                        {duration}m
+                      </AppText>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <TouchableOpacity 
@@ -2442,6 +2868,34 @@ export default function ChatScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Forward Modal ── */}
+      {userId && (
+        <ForwardModal
+          visible={forwardModalVisible}
+          onClose={() => {
+            setForwardModalVisible(false);
+            setMessageToForward(null);
+          }}
+          onForward={handleForwardToChats}
+          currentUserId={userId}
+        />
+      )}
+
+      {/* ── Message Info Modal ── */}
+      {userId && messageForInfo && (
+        <MessageInfoModal
+          visible={messageInfoVisible}
+          onClose={() => {
+            setMessageInfoVisible(false);
+            setMessageForInfo(null);
+          }}
+          messageTimestamp={messageForInfo.timestamp}
+          readBy={messageForInfo.readBy}
+          currentUserId={userId}
+          isGroup={isGroup}
+        />
+      )}
     </>
   );
 }
@@ -2477,20 +2931,53 @@ const styles = StyleSheet.create({
   msgRowIn: { justifyContent: 'flex-start' },
   msgRowOut: { justifyContent: 'flex-end' },
 
-  bubble: { maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  bubble: { 
+    maxWidth: '75%', 
+    borderRadius: 18, 
+    paddingHorizontal: 14, 
+    paddingVertical: 10,
+    paddingBottom: 6,
+    position: 'relative',
+  },
   bubbleIn: { borderBottomLeftRadius: 4, ...SHADOW.card },
-  bubbleTextIn: { fontSize: 14, color: '#fff', lineHeight: 20 },
-  timeIn: { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 5, textAlign: 'right' },
+  bubbleTextIn: { 
+    fontSize: 14, 
+    color: '#fff', 
+    lineHeight: 20,
+    paddingRight: 60, // Space for time and tick
+    marginBottom: 2,
+  },
+  timeIn: { 
+    position: 'absolute',
+    bottom: 4,
+    right: 10,
+    fontSize: 10, 
+    color: 'rgba(255,255,255,0.75)',
+  },
 
   bubbleOut: { 
     backgroundColor: 'rgba(180,225,245,0.22)', 
     borderWidth: 1, 
     borderColor: 'rgba(30,156,240,0.18)', 
-    borderBottomRightRadius: 4, 
+    borderBottomRightRadius: 4,
+    position: 'relative',
     ...SHADOW.card 
   },
-  bubbleTextOut: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
-  timeOutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 5 },
+  bubbleTextOut: { 
+    fontSize: 14, 
+    color: COLORS.text, 
+    lineHeight: 20,
+    paddingRight: 70, // Space for time and double tick
+    marginBottom: 2,
+  },
+  timeOutRow: { 
+    position: 'absolute',
+    bottom: 4,
+    right: 10,
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 3,
+  },
   timeOut: { fontSize: 10, color: COLORS.sub },
 
   // Voice / image
@@ -2499,11 +2986,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center', marginBottom: 4,
   },
+  imageBubble: {
+    padding: 4,
+    paddingBottom: 4,
+  },
   messageImage: {
     width: 200,
     height: 200,
     borderRadius: 12,
-    marginBottom: 4,
+  },
+  imageTimeOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
 
   inputBar: {
@@ -3055,6 +3557,96 @@ const styles = StyleSheet.create({
   unblockBtnText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  // ── Message Action Toolbar ────────────────────────────────────────────────
+  selectedMessage: {
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    borderRadius: RADIUS.md,
+  },
+  actionToolbar: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  actionToolbarContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    gap: 8,
+  },
+  actionToolbarBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    gap: 4,
+    minWidth: 50,
+  },
+  actionToolbarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  actionToolbarClose: {
+    padding: 4,
+  },
+
+  // ── Reply Preview ──────────────────────────────────────────────────────────
+  replyPreview: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  replyPreviewBar: {
+    width: 3,
+    height: 36,
+    backgroundColor: COLORS.blue,
+    borderRadius: 2,
+  },
+  replyPreviewContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  replyPreviewLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  replyPreviewText: {
+    fontSize: 13,
+  },
+  replyPreviewClose: {
+    padding: 4,
+  },
+
+  // ── Reply Bubble (inside message) ──────────────────────────────────────────
+  replyBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: RADIUS.md,
+    marginBottom: 6,
+  },
+  replyBubbleBar: {
+    width: 3,
+    height: 32,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    borderRadius: 2,
+  },
+  replyBubbleSender: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  replyBubbleText: {
+    fontSize: 12,
   },
 
   // ── Location Menu ─────────────────────────────────────────────────────────

@@ -14,12 +14,23 @@ import { AppText, AppIcon, useForeground } from '../context/ThemeContext';
 import { COLORS, RADIUS } from '../types/theme';
 import { LocationData } from '../types';
 
+/** Format time to HH:MM */
+function formatTime(date: Date | null): string {
+  if (!date) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 interface LocationMessageBubbleProps {
   location: LocationData;
   isLiveLocation?: boolean;
   liveLocationExpiry?: Date | null;
   isSender: boolean;
   onStopSharing?: () => void;
+  timestamp?: Date | null;
+  tickIcon?: {
+    icon: 'checkmark' | 'checkmark-done';
+    color: string;
+  };
 }
 
 export function LocationMessageBubble({
@@ -28,6 +39,8 @@ export function LocationMessageBubble({
   liveLocationExpiry,
   isSender,
   onStopSharing,
+  timestamp,
+  tickIcon,
 }: LocationMessageBubbleProps) {
   const { FG } = useForeground();
   const [isLive, setIsLive] = useState(isLiveLocation);
@@ -160,6 +173,18 @@ export function LocationMessageBubble({
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Timestamp and tick at bottom right */}
+      {timestamp && (
+        <View style={styles.timestampRow}>
+          <AppText style={styles.timestamp}>
+            {formatTime(timestamp)}
+          </AppText>
+          {isSender && tickIcon && (
+            <AppIcon name={tickIcon.icon} size={13} color={tickIcon.color} fixedColor />
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -245,5 +270,17 @@ const styles = StyleSheet.create({
   },
   stopText: {
     color: COLORS.missed,
+  },
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 3,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  timestamp: {
+    fontSize: 10,
+    color: COLORS.sub,
   },
 });

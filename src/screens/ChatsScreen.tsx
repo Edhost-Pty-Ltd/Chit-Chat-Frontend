@@ -14,6 +14,7 @@ import { BottomNav } from '../components';
 import { useAuth } from '../hooks/useAuth';
 import { useChats, ChatPreview } from '../hooks/useChats';
 import { useContacts, AppContact } from '../hooks/useContacts';
+import { useStatus } from '../hooks/useStatus';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
 import { db } from '../config/firebase';
@@ -535,6 +536,16 @@ export default function ChatsScreen() {
 
   const { chats, loading: chatsLoading } = useChats(userId);
   const { contacts, loading: contactsLoading, reload: reloadContacts, hasPermission, error: contactsError } = useContacts();
+  const { contactStatuses } = useStatus(userId);
+
+  // Create a map of userId -> hasStatus for quick lookup
+  const userStatusMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const statusGroup of contactStatuses) {
+      map.set(statusGroup.userId, true);
+    }
+    return map;
+  }, [contactStatuses]);
 
   // Log contacts state
   useEffect(() => {
@@ -694,6 +705,9 @@ export default function ChatsScreen() {
     const contactPhotoUri = otherUser?.contactPhotoUri;
     const firebasePhotoURL = otherUser?.photoURL;
     const isSavedContact = !!(contactPhotoUri || (otherUser && contactsMap.has(otherUser.phone)));
+    
+    // Check if user has active status
+    const hasStatus = otherMemberId ? userStatusMap.get(otherMemberId) || false : false;
 
     const getSenderPrefix = (): string => {
       if (!item.lastSenderId) return '';
@@ -728,16 +742,15 @@ export default function ChatsScreen() {
           otherUserId: otherMemberId || undefined,
           otherUserPhoto: firebasePhotoURL || contactPhotoUri || null,
         })}>
-        {/* Avatar with status dot */}
+        {/* Avatar with status ring */}
         <View style={styles.chatAvatarWrap}>
           <ChatAvatar 
             displayName={displayName} 
             contactPhotoUri={contactPhotoUri}
             firebasePhotoURL={firebasePhotoURL}
             isSavedContact={isSavedContact}
+            hasStatus={hasStatus}
           />
-          {/* Online status dot - can be enabled when status feature is implemented */}
-          {/* {isOnline && <View style={styles.onlineDot} />} */}
         </View>
 
         {/* Name + preview */}

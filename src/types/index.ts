@@ -97,6 +97,34 @@ export interface StatusUpdate {
   time: string;
 }
 
+// ─── Firestore Status Update ───────────────────────────────────────────────────
+export interface FireStatus {
+  statusId: string;
+  userId: string;
+  displayName: string;
+  photoURL: string | null;
+  
+  // Media content
+  mediaUrl: string | null;
+  mediaType: 'image' | 'video' | 'text';
+  thumbnailUrl?: string | null;
+  
+  // Text status
+  caption: string | null;
+  backgroundColor: string | null; // For text-only status
+  textColor: string | null;
+  
+  // Metadata
+  createdAt: Date;
+  expiresAt: Date; // 24 hours from createdAt
+  viewedBy: string[]; // Array of userId who viewed
+  
+  // Privacy
+  visibility: 'everyone' | 'contacts' | 'except' | 'only';
+  excludedUsers?: string[];
+  selectedUsers?: string[];
+}
+
 // ─── Calendar ─────────────────────────────────────────────────────────────
 export interface CalendarEvent {
   id: number;
