@@ -199,12 +199,12 @@ export default function SignInScreen() {
         try {
           await signInToContext(fullNumber);
           console.log('[SignInScreen] Sign-in to context successful');
-          
-          // Don't manually navigate - let AppNavigator handle it automatically
-          // when the auth state changes. This prevents navigation errors.
+
+          // No manual navigation here: AppNavigator switches to the
+          // authenticated stack reactively once isSignedIn + profileExists are
+          // resolved. Manually resetting to 'Chats' fails here because that
+          // route isn't registered while the unauthenticated stack is active.
           setLoading(false);
-          
-          // AppNavigator will automatically show Chats screen when isSignedIn becomes true
         } catch (contextError: any) {
           console.error('[SignInScreen] Error signing in to context:', contextError);
           setErrorMsg(contextError.message || 'Failed to complete sign-in. Please try again.');

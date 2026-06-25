@@ -91,18 +91,20 @@ export function useRingtone() {
   const stop = async () => {
     try {
       console.log('[useRingtone] Stopping ringtone...');
-      
-      // Stop the audio player
-      if (player.playing) {
+
+      // Stop the audio player (guard against released/invalid player)
+      try {
         player.pause();
+      } catch (playerError) {
+        console.log('[useRingtone] Player already released or unavailable');
       }
-      
+
       // Clear beep interval if it exists
       if (beepIntervalRef.current) {
         clearInterval(beepIntervalRef.current);
         beepIntervalRef.current = null;
       }
-      
+
       setIsPlaying(false);
       console.log('[useRingtone] Ringtone stopped');
     } catch (error) {
@@ -113,11 +115,16 @@ export function useRingtone() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (player.playing) {
+      // The player may already be released by expo-audio's own teardown, so
+      // guard every access to avoid "shared object already released" crashes.
+      try {
         player.pause();
+      } catch {
+        // player already released — nothing to do
       }
       if (beepIntervalRef.current) {
         clearInterval(beepIntervalRef.current);
+        beepIntervalRef.current = null;
       }
     };
   }, [player]);

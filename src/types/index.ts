@@ -108,6 +108,7 @@ export interface FireStatus {
   mediaUrl: string | null;
   mediaType: 'image' | 'video' | 'text';
   thumbnailUrl?: string | null;
+  durationMs?: number; // Duration for image (default 5000ms) and video playback
   
   // Text status
   caption: string | null;

@@ -13,10 +13,13 @@ import { ThemeProvider } from './src/context/ThemeContext';
 import { CallProvider } from './src/context/CallContext';
 import { NotificationProvider } from './src/context/NotificationContext';
 import { FloatingCallProvider } from './src/context/FloatingCallContext';
+import { ActiveCallProvider } from './src/context/ActiveCallContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import ToastOverlay from './src/components/ToastNotification';
 import { FloatingCallManager } from './src/components/FloatingCallManager';
+import { CallHost } from './src/components/CallHost';
 import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
+import { BiometricGate } from './src/components/BiometricGate';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -106,14 +109,18 @@ export default function App() {
           <CallProvider>
             <NotificationProvider>
               <FloatingCallProvider>
-                <ActivityWatcher />
-                <NavigationContainer>
-                  <StatusBar style="auto" />
-                  <AppNavigator />
-                  <ToastOverlay />
-                  <FloatingCallManager />
-                  <GroupCallNotificationManager />
-                </NavigationContainer>
+                <ActiveCallProvider>
+                  <ActivityWatcher />
+                  <NavigationContainer>
+                    <StatusBar style="auto" />
+                    <AppNavigator />
+                    <ToastOverlay />
+                    <FloatingCallManager />
+                    <GroupCallNotificationManager />
+                    <CallHost />
+                    <BiometricGate />
+                  </NavigationContainer>
+                </ActiveCallProvider>
               </FloatingCallProvider>
             </NotificationProvider>
           </CallProvider>

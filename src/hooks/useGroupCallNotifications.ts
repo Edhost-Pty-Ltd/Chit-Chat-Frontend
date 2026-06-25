@@ -13,6 +13,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
+// A pending call invite older than this is considered stale (the call has
+// almost certainly ended). Prevents "ghost calls" from leftover notifications.
+const STALE_NOTIFICATION_MS = 60 * 1000;
+
 export interface GroupCallNotification {
   callId: string;
   chatId: string;
@@ -43,9 +47,29 @@ export function useGroupCallNotifications(userId: string | null) {
       q,
       (snapshot) => {
         const newNotifications: GroupCallNotification[] = [];
+        const now = Date.now();
 
-        snapshot.forEach((doc) => {
-          const data = doc.data();
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+
+          // Ignore stale invites (call already ended/abandoned). Auto-dismiss
+          // them so they stop re-triggering as ghost calls on every login.
+          const createdAtMs =
+            data.createdAt && typeof data.createdAt.toMillis === 'function'
+              ? data.createdAt.toMillis()
+              : null;
+
+          if (createdAtMs !== null && now - createdAtMs > STALE_NOTIFICATION_MS) {
+            console.log('[useGroupCallNotifications] Ignoring stale notification:', docSnap.id);
+            updateDoc(
+              doc(db, 'users', userId, 'groupCallNotifications', docSnap.id),
+              { status: 'dismissed' }
+            ).catch((err) =>
+              console.warn('[useGroupCallNotifications] Failed to dismiss stale notification:', err)
+            );
+            return; // skip — don't surface as an incoming call
+          }
+
           newNotifications.push({
             callId: data.callId,
             chatId: data.chatId,

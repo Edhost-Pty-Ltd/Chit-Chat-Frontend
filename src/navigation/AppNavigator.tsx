@@ -47,18 +47,27 @@ export default function AppNavigator() {
   const [profileExists, setProfileExists] = useState<boolean | null>(null);
   const [profileCheckError, setProfileCheckError] = useState<boolean>(false);
 
-  const checkProfileExists = useCallback(async () => {
-    try {
-      const authInstance = getAuth();
-      const currentUser = authInstance.currentUser;
-      console.log('[AppNavigator] checkProfileExists - currentUser:', currentUser?.uid);
-      
-      if (!currentUser) {
-        console.log('[AppNavigator] No current user, setting profileExists to false');
-        setProfileExists(false);
+  const checkProfileExists = useCallback(async (retry = 0) => {
+    const authInstance = getAuth();
+    const currentUser = authInstance.currentUser;
+    console.log('[AppNavigator] checkProfileExists - currentUser:', currentUser?.uid, 'retry:', retry);
+
+    if (!currentUser) {
+      // Native Firebase auth may not have hydrated yet right after OTP
+      // verification on a fresh install. Retry before concluding there is no
+      // user — otherwise we'd set profileExists=false and erroneously sign the
+      // user out, bouncing them back to the verify screen.
+      if (retry < 10) {
+        console.log('[AppNavigator] currentUser not ready, retrying in 500ms...');
+        setTimeout(() => checkProfileExists(retry + 1), 500);
         return;
       }
+      console.log('[AppNavigator] No current user after retries, setting profileExists to false');
+      setProfileExists(false);
+      return;
+    }
 
+    try {
       setProfileCheckError(false);
       setProfileExists(null); // reset to loading state
       console.log('[AppNavigator] Checking profile existence for user:', currentUser.uid);
@@ -153,7 +162,7 @@ export default function AppNavigator() {
         <Text style={styles.errorSubtext}>
           Could not connect to the server. Please check your internet connection and try again.
         </Text>
-        <TouchableOpacity style={styles.retryButton} onPress={checkProfileExists}>
+        <TouchableOpacity style={styles.retryButton} onPress={() => checkProfileExists()}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
         <TouchableOpacity 

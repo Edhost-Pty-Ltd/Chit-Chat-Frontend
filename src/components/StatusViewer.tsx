@@ -1,8 +1,8 @@
 // ─── Component: StatusViewer ──────────────────────────────────────────────────
 // Full-screen WhatsApp-style story viewer with progress bars, tap navigation,
-// swipe gestures, and auto-advance timer.
+// video playback support, and auto-advance timer.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,12 @@ import {
   Pressable,
   ActivityIndicator,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEvent } from 'expo';
 import type { FireStatus } from '../types';
 import { COLORS, SHADOW } from '../types/theme';
 
@@ -60,88 +63,162 @@ export function StatusViewer({
   onDeleteStatus,
 }: StatusViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const progress = useRef(new Animated.Value(0)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const progressValueRef = useRef(0);
 
   const currentStatus = statuses[currentIndex];
   const isOwner = currentStatus?.userId === currentUserId;
   const viewCount = currentStatus?.viewedBy?.length || 0;
+  const isVideo = currentStatus?.mediaType === 'video';
+  const isImage = currentStatus?.mediaType === 'image';
+  const isText = currentStatus?.mediaType === 'text';
 
-  const DURATION = currentStatus?.mediaType === 'video' ? 15000 : 5000; // 15s for video, 5s for image/text
+  const DURATION = currentStatus?.durationMs || (isVideo ? 15000 : isText ? 5000 : 5000);
 
-  // ── Auto-advance timer ──────────────────────────────────────────────────────
+  // Video player for video statuses
+  const player = useVideoPlayer(
+    isVideo && currentStatus?.mediaUrl ? currentStatus.mediaUrl : null,
+    (p) => {
+      p.loop = false;
+      p.timeUpdateEventInterval = 0.2;
+    }
+  );
+
+  // Track animated progress value
   useEffect(() => {
-    if (!visible || isPaused || !currentStatus) return;
+    const id = progress.addListener(({ value }) => {
+      progressValueRef.current = value;
+    });
+    return () => progress.removeListener(id);
+  }, [progress]);
 
-    // Mark as viewed when opening
-    if (!currentStatus.viewedBy.includes(currentUserId)) {
+  // ── Navigation handlers ─────────────────────────────────────────────────────
+  const goNext = useCallback(() => {
+    if (currentIndex < statuses.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    } else {
+      onClose();
+    }
+  }, [currentIndex, statuses.length, onClose]);
+
+  const goPrev = useCallback(() => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+    }
+  }, [currentIndex]);
+
+  const pause = useCallback(() => {
+    setIsPaused(true);
+    if (isVideo) {
+      try {
+        player.pause();
+      } catch {}
+    } else if (animRef.current) {
+      animRef.current.stop();
+    }
+  }, [isVideo, player]);
+
+  const resume = useCallback(() => {
+    setIsPaused(false);
+    if (isVideo) {
+      try {
+        player.play();
+      } catch {}
+    } else if (isImage || isText) {
+      const remaining = DURATION * (1 - progressValueRef.current);
+      const anim = Animated.timing(progress, {
+        toValue: 1,
+        duration: Math.max(remaining, 0),
+        useNativeDriver: false,
+      });
+      animRef.current = anim;
+      anim.start(({ finished }) => {
+        if (finished) goNext();
+      });
+    }
+  }, [isVideo, isImage, isText, player, DURATION, progress, goNext]);
+
+  // ── Mark as viewed when opening ─────────────────────────────────────────────
+  useEffect(() => {
+    if (currentStatus && !currentStatus.viewedBy.includes(currentUserId)) {
       onStatusViewed(currentStatus.statusId);
     }
+  }, [currentStatus?.statusId, currentUserId, onStatusViewed]);
 
-    setProgress(0);
-    const interval = 50; // Update every 50ms
-    const increment = interval / DURATION;
+  // ── Drive playback / timing for current item ────────────────────────────────
+  useEffect(() => {
+    if (!visible || !currentStatus) return;
 
-    timerRef.current = setInterval(() => {
-      setProgress((prev) => {
-        const next = prev + increment;
-        if (next >= 1) {
-          // Auto-advance to next status
-          if (currentIndex < statuses.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-          } else {
-            onClose();
-          }
-          return 0;
-        }
-        return next;
+    progress.setValue(0);
+    progressValueRef.current = 0;
+    if (animRef.current) {
+      animRef.current.stop();
+      animRef.current = null;
+    }
+
+    if (isImage || isText) {
+      // Animate progress for image/text statuses
+      const anim = Animated.timing(progress, {
+        toValue: 1,
+        duration: DURATION,
+        useNativeDriver: false,
       });
-    }, interval);
+      animRef.current = anim;
+      anim.start(({ finished }) => {
+        if (finished && !isPaused) goNext();
+      });
+      return () => anim.stop();
+    } else if (isVideo && currentStatus.mediaUrl) {
+      // Video playback handled by expo-video player
+      let cancelled = false;
+      (async () => {
+        try {
+          await player.replace(currentStatus.mediaUrl);
+          if (!cancelled && !isPaused) {
+            player.play();
+          }
+        } catch (e) {
+          console.warn('[StatusViewer] video load failed:', e);
+          if (!cancelled) goNext();
+        }
+      })();
+      return () => {
+        cancelled = true;
+        try {
+          player.pause();
+        } catch {}
+      };
+    }
+  }, [currentStatus?.statusId, visible, isPaused]);
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [visible, currentIndex, isPaused, currentStatus, statuses.length, currentUserId, onStatusViewed, onClose]);
+  // ── Video progress tracking ─────────────────────────────────────────────────
+  useEvent(player, 'timeUpdate', (payload: { currentTime: number }) => {
+    if (!isVideo) return;
+    const dur =
+      player.duration && player.duration > 0 ? player.duration : DURATION / 1000;
+    if (dur > 0) {
+      progress.setValue(Math.min(payload.currentTime / dur, 1));
+    }
+  });
+
+  useEvent(player, 'playToEnd', () => {
+    if (isVideo) goNext();
+  });
 
   // Reset index when opening
   useEffect(() => {
     if (visible) {
       setCurrentIndex(initialIndex);
-      setProgress(0);
+      progress.setValue(0);
       setShowOptions(false);
+      setIsPaused(false);
     }
   }, [visible, initialIndex]);
-
-  // ── Navigation handlers ─────────────────────────────────────────────────────
-  const handleTapLeft = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
-      setProgress(0);
-    } else {
-      onClose();
-    }
-  };
-
-  const handleTapRight = () => {
-    if (currentIndex < statuses.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-      setProgress(0);
-    } else {
-      onClose();
-    }
-  };
-
-  const handleLongPressStart = () => {
-    setIsPaused(true);
-  };
-
-  const handleLongPressEnd = () => {
-    setIsPaused(false);
-  };
 
   const handleDelete = () => {
     if (onDeleteStatus && currentStatus) {
@@ -164,7 +241,7 @@ export function StatusViewer({
       <View style={styles.container}>
         {/* Background */}
         <View style={styles.background}>
-          {currentStatus.mediaType === 'image' && currentStatus.mediaUrl ? (
+          {isImage && currentStatus.mediaUrl ? (
             <Image
               source={{ uri: currentStatus.mediaUrl }}
               style={styles.media}
@@ -172,13 +249,14 @@ export function StatusViewer({
               onLoadStart={() => setLoading(true)}
               onLoadEnd={() => setLoading(false)}
             />
-          ) : currentStatus.mediaType === 'video' && currentStatus.mediaUrl ? (
-            <View style={styles.videoPlaceholder}>
-              <Ionicons name="play-circle" size={80} color="#ffffff" />
-              <Text style={styles.videoPlaceholderText}>Video playback coming soon</Text>
-              <Text style={styles.videoPlaceholderSubtext}>Video statuses are not yet supported</Text>
-            </View>
-          ) : currentStatus.mediaType === 'text' ? (
+          ) : isVideo && currentStatus.mediaUrl ? (
+            <VideoView
+              player={player}
+              style={styles.media}
+              contentFit="contain"
+              nativeControls={false}
+            />
+          ) : isText ? (
             <LinearGradient
               colors={[currentStatus.backgroundColor || '#1a7fe8', '#0a5bb8']}
               style={styles.textBackground}
@@ -203,13 +281,19 @@ export function StatusViewer({
           <View style={styles.progressContainer}>
             {statuses.map((_, index) => (
               <View key={index} style={styles.progressBarBg}>
-                <View
+                <Animated.View
                   style={[
                     styles.progressBarFill,
                     {
-                      width: `${
-                        index < currentIndex ? 100 : index === currentIndex ? progress * 100 : 0
-                      }%`,
+                      width:
+                        index < currentIndex
+                          ? '100%'
+                          : index === currentIndex
+                          ? progress.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ['0%', '100%'],
+                            })
+                          : '0%',
                     },
                   ]}
                 />
@@ -271,7 +355,7 @@ export function StatusViewer({
         {/* Bottom gradient overlay */}
         {(currentStatus.caption || isOwner) && (
           <LinearGradient colors={['transparent', 'rgba(0,0,0,0.6)']} style={styles.bottomGradient}>
-            {currentStatus.caption && currentStatus.mediaType !== 'text' && (
+            {currentStatus.caption && !isText && (
               <Text style={styles.caption}>{currentStatus.caption}</Text>
             )}
             {isOwner && (
@@ -289,15 +373,17 @@ export function StatusViewer({
         <View style={styles.tapZones}>
           <Pressable
             style={styles.tapLeft}
-            onPress={handleTapLeft}
-            onLongPress={handleLongPressStart}
-            onPressOut={handleLongPressEnd}
+            onPress={goPrev}
+            onLongPress={pause}
+            onPressOut={resume}
+            delayLongPress={150}
           />
           <Pressable
             style={styles.tapRight}
-            onPress={handleTapRight}
-            onLongPress={handleLongPressStart}
-            onPressOut={handleLongPressEnd}
+            onPress={goNext}
+            onLongPress={pause}
+            onPressOut={resume}
+            delayLongPress={150}
           />
         </View>
       </View>
@@ -478,26 +564,5 @@ const styles = StyleSheet.create({
   },
   tapRight: {
     flex: 1,
-  },
-  videoPlaceholder: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000000',
-    padding: 40,
-  },
-  videoPlaceholderText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginTop: 20,
-    textAlign: 'center',
-  },
-  videoPlaceholderSubtext: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 8,
-    textAlign: 'center',
   },
 });

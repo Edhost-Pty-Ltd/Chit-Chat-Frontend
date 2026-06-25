@@ -9,10 +9,12 @@ import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
+import {
+  BIOMETRIC_KEY, isBiometricAvailable, getBiometricLabel,
+  authenticateBiometric, setBiometricEnabled as persistBiometricEnabled,
+} from '../utils/biometrics';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'AccountSettings'>;
-
-const BIOMETRIC_KEY = 'auth_biometric_enabled';
 
 type RowProps = {
   icon: string; label: string; sub?: string;
@@ -53,17 +55,41 @@ export default function AccountSettingsScreen() {
   const [twoFA,            setTwoFA]            = useState(true);
   const [bioLoading,       setBioLoading]       = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricLabel,   setBiometricLabel]   = useState('fingerprint or face ID');
 
   useEffect(() => {
     AsyncStorage.getItem(BIOMETRIC_KEY).then((v) => setBiometricEnabled(v === 'true'));
+    getBiometricLabel().then((label) => {
+      // Lowercase for natural sentence flow in sub-text.
+      setBiometricLabel(label === 'Biometrics' ? 'biometrics' : label);
+    });
   }, []);
 
   const handleBiometricToggle = async (enabled: boolean) => {
     if (bioLoading) return;
     setBioLoading(true);
     try {
-      await AsyncStorage.setItem(BIOMETRIC_KEY, enabled ? 'true' : 'false');
-      setBiometricEnabled(enabled);
+      if (enabled) {
+        // Enabling: require hardware + enrollment, then confirm with a live prompt.
+        const available = await isBiometricAvailable();
+        if (!available) {
+          Alert.alert(
+            'Biometrics unavailable',
+            'No fingerprint or face ID is set up on this device. Add one in your device settings, then try again.',
+          );
+          return;
+        }
+        const ok = await authenticateBiometric('Confirm to enable biometric login');
+        if (!ok) {
+          Alert.alert('Not enabled', 'Biometric verification was cancelled or failed.');
+          return;
+        }
+        await persistBiometricEnabled(true);
+        setBiometricEnabled(true);
+      } else {
+        await persistBiometricEnabled(false);
+        setBiometricEnabled(false);
+      }
     } catch {
       Alert.alert('Error', 'Could not update biometric preference.');
     } finally {
@@ -100,8 +126,8 @@ export default function AccountSettingsScreen() {
             bioLoading
               ? 'Verifying…'
               : biometricEnabled
-                ? 'Enabled — fingerprint or face ID required on launch'
-                : 'Use fingerprint or face ID to sign in'
+                ? `Enabled — ${biometricLabel} required on launch`
+                : `Use ${biometricLabel} to unlock the app`
           }
           value={biometricEnabled}
           onToggle={handleBiometricToggle}

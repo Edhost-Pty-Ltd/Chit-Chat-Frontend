@@ -1,6 +1,6 @@
 // ─── Hook: useStatus ──────────────────────────────────────────────────────────
 // Manages WhatsApp-style status updates with 24-hour expiry, view tracking,
-// and real-time sync with Firestore.
+// video/image support with duration tracking, and real-time sync with Firestore.
 
 import { useState, useEffect, useCallback } from 'react';
 import {
@@ -21,6 +21,13 @@ import {
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
 import type { FireStatus } from '../types';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+export const IMAGE_STATUS_DURATION_MS = 5000; // 5s for images
+export const VIDEO_STATUS_DURATION_MS = 15000; // 15s max for videos
+export const TEXT_STATUS_DURATION_MS = 5000; // 5s for text
+export const MAX_VIDEO_STATUS_MS = 30000; // 30s maximum video length
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -87,6 +94,7 @@ export function useStatus(currentUserId: string | null) {
               mediaUrl: data.mediaUrl || null,
               mediaType: data.mediaType,
               thumbnailUrl: data.thumbnailUrl || null,
+              durationMs: data.durationMs || IMAGE_STATUS_DURATION_MS,
               caption: data.caption || null,
               backgroundColor: data.backgroundColor || null,
               textColor: data.textColor || null,
@@ -165,7 +173,8 @@ export function useStatus(currentUserId: string | null) {
       mediaUri: string | null,
       caption: string | null,
       backgroundColor: string | null,
-      textColor: string | null
+      textColor: string | null,
+      durationMs?: number
     ): Promise<string> => {
       if (!currentUserId) throw new Error('User not authenticated');
 
@@ -190,6 +199,22 @@ export function useStatus(currentUserId: string | null) {
           console.log('[useStatus] Media uploaded:', mediaUrl);
         }
 
+        // Determine duration based on media type
+        let finalDuration = durationMs;
+        if (!finalDuration) {
+          if (mediaType === 'image') {
+            finalDuration = IMAGE_STATUS_DURATION_MS;
+          } else if (mediaType === 'video') {
+            finalDuration = VIDEO_STATUS_DURATION_MS;
+          } else {
+            finalDuration = TEXT_STATUS_DURATION_MS;
+          }
+        }
+        // Cap video duration at 30s
+        if (mediaType === 'video') {
+          finalDuration = Math.min(finalDuration, MAX_VIDEO_STATUS_MS);
+        }
+
         const now = new Date();
         const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
 
@@ -200,6 +225,7 @@ export function useStatus(currentUserId: string | null) {
           mediaUrl,
           mediaType,
           thumbnailUrl,
+          durationMs: finalDuration,
           caption,
           backgroundColor,
           textColor,

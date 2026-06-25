@@ -1,5 +1,5 @@
 ﻿// ─── Screen: Status ──────────────────────────────────────────────────────────
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, FlatList, TouchableOpacity, StyleSheet, Platform, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BottomNav, UserAvatar, StatusViewer, CreateStatusModal } from '../components';
@@ -68,10 +68,11 @@ export default function StatusScreen() {
     mediaUri: string | null,
     caption: string | null,
     backgroundColor: string | null,
-    textColor: string | null
+    textColor: string | null,
+    durationMs?: number
   ) => {
     if (!userId) return;
-    await createStatus(displayName, photoURL, mediaType, mediaUri, caption, backgroundColor, textColor);
+    await createStatus(displayName, photoURL, mediaType, mediaUri, caption, backgroundColor, textColor, durationMs);
   };
 
   // ── Handle view status ──────────────────────────────────────────────────────
@@ -267,9 +268,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14,
   },
-  title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
+  title: { fontSize: 26, fontWeight: '800', color: COLORS.text },
 
-  // My status — glass card
   myCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     marginHorizontal: 14, marginBottom: 18, marginTop: 10,
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1.5, borderColor: COLORS.sky1,
   },
-  myCardText:  { flex: 1 },
+  myCardText: { flex: 1 },
   myCardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text },
   myCardSub:   { fontSize: 12, color: COLORS.sub, marginTop: 2 },
   addMoreBtn: {
@@ -308,14 +308,9 @@ const styles = StyleSheet.create({
 
   listContent: { paddingHorizontal: 14, paddingBottom: 100 },
 
-  // Glass card per status row
   statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderRadius: RADIUS.lg,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 12,
   },
   ring:       { borderRadius: 999, padding: 2.5 },
   ringInner:  { borderRadius: 999, padding: 2, backgroundColor: 'rgba(255,255,255,0.9)' },

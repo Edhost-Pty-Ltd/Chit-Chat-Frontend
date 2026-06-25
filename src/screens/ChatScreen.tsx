@@ -51,6 +51,8 @@ import { useVoiceRecorder, RecordingResult } from '../hooks/useVoiceRecorder';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useLocationSharing } from '../hooks/useLocationSharing';
 import { useGroupCall } from '../hooks/useGroupCall';
+import { usePhoneBook } from '../hooks/usePhoneBook';
+import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
@@ -228,6 +230,12 @@ export default function ChatScreen() {
   // ── Group call ──────────────────────────────────────────────────
   const groupCall = useGroupCall();
 
+  // ── Active call (app-level LiveKit host; supports minimize) ──────
+  const { startCall: startActiveCall } = useActiveCall();
+
+  // ── Phone book name resolver (saved contact name, else phone number) ──
+  const { resolveName } = usePhoneBook();
+
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
 
@@ -364,7 +372,7 @@ export default function ChatScreen() {
               const userData = userSnap.data();
               return {
                 userId: memberId,
-                displayName: userData.displayName || userData.phone || 'Unknown',
+                displayName: resolveName(userData.phone, 'Unknown'),
                 photoURL: userData.photoURL || null,
                 status: userData.status || 'offline',
               } as GroupMember;
@@ -451,7 +459,7 @@ export default function ChatScreen() {
               const userData = userSnap.data();
               return {
                 userId: pastMemberEntry.userId,
-                displayName: userData.displayName || userData.phone || 'Unknown',
+                displayName: resolveName(userData.phone, 'Unknown'),
                 photoURL: userData.photoURL || null,
                 leftAt: leftAtDate,
               } as PastMember;
@@ -844,227 +852,70 @@ export default function ChatScreen() {
   };
 
   // ── Voice call handler ──────────────────────────────────────────
-  const handleVoiceCall = useCallback(async () => {
+  // ── Unified call initiation — LiveKit for both 1-on-1 and group ─────────────
+  // A 1-on-1 call is just a 2-person LiveKit room, so the same GroupCallScreen
+  // + group-call-notification flow handles every call. This makes "Add to call"
+  // work everywhere.
+  const startCall = useCallback(async (callType: 'audio' | 'video') => {
     if (!userId) {
       Alert.alert('Cannot make call', 'User information not available.');
       return;
     }
 
-    // Handle group calls with Jitsi
-    if (isGroup) {
-      try {
-        console.log('[ChatScreen] Initiating group voice call');
-        
-        // Get group members
+    try {
+      const userDisplayName = user?.phoneNumber || user?.displayName || 'Unknown';
+      let memberIds: string[];
+
+      if (isGroup) {
+        // Group: pull the member list from the chat document
         const chatRef = doc(db, 'chats', chatId);
         const chatSnap = await getDoc(chatRef);
-        
         if (!chatSnap.exists()) {
           Alert.alert('Error', 'Could not load group information');
           return;
         }
-
-        const chatData = chatSnap.data();
-        const memberIds = (chatData.members as string[]) || [];
-        const userDisplayName = user?.phoneNumber || user?.displayName || 'Unknown';
-
-        // Initiate group call and send notifications
-        const result = await groupCall.initiateGroupCall(
-          chatId,
-          userId,
-          userDisplayName,
-          memberIds,
-          'audio'
-        );
-
-        if (result) {
-          // Navigate to Group call screen with custom UI
-          navigation.navigate('GroupCall', {
-            roomName: result.roomName,
-            displayName: userDisplayName,
-            audioOnly: true,
-            groupName: displayName,
-            memberCount: memberIds.length,
-            chatId,
-            callId: result.callId,
-          });
-        } else {
-          Alert.alert('Error', groupCall.error || 'Failed to start group call');
+        memberIds = (chatSnap.data().members as string[]) || [];
+      } else {
+        // 1-on-1: a 2-person LiveKit room
+        if (!otherUserId) {
+          Alert.alert('Cannot make call', 'User information not available.');
+          return;
         }
-      } catch (error) {
-        console.error('[ChatScreen] Error initiating group call:', error);
-        Alert.alert('Error', 'Failed to start group call');
+        memberIds = [userId, otherUserId];
       }
-      return;
-    }
 
-    // Handle 1-on-1 calls with WebRTC
-    if (!otherUserId) {
-      Alert.alert('Cannot make call', 'User information not available.');
-      return;
-    }
-
-    if (outgoingCall.isInitiating) {
-      return; // Already initiating a call
-    }
-
-    try {
-      console.log('[ChatScreen] Initiating voice call to:', otherUserId);
-
-      // Fetch current user's profile from Firestore for accurate caller info
-      const userProfileRef = doc(db, 'users', userId);
-      const userProfileSnap = await getDoc(userProfileRef);
-      
-      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
-
-      // Get current user's profile data
-      const callerInfo = {
-        userId: userId,
-        displayName: userProfile?.displayName || user?.phoneNumber || 'Unknown',
-        photoUrl: userProfile?.photoURL || null,
-      };
-
-      const calleeInfo = {
-        userId: otherUserId,
-        displayName: displayName,
-        photoUrl: otherUserPhoto || null,
-      };
-
-      // Initiate the call
-      const callId = await outgoingCall.initiateCall(
+      const result = await groupCall.initiateGroupCall(
+        chatId,
         userId,
-        otherUserId,
-        callerInfo,
-        calleeInfo
+        userDisplayName,
+        memberIds,
+        callType
       );
 
-      if (callId) {
-        // Navigate to AudioCallScreen
-        navigation.navigate('AudioCall', {
-          callId,
-          isOutgoing: true,
-          otherParty: calleeInfo,
+      if (result) {
+        startActiveCall({
+          roomName: result.roomName,
+          displayName: userDisplayName,
+          audioOnly: callType === 'audio',
+          // For a group this is the group name; for 1-on-1 it's the other person.
+          groupName: displayName,
+          memberCount: memberIds.length,
+          chatId,
+          callId: result.callId,
         });
       } else {
-        Alert.alert('Call Failed', outgoingCall.error || 'Failed to initiate call');
+        Alert.alert('Error', groupCall.error || 'Failed to start call');
       }
     } catch (error) {
       console.error('[ChatScreen] Error initiating call:', error);
-      Alert.alert('Call Failed', 'An error occurred while trying to start the call');
+      Alert.alert('Error', 'Failed to start call');
     }
-  }, [userId, otherUserId, isGroup, chatId, displayName, otherUserPhoto, user, outgoingCall, groupCall, navigation]);
+  }, [userId, isGroup, chatId, otherUserId, displayName, user, groupCall, startActiveCall]);
+
+  const handleVoiceCall = useCallback(() => startCall('audio'), [startCall]);
 
   // ── Video call handler ──────────────────────────────────────────────────────
-  const handleVideoCall = useCallback(async () => {
-    if (!userId) {
-      Alert.alert('Cannot make call', 'User information not available.');
-      return;
-    }
-
-    // Handle group calls with Jitsi
-    if (isGroup) {
-      try {
-        console.log('[ChatScreen] Initiating group video call');
-        
-        // Get group members
-        const chatRef = doc(db, 'chats', chatId);
-        const chatSnap = await getDoc(chatRef);
-        
-        if (!chatSnap.exists()) {
-          Alert.alert('Error', 'Could not load group information');
-          return;
-        }
-
-        const chatData = chatSnap.data();
-        const memberIds = (chatData.members as string[]) || [];
-        const userDisplayName = user?.phoneNumber || user?.displayName || 'Unknown';
-
-        // Initiate group call and send notifications
-        const result = await groupCall.initiateGroupCall(
-          chatId,
-          userId,
-          userDisplayName,
-          memberIds,
-          'video'
-        );
-
-        if (result) {
-          // Navigate to Group call screen with custom UI
-          navigation.navigate('GroupCall', {
-            roomName: result.roomName,
-            displayName: userDisplayName,
-            audioOnly: false,
-            groupName: displayName,
-            memberCount: memberIds.length,
-            chatId,
-            callId: result.callId,
-          });
-        } else {
-          Alert.alert('Error', groupCall.error || 'Failed to start group call');
-        }
-      } catch (error) {
-        console.error('[ChatScreen] Error initiating group call:', error);
-        Alert.alert('Error', 'Failed to start group call');
-      }
-      return;
-    }
-
-    // Handle 1-on-1 calls with WebRTC
-    if (!otherUserId) {
-      Alert.alert('Cannot make call', 'User information not available.');
-      return;
-    }
-
-    if (outgoingCall.isInitiating) {
-      return; // Already initiating a call
-    }
-
-    try {
-      console.log('[ChatScreen] Initiating video call to:', otherUserId);
-
-      // Fetch current user's profile from Firestore for accurate caller info
-      const userProfileRef = doc(db, 'users', userId);
-      const userProfileSnap = await getDoc(userProfileRef);
-      
-      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
-
-      // Get current user's profile data
-      const callerInfo = {
-        userId: userId,
-        displayName: userProfile?.displayName || user?.phoneNumber || 'Unknown',
-        photoUrl: userProfile?.photoURL || null,
-      };
-
-      const calleeInfo = {
-        userId: otherUserId,
-        displayName: displayName,
-        photoUrl: otherUserPhoto || null,
-      };
-
-      // Initiate the video call
-      const callId = await outgoingCall.initiateCall(
-        userId,
-        otherUserId,
-        callerInfo,
-        calleeInfo,
-        'video'
-      );
-
-      if (callId) {
-        // Navigate to VideoCallScreen
-        navigation.navigate('VideoCall', {
-          callId,
-          isOutgoing: true,
-          otherParty: calleeInfo,
-        });
-      } else {
-        Alert.alert('Call Failed', outgoingCall.error || 'Failed to initiate call');
-      }
-    } catch (error) {
-      console.error('[ChatScreen] Error initiating video call:', error);
-      Alert.alert('Call Failed', 'An error occurred while trying to start the call');
-    }
-  }, [userId, otherUserId, isGroup, chatId, displayName, otherUserPhoto, user, outgoingCall, navigation]);
+  const handleVideoCall = useCallback(() => startCall('video'), [startCall]);
 
   // ── PanResponder for mic button ─────────────────────────────────
   const micPanResponder = useMemo(() => PanResponder.create({

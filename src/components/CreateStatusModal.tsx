@@ -32,7 +32,8 @@ interface CreateStatusModalProps {
     mediaUri: string | null,
     caption: string | null,
     backgroundColor: string | null,
-    textColor: string | null
+    textColor: string | null,
+    durationMs?: number
   ) => Promise<void>;
 }
 
@@ -55,6 +56,7 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
   const [mode, setMode] = useState<'select' | 'text' | 'media'>('select');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
+  const [mediaDuration, setMediaDuration] = useState<number>(5000); // Default 5s for images
   const [caption, setCaption] = useState('');
   const [textStatus, setTextStatus] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
@@ -67,6 +69,7 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
   const handleClose = () => {
     setMode('select');
     setMediaUri(null);
+    setMediaDuration(5000);
     setCaption('');
     setTextStatus('');
     setSelectedColorIndex(0);
@@ -90,8 +93,15 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
       });
 
       if (!result.canceled && result.assets[0]) {
-        setMediaUri(result.assets[0].uri);
+        const asset = result.assets[0];
+        setMediaUri(asset.uri);
         setMediaType(type);
+        // Set duration: 5s for images, video duration in ms (capped at 30s)
+        if (type === 'video' && asset.duration) {
+          setMediaDuration(Math.min(asset.duration, 30000));
+        } else {
+          setMediaDuration(5000);
+        }
         setMode('media');
       }
     } catch (err) {
@@ -139,9 +149,9 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
         }
 
         const color = TEXT_BG_COLORS[selectedColorIndex];
-        await onCreate('text', null, textStatus.trim(), color.bg, color.text);
+        await onCreate('text', null, textStatus.trim(), color.bg, color.text, 5000);
       } else if (mode === 'media' && mediaUri) {
-        await onCreate(mediaType, mediaUri, caption.trim() || null, null, null);
+        await onCreate(mediaType, mediaUri, caption.trim() || null, null, null, mediaDuration);
       }
 
       handleClose();
@@ -201,18 +211,18 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.optionCard, bevel, styles.optionDisabled]}
-                activeOpacity={1}
-                disabled
+                style={[styles.optionCard, bevel]}
+                activeOpacity={0.8}
+                onPress={() => pickMedia('video')}
               >
-                <LinearGradient colors={['#888888', '#666666']} style={styles.optionIcon}>
+                <LinearGradient colors={['#f97316', '#e11d48']} style={styles.optionIcon}>
                   <AppIcon name="videocam-outline" size={28} color="#fff" fixedColor />
                 </LinearGradient>
                 <View style={styles.optionMeta}>
-                  <AppText style={styles.optionTitle}>Video (Coming Soon)</AppText>
-                  <AppText style={styles.optionSub}>Video statuses not yet available</AppText>
+                  <AppText style={styles.optionTitle}>Video</AppText>
+                  <AppText style={styles.optionSub}>Share a video (max 30s)</AppText>
                 </View>
-                <AppIcon name="lock-closed" size={16} color={COLORS.sub} />
+                <AppIcon name="chevron-forward" size={20} color={COLORS.sub} />
               </TouchableOpacity>
 
               <TouchableOpacity
