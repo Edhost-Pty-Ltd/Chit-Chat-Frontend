@@ -11,21 +11,20 @@
 //
 import { useState, useRef, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, Image,
+  View, TextInput, TouchableOpacity, Image,
   StyleSheet, ScrollView, KeyboardAvoidingView,
   Platform, ActivityIndicator, Modal, FlatList,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { useAuth as useAuthContext } from '../context/AuthContext';
 import { useAuth } from '../hooks/useAuth';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useGlass } from '../context/ThemeContext';
 
 // ─── Stub API helpers ─────────────────────────────────────────────────────────
 // Removed - now using Firebase Phone Authentication via useAuth hook
@@ -41,6 +40,7 @@ interface CountryPickerProps {
 
 function CountryPicker({ visible, selected, onSelect, onClose }: CountryPickerProps) {
   const [query, setQuery] = useState('');
+  const { bevel } = useGlass();
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -61,17 +61,19 @@ function CountryPicker({ visible, selected, onSelect, onClose }: CountryPickerPr
       onRequestClose={onClose}
     >
       <SafeAreaView style={picker.root}>
+        <AppBg />
+
         {/* Header */}
         <View style={picker.header}>
-          <Text style={picker.title}>Select Country</Text>
+          <AppText style={picker.title}>Select Country</AppText>
           <TouchableOpacity onPress={onClose} style={picker.closeBtn}>
-            <Ionicons name="close" size={22} color={COLORS.text} />
+            <AppIcon name="close" size={22} color={COLORS.text} />
           </TouchableOpacity>
         </View>
 
         {/* Search */}
-        <View style={picker.searchWrap}>
-          <Ionicons name="search-outline" size={16} color={COLORS.sub} style={picker.searchIcon} />
+        <View style={[picker.searchWrap, bevel]}>
+          <AppIcon name="search-outline" size={16} color={COLORS.sub} style={picker.searchIcon} />
           <TextInput
             style={picker.searchInput}
             placeholder="Search country or code…"
@@ -97,18 +99,18 @@ function CountryPicker({ visible, selected, onSelect, onClose }: CountryPickerPr
                 onPress={() => { onSelect(item); onClose(); setQuery(''); }}
                 activeOpacity={0.7}
               >
-                <Text style={picker.flag}>{item.flag}</Text>
-                <Text style={picker.countryName}>{item.name}</Text>
-                <Text style={picker.dialCode}>+{item.dial}</Text>
+                <AppText style={picker.flag}>{item.flag}</AppText>
+                <AppText style={picker.countryName}>{item.name}</AppText>
+                <AppText style={picker.dialCode}>+{item.dial}</AppText>
                 {isSelected && (
-                  <Ionicons name="checkmark" size={16} color={COLORS.blue} style={picker.check} />
+                  <AppIcon name="checkmark" size={16} color={COLORS.blue} fixedColor style={picker.check} />
                 )}
               </TouchableOpacity>
             );
           }}
           ItemSeparatorComponent={() => <View style={picker.sep} />}
           ListEmptyComponent={
-            <Text style={picker.empty}>No countries found.</Text>
+            <AppText style={picker.empty}>No countries found.</AppText>
           }
         />
       </SafeAreaView>
@@ -267,21 +269,20 @@ export default function SignInScreen() {
 
   return (
     <>
-      <SafeAreaView style={styles.root} edges={['top', 'left', 'right', 'bottom']}>
-        <KeyboardAvoidingView
-          style={styles.root}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          {/* Fixed default sky-blue background — sign in always uses the brand colours */}
-          <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+      {/* Full-screen wrapper so gradient fills behind status bar */}
+      <View style={styles.rootFull}>
+        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
 
-
-
-          <ScrollView
-            contentContainerStyle={styles.scroll}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+        <SafeAreaView style={styles.root} edges={['top', 'left', 'right', 'bottom']}>
+          <KeyboardAvoidingView
+            style={styles.root}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           >
+            <ScrollView
+              contentContainerStyle={styles.scroll}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
             {/* ── Logo block ── */}
             <View style={styles.logoSection}>
               <Image
@@ -296,26 +297,22 @@ export default function SignInScreen() {
 
               {step === 'phone' ? (
                 <>
-                  <Text style={styles.cardTitle}>Sign In</Text>
-                  <Text style={styles.cardSub}>
+                  <AppText style={styles.cardTitle}>Sign In</AppText>
+                  <AppText style={styles.cardSub}>
                     Enter your phone number to receive a verification code.
-                  </Text>
+                  </AppText>
 
-                  {/* Phone row: [country picker] [local number] */}
+                  {/* Phone row */}
                   <View style={styles.phoneRow}>
-                    <TouchableOpacity
-                      style={styles.dialBtn}
-                      onPress={() => setPickerOpen(true)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.dialFlag}>{country.flag}</Text>
-                      <Text style={styles.dialCode}>+{country.dial}</Text>
-                      <View style={styles.iconTile}>
-                        <Ionicons name="chevron-down" size={13} color={COLORS.blue} />
-                      </View>
+                    {/* Tappable flag — no box, no chevron */}
+                    <TouchableOpacity style={styles.flagBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.65}>
+                      <AppText style={styles.dialFlag}>{country.flag}</AppText>
                     </TouchableOpacity>
 
-                    <View style={[styles.inputWrap, styles.inputFlex]}>
+                    {/* Dial code + number input in one bevel container */}
+                    <View style={[styles.inputWrap, styles.inputFlex, bevel]}>
+                      <AppText style={styles.dialCodePrefix}>+{country.dial}</AppText>
+                      <View style={styles.dialDivider} />
                       <TextInput
                         style={styles.input}
                         placeholder={Array(country.digits + 1).join('0').replace(/(\d{3})(\d{3})(\d+)/, '$1 $2 $3')}
@@ -325,7 +322,6 @@ export default function SignInScreen() {
                         textContentType="telephoneNumber"
                         value={formatted}
                         onChangeText={(t) => {
-                          // Strip non-digits, limit to country digit count
                           const digits = t.replace(/\D/g, '').slice(0, country.digits);
                           setLocalNumber(digits);
                           setErrorMsg('');
@@ -337,42 +333,28 @@ export default function SignInScreen() {
                   </View>
 
                   {rawDigits.length > 0 && (
-                    <Text style={styles.previewText}>Will send to: {fullNumber}</Text>
+                    <AppText style={styles.previewText}>Will send to: {fullNumber}</AppText>
                   )}
+                  {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
 
-                  {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
-
-                  <TouchableOpacity
-                    onPress={handleSendOtp}
-                    activeOpacity={0.85}
-                    disabled={loading}
-                  >
+                  <TouchableOpacity onPress={handleSendOtp} activeOpacity={0.85} disabled={loading}>
                     <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                      {loading
-                        ? <ActivityIndicator color="#fff" />
-                        : <Text style={styles.primaryBtnText}>Send Code</Text>}
+                      {loading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Send Code</AppText>}
                     </LinearGradient>
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  <TouchableOpacity
-                    style={styles.backRow}
-                    onPress={() => {
-                      setStep('phone');
-                      setErrorMsg('');
-                      setOtp(['', '', '', '', '', '']);
-                    }}
-                  >
-                    <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
-                    <Text style={styles.backText}>Change number</Text>
+                  <TouchableOpacity style={styles.backRow} onPress={() => { setStep('phone'); setErrorMsg(''); setOtp(['', '', '', '', '', '']); }}>
+                    <AppIcon name="chevron-back" size={18} color={COLORS.blue} fixedColor />
+                    <AppText style={styles.backText}>Change number</AppText>
                   </TouchableOpacity>
 
-                  <Text style={styles.cardTitle}>Verify Code</Text>
-                  <Text style={styles.cardSub}>
+                  <AppText style={styles.cardTitle}>Verify Code</AppText>
+                  <AppText style={styles.cardSub}>
                     We sent a 6-digit code to{'\n'}
-                    <Text style={styles.phoneHighlight}>{fullNumber}</Text>
-                  </Text>
+                    <AppText style={styles.phoneHighlight}>{fullNumber}</AppText>
+                  </AppText>
 
                   <View style={styles.otpRow}>
                     {otp.map((digit, i) => (
@@ -391,34 +373,28 @@ export default function SignInScreen() {
                     ))}
                   </View>
 
-                  {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+                  {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
 
-                  <TouchableOpacity
-                    onPress={handleVerifyOtp}
-                    activeOpacity={0.85}
-                    disabled={loading}
-                  >
+                  <TouchableOpacity onPress={handleVerifyOtp} activeOpacity={0.85} disabled={loading}>
                     <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                      {loading
-                        ? <ActivityIndicator color="#fff" />
-                        : <Text style={styles.primaryBtnText}>Verify</Text>}
+                      {loading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Verify</AppText>}
                     </LinearGradient>
                   </TouchableOpacity>
 
                   <View style={styles.resendRow}>
-                    <Text style={styles.resendLabel}>Didn't receive a code? </Text>
+                    <AppText style={styles.resendLabel}>Didn't receive a code? </AppText>
                     <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0}>
-                      <Text style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
+                      <AppText style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
                         {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
-                      </Text>
+                      </AppText>
                     </TouchableOpacity>
                   </View>
 
-                  <View style={styles.hintBox}>
-                    <Ionicons name="information-circle-outline" size={15} color={COLORS.sub} />
-                    <Text style={styles.hintText}>
+                  <View style={[styles.hintBox, bevel]}>
+                    <AppIcon name="information-circle-outline" size={15} color={COLORS.sub} />
+                    <AppText style={styles.hintText}>
                       Enter the 6-digit code sent to your phone
-                    </Text>
+                    </AppText>
                   </View>
                 </>
               )}
@@ -429,20 +405,22 @@ export default function SignInScreen() {
           {/* ── Create account link — mobile only, below the card ── */}
           {step === 'phone' && Platform.OS !== 'web' && (
             <View style={styles.createAccountRow}>
-              <Text style={styles.createAccountText}>Don't have an account? </Text>
+              <AppText style={styles.createAccountText}>Don't have an account? </AppText>
               <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
-                <Text style={styles.createAccountLink}>Create one</Text>
+                <AppText style={styles.createAccountLink}>Create one</AppText>
               </TouchableOpacity>
             </View>
           )}
 
-        <CountryPicker
-          visible={pickerOpen}
-          selected={country}
-          onSelect={setCountry}
-          onClose={() => setPickerOpen(false)}
-        />
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
+
+      <CountryPicker
+        visible={pickerOpen}
+        selected={country}
+        onSelect={setCountry}
+        onClose={() => setPickerOpen(false)}
+      />
     </>
   );
 }
@@ -450,7 +428,8 @@ export default function SignInScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  rootFull: { flex: 1 },  // wraps everything, gradient fills behind status bar
+  root:     { flex: 1 },  // SafeAreaView + KeyboardAvoidingView
 
   scroll: {
     flexGrow: 1,
@@ -491,35 +470,46 @@ const styles = StyleSheet.create({
   },
 
   // ── Phone input row ───────────────────────────────────────────────────────
-  phoneRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-
-  dialBtn: {
+  phoneRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 13,
-    backgroundColor: 'rgba(30,156,240,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    borderRadius: RADIUS.md,
+    gap: 6,
+    marginBottom: 8,
+    alignItems: 'stretch',
   },
-  dialFlag: { fontSize: 20 },
-  dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
+
+  // Tappable flag — no box, just the emoji
+  flagBtn: {
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialFlag: { fontSize: 26 },
+
+  // Dial code inside the input container
+  dialCodePrefix: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    paddingLeft: 12,
+    paddingRight: 6,
+  },
+  dialDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: COLORS.border,
+    marginRight: 2,
+  },
 
   inputWrap: {
-    backgroundColor: 'rgba(30,156,240,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
     borderRadius: RADIUS.md,
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
   },
-  inputFlex: { flex: 1 },
+  inputFlex: { flex: 1, marginBottom: 0 },
   input: {
     flex: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 13,
     fontSize: 15,
     color: COLORS.text,
@@ -593,13 +583,9 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 14,
     padding: 10,
-    backgroundColor: 'rgba(30,156,240,0.06)',
     borderRadius: RADIUS.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.15)',
   },
   hintText: { fontSize: 12, color: COLORS.sub },
-  hintCode: { fontWeight: '700', color: COLORS.blue },
 
   createAccountRow: {
     flexDirection: 'row',
@@ -610,29 +596,12 @@ const styles = StyleSheet.create({
   },
   createAccountText: { fontSize: 14, color: COLORS.sub },
   createAccountLink: { fontSize: 14, color: COLORS.blue, fontWeight: '700' },
-
-  iconTile: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(30,156,240,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.50)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
-    shadowColor: '#1E9CF0',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 4,
-  },
 });
 
 // ─── Picker Styles ────────────────────────────────────────────────────────────
 
 const picker = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.bg2 },
+  root: { flex: 1, overflow: 'hidden' },
 
   header: {
     flexDirection: 'row',
@@ -651,9 +620,6 @@ const picker = StyleSheet.create({
     alignItems: 'center',
     margin: 12,
     marginBottom: 6,
-    backgroundColor: 'rgba(30,156,240,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
     borderRadius: RADIUS.md,
     paddingHorizontal: 10,
   },

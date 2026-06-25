@@ -14,6 +14,7 @@ export interface BlockedContact {
   photoURL: string | null;
   phone?: string;
   blockedAt: Date;
+  lastSeenAtBlock?: Date; // Frozen last seen at time of blocking
 }
 
 // ─── Helper: Send block notification to chat ─────────────────────────────────
@@ -49,6 +50,17 @@ async function sendBlockNotifications(
 
     const batch = writeBatch(db);
 
+    // Get blocker's current lastSeen to freeze it for blocked user
+    const blockerRef = doc(db, 'users', blockerId);
+    const blockerSnap = await getDoc(blockerRef);
+    const blockerLastSeen = blockerSnap.exists() ? blockerSnap.data().lastSeen : null;
+
+    // Store the frozen last seen in the blocked user's document
+    const blockedUserRef = doc(db, 'users', blockerId, 'blockedUsers', blockedId);
+    batch.update(blockedUserRef, {
+      lastSeenAtBlock: blockerLastSeen || serverTimestamp(),
+    });
+
     // Add system message with personalized text for each user
     const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
     batch.set(msgRef, {
@@ -79,6 +91,19 @@ async function sendBlockNotifications(
       'lastMessage.text': `You blocked ${blockedName}`,
       'lastMessage.senderId': 'system',
       'lastMessage.timestamp': serverTimestamp(),
+    });
+
+    // Create notification for blocked user
+    const notificationRef = doc(collection(db, 'users', blockedId, 'notifications'));
+    batch.set(notificationRef, {
+      id: notificationRef.id,
+      type: 'blocked',
+      title: 'You were blocked',
+      message: `${blockerName} blocked you`,
+      fromUserId: blockerId,
+      fromUserName: blockerName,
+      timestamp: serverTimestamp(),
+      read: false,
     });
 
     await batch.commit();
@@ -192,6 +217,11 @@ export function useBlockedContacts(currentUserId: string | null) {
             blockedAt: data.blockedAt instanceof Timestamp
               ? data.blockedAt.toDate()
               : new Date(data.blockedAt),
+            lastSeenAtBlock: data.lastSeenAtBlock instanceof Timestamp
+              ? data.lastSeenAtBlock.toDate()
+              : data.lastSeenAtBlock instanceof Date
+                ? data.lastSeenAtBlock
+                : undefined,
           };
         });
 
@@ -225,6 +255,11 @@ export function useBlockedContacts(currentUserId: string | null) {
       try {
         console.log('[useBlockedContacts] Blocking contact:', userId);
 
+        // Get current user's lastSeen to freeze it for blocked user
+        const currentUserRef = doc(db, 'users', currentUserId);
+        const currentUserSnap = await getDoc(currentUserRef);
+        const currentLastSeen = currentUserSnap.exists() ? currentUserSnap.data().lastSeen : null;
+
         const blockedRef = doc(db, 'users', currentUserId, 'blockedUsers', userId);
         
         await setDoc(blockedRef, {
@@ -232,6 +267,7 @@ export function useBlockedContacts(currentUserId: string | null) {
           photoURL: photoURL || null,
           phone: phone || null,
           blockedAt: new Date(),
+          lastSeenAtBlock: currentLastSeen || new Date(), // Freeze last seen at block time
         });
 
         // Send system message to both users' chats

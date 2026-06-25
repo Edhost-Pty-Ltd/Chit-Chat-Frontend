@@ -7,6 +7,7 @@ import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { useAuth } from '../hooks/useAuth';
 import { useStatus, type StatusGroup } from '../hooks/useStatus';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ export default function StatusScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
 
   const {
     myStatuses,
@@ -150,7 +152,7 @@ export default function StatusScreen() {
     <View style={styles.root}>
       <AppBg />
 
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1 }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1, paddingTop: Platform.OS === 'web' ? 16 : insets.top + 14 }]}>
         <AppText style={[styles.title, { color: textColor, fontFamily }]}>Updates</AppText>
       </View>
 
@@ -266,7 +268,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14,
+    paddingHorizontal: 20, paddingTop: 0, paddingBottom: 14,
   },
   title: { fontSize: 26, fontWeight: '800', color: COLORS.text },
 

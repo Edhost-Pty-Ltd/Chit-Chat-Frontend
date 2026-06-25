@@ -9,6 +9,7 @@ import {
   Linking,
   Platform,
   Alert,
+  Image,
 } from 'react-native';
 import { AppText, AppIcon, useForeground } from '../context/ThemeContext';
 import { COLORS, RADIUS } from '../types/theme';
@@ -77,16 +78,23 @@ export function LocationMessageBubble({
     return () => clearInterval(interval);
   }, [isLiveLocation, liveLocationExpiry]);
 
-  // Generate static map image URL (using OpenStreetMap)
+  // Generate static map image URL using Google Maps Static API
   const getStaticMapUrl = () => {
     const { latitude, longitude } = location;
     const zoom = 15;
-    const width = 280;
-    const height = 180;
+    const width = 600;
+    const height = 360;
+    const scale = 2; // For retina displays
     
-    // Using StaticMap API or similar service
-    // For now, we'll use a placeholder that opens in maps
-    return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=${zoom}/${latitude}/${longitude}`;
+    // Using Google Maps Static API
+    // Note: You'll need to add your API key in production
+    const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY'; // Replace with actual key
+    
+    // For now, using MapQuest static map (no key required for basic usage)
+    return `https://www.mapquestapi.com/staticmap/v5/map?locations=${latitude},${longitude}&size=${width},${height}&zoom=${zoom}&defaultMarker=marker-sm-blue`;
+    
+    // Alternative: Google Maps (requires API key)
+    // return `https://maps.googleapis.com/maps/api/staticmap?center=${latitude},${longitude}&zoom=${zoom}&size=${width}x${height}&scale=${scale}&markers=color:blue%7C${latitude},${longitude}&key=${apiKey}`;
   };
 
   // Open location in maps app
@@ -134,14 +142,25 @@ export function LocationMessageBubble({
         </View>
       )}
 
-      {/* Map preview placeholder */}
+      {/* Map preview with actual map image */}
       <TouchableOpacity 
         style={styles.mapPreview}
         onPress={openInMaps}
         activeOpacity={0.8}
       >
-        <View style={styles.mapPlaceholder}>
-          <AppIcon name="location-sharp" size={48} color={COLORS.blue} />
+        <Image
+          source={{ uri: getStaticMapUrl() }}
+          style={styles.mapImage}
+          resizeMode="cover"
+        />
+        
+        {/* Location pin overlay */}
+        <View style={styles.pinOverlay}>
+          <AppIcon name="location-sharp" size={32} color={COLORS.missed} />
+        </View>
+        
+        {/* Coordinates overlay */}
+        <View style={styles.coordsOverlay}>
           <AppText style={styles.coordsText}>
             {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
           </AppText>
@@ -227,23 +246,36 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 180,
     backgroundColor: COLORS.bg2,
+    position: 'relative',
   },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
+  mapImage: {
+    width: '100%',
+    height: '100%',
+  },
+  pinOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -16 }, { translateY: -32 }],
+  },
+  coordsOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    padding: 8,
     alignItems: 'center',
-    padding: 16,
   },
   coordsText: {
-    fontSize: 13,
-    color: COLORS.text,
-    marginTop: 8,
+    fontSize: 11,
+    color: '#ffffff',
     fontWeight: '500',
   },
   accuracyText: {
-    fontSize: 11,
-    color: COLORS.sub,
-    marginTop: 4,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
   },
   actions: {
     flexDirection: 'row',

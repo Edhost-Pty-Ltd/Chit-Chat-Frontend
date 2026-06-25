@@ -33,7 +33,7 @@ export interface ChatMessage {
   messageId: string;
   senderId: string;
   text: string | null;
-  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file' | 'location';
+  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file' | 'location' | 'system';
   
   // Media URLs
   imageUrl?: string | null;
@@ -57,6 +57,9 @@ export interface ChatMessage {
   timestamp: Date;
   readBy: string[];
   editedAt?: Date | null;
+  
+  // Block status
+  blockedMessage?: boolean; // Message sent while recipient was blocked
 }
 
 // ─── Location Data ─────────────────────────────────────────────────────────────

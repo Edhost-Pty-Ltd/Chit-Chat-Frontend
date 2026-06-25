@@ -73,6 +73,7 @@ export function StatusViewer({
 
   const currentStatus = statuses[currentIndex];
   const isOwner = currentStatus?.userId === currentUserId;
+  const isExcluded = currentStatus?.excludedUsers?.includes(currentUserId) || false;
   const viewCount = currentStatus?.viewedBy?.length || 0;
   const isVideo = currentStatus?.mediaType === 'video';
   const isImage = currentStatus?.mediaType === 'image';
@@ -161,6 +162,20 @@ export function StatusViewer({
       animRef.current = null;
     }
 
+    // If user is excluded, show for default duration then auto-advance
+    if (isExcluded) {
+      const anim = Animated.timing(progress, {
+        toValue: 1,
+        duration: 3000, // Show blocked message for 3 seconds
+        useNativeDriver: false,
+      });
+      animRef.current = anim;
+      anim.start(({ finished }) => {
+        if (finished && !isPaused) goNext();
+      });
+      return () => anim.stop();
+    }
+
     if (isImage || isText) {
       // Animate progress for image/text statuses
       const anim = Animated.timing(progress, {
@@ -194,7 +209,7 @@ export function StatusViewer({
         } catch {}
       };
     }
-  }, [currentStatus?.statusId, visible, isPaused]);
+  }, [currentStatus?.statusId, visible, isPaused, isExcluded]);
 
   // ── Video progress tracking ─────────────────────────────────────────────────
   useEvent(player, 'timeUpdate', (payload: { currentTime: number }) => {
@@ -241,7 +256,16 @@ export function StatusViewer({
       <View style={styles.container}>
         {/* Background */}
         <View style={styles.background}>
-          {isImage && currentStatus.mediaUrl ? (
+          {isExcluded ? (
+            /* Blocked message */
+            <View style={styles.blockedContainer}>
+              <Ionicons name="ban-outline" size={64} color="rgba(255,255,255,0.6)" />
+              <Text style={styles.blockedTitle}>Status Hidden</Text>
+              <Text style={styles.blockedMessage}>
+                {currentStatus.displayName} blocked you from seeing this status
+              </Text>
+            </View>
+          ) : isImage && currentStatus.mediaUrl ? (
             <Image
               source={{ uri: currentStatus.mediaUrl }}
               style={styles.media}
@@ -419,6 +443,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     lineHeight: 42,
+  },
+  blockedContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  blockedTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  blockedMessage: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

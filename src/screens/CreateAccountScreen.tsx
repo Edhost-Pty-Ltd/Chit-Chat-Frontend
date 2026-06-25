@@ -39,8 +39,7 @@ import { RootStackParamList } from '../types';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { validateUsername, validatePhone, validateImage } from '../utils/validationUtils';
 import { AvatarPreview } from '../components/AvatarPreview';
-import { Text } from 'react-native';
-import { useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'CreateAccount'>;
 type Step = 'details' | 'otp' | 'biometric';
@@ -76,6 +75,7 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
   onSelect: (c: Country) => void; onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
+  const { bevel } = useGlass();
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return COUNTRIES;
@@ -87,12 +87,15 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={picker.root}>
+        <AppBg />
         <View style={picker.header}>
-          <Text style={picker.title}>Select Country</Text>
-          <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={COLORS.text} /></TouchableOpacity>
+          <AppText style={picker.title}>Select Country</AppText>
+          <TouchableOpacity onPress={onClose}>
+            <AppIcon name="close" size={22} color={COLORS.text} />
+          </TouchableOpacity>
         </View>
-        <View style={picker.searchWrap}>
-          <Ionicons name="search-outline" size={16} color={COLORS.sub} style={{ marginRight: 6 }} />
+        <View style={[picker.searchWrap, bevel]}>
+          <AppIcon name="search-outline" size={16} color={COLORS.sub} style={{ marginRight: 6 }} />
           <TextInput style={picker.searchInput} placeholder="Search…" placeholderTextColor={COLORS.textFaint}
             value={query} onChangeText={setQuery} autoCorrect={false} autoCapitalize="none" clearButtonMode="while-editing" />
         </View>
@@ -103,15 +106,15 @@ function CountryPicker({ visible, selected, onSelect, onClose }: {
             return (
               <TouchableOpacity style={[picker.item, sel && picker.itemSelected]}
                 onPress={() => { onSelect(item); onClose(); setQuery(''); }} activeOpacity={0.7}>
-                <Text style={picker.flag}>{item.flag}</Text>
-                <Text style={picker.countryName}>{item.name}</Text>
-                <Text style={picker.dialCode}>+{item.dial}</Text>
-                {sel && <Ionicons name="checkmark" size={16} color={COLORS.blue} />}
+                <AppText style={picker.flag}>{item.flag}</AppText>
+                <AppText style={picker.countryName}>{item.name}</AppText>
+                <AppText style={picker.dialCode}>+{item.dial}</AppText>
+                {sel && <AppIcon name="checkmark" size={16} color={COLORS.blue} fixedColor />}
               </TouchableOpacity>
             );
           }}
           ItemSeparatorComponent={() => <View style={picker.sep} />}
-          ListEmptyComponent={<Text style={picker.empty}>No countries found.</Text>}
+          ListEmptyComponent={<AppText style={picker.empty}>No countries found.</AppText>}
         />
       </SafeAreaView>
     </Modal>
@@ -135,6 +138,7 @@ export default function CreateAccountScreen() {
   } = useRegistration();
 
   const { bevel } = useGlass();
+  const { FG } = useForeground();
 
   const [step,        setStep]        = useState<Step>('details');
   const [name,        setName]        = useState('');
@@ -293,6 +297,11 @@ export default function CreateAccountScreen() {
   // Compute form validity for button state
   const isFormValid = validateUsername(name.trim()).valid && validatePhone(fullNumber);
 
+  // Compute initials from name for avatar placeholder
+  const avatarInitials = name.trim()
+    ? name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2)
+    : '?';
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
@@ -302,31 +311,39 @@ export default function CreateAccountScreen() {
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Back link - uses native back navigation */}
+          {/* Back link */}
           <TouchableOpacity style={styles.backRow} onPress={() => navigation.goBack()}>
-            <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
-            <Text style={styles.backText}>Back</Text>
+            <AppIcon name="chevron-back" size={18} color={COLORS.blue} fixedColor />
+            <AppText style={styles.backText}>Back</AppText>
           </TouchableOpacity>
 
           <View style={[styles.card, bevel]}>
             {step === 'details' ? (
               <>
-                <Text style={styles.cardTitle}>Create Account</Text>
-                <Text style={styles.cardSub}>Fill in your details to get started.</Text>
+                <AppText style={styles.cardTitle}>Create Account</AppText>
+                <AppText style={styles.cardSub}>Fill in your details to get started.</AppText>
 
-                {/* Avatar picker */}
-                <View style={styles.avatarWrap}>
-                  <AvatarPreview imageUri={avatarUri} username={name.trim()} size={90} onPress={pickPhoto} />
-                  <View style={styles.cameraBadge}>
-                    <Ionicons name="camera" size={14} color={COLORS.blue} />
-                  </View>
-                  <Text style={styles.avatarHint}>Add photo</Text>
+                {/* Avatar — same style as ProfileScreen */}
+                <View style={styles.avatarSection}>
+                  <TouchableOpacity onPress={pickPhoto} activeOpacity={0.85} style={styles.avatarWrap}>
+                    {avatarUri ? (
+                      <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+                    ) : (
+                      <LinearGradient colors={[COLORS.blue, COLORS.blueDark]} style={styles.avatarPlaceholder}>
+                        <AppText fixedColor style={styles.avatarInitials}>{avatarInitials}</AppText>
+                      </LinearGradient>
+                    )}
+                    <View style={styles.cameraBadge}>
+                      <AppIcon name="camera" size={16} color={COLORS.blue} fixedColor />
+                    </View>
+                  </TouchableOpacity>
+                  <AppText style={[styles.avatarHint, { color: FG.secondary }]}>Tap to add photo</AppText>
                 </View>
 
                 {/* Name */}
-                <View style={styles.inputWrap}>
+                <View style={[styles.inputWrap, bevel]}>
                   <View style={[styles.iconTile, { marginLeft: 8 }]}>
-                    <Ionicons name="person-outline" size={18} color={COLORS.blue} />
+                    <AppIcon name="person-outline" size={18} color={COLORS.blue} fixedColor />
                   </View>
                   <TextInput
                     style={styles.input}
@@ -338,11 +355,8 @@ export default function CreateAccountScreen() {
                       const trimmed = name.trim();
                       if (trimmed.length > 0) {
                         const result = validateUsername(trimmed);
-                        if (!result.valid) {
-                          setNameError(result.error!);
-                        } else {
-                          setNameError('');
-                        }
+                        if (!result.valid) setNameError(result.error!);
+                        else setNameError('');
                       } else {
                         setNameError('');
                       }
@@ -351,51 +365,49 @@ export default function CreateAccountScreen() {
                     returnKeyType="next"
                   />
                 </View>
-                {nameError ? <Text style={styles.error}>{nameError}</Text> : null}
+                {nameError ? <AppText style={styles.error}>{nameError}</AppText> : null}
 
                 {/* Phone */}
                 <View style={styles.phoneRow}>
-                  <TouchableOpacity style={styles.dialBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.75}>
-                    <Text style={styles.dialFlag}>{country.flag}</Text>
-                    <Text style={styles.dialCode}>+{country.dial}</Text>
-                    <View style={styles.iconTile}>
-                      <Ionicons name="chevron-down" size={13} color={COLORS.blue} />
-                    </View>
+                  {/* Tappable flag — no box, no chevron */}
+                  <TouchableOpacity style={styles.flagBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.65}>
+                    <AppText style={styles.dialFlag}>{country.flag}</AppText>
                   </TouchableOpacity>
-                  <View style={[styles.inputWrap, styles.inputFlex]}>
+
+                  {/* Dial code + number input in one bevel container */}
+                  <View style={[styles.inputWrap, styles.inputFlex, bevel]}>
+                    <AppText style={styles.dialCodePrefix}>+{country.dial}</AppText>
+                    <View style={styles.dialDivider} />
                     <TextInput
                       style={styles.input}
                       placeholder="Phone number"
                       placeholderTextColor={COLORS.textFaint}
                       keyboardType="phone-pad"
                       value={formatted}
-                      onChangeText={t => {
-                        const d = t.replace(/\D/g, '').slice(0, country.digits);
-                        setLocalNumber(d); setErrorMsg('');
-                      }}
+                      onChangeText={t => { const d = t.replace(/\D/g, '').slice(0, country.digits); setLocalNumber(d); setErrorMsg(''); }}
                       returnKeyType="done"
                       onSubmitEditing={handleSend}
                     />
                   </View>
                 </View>
 
-                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+                {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
 
                 <TouchableOpacity onPress={handleSend} activeOpacity={0.85} disabled={hookLoading || !isFormValid}>
                   <LinearGradient colors={GRADIENTS.primary} style={[styles.primaryBtn, (!isFormValid) && { opacity: 0.5 }]}>
-                    {hookLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Send Verification Code</Text>}
+                    {hookLoading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Send Verification Code</AppText>}
                   </LinearGradient>
                 </TouchableOpacity>
               </>
             ) : step === 'otp' ? (
               <>
                 <TouchableOpacity style={styles.backRow} onPress={() => { setStep('details'); setErrorMsg(''); setOtp(['','','','','','']); }}>
-                  <Ionicons name="chevron-back" size={18} color={COLORS.blue} />
-                  <Text style={styles.backText}>Change details</Text>
+                  <AppIcon name="chevron-back" size={18} color={COLORS.blue} fixedColor />
+                  <AppText style={styles.backText}>Change details</AppText>
                 </TouchableOpacity>
 
-                <Text style={styles.cardTitle}>Verify Code</Text>
-                <Text style={styles.cardSub}>We sent a 6-digit code to{'\n'}<Text style={styles.phoneHighlight}>{fullNumber}</Text></Text>
+                <AppText style={styles.cardTitle}>Verify Code</AppText>
+                <AppText style={styles.cardSub}>We sent a 6-digit code to{'\n'}<AppText style={styles.phoneHighlight}>{fullNumber}</AppText></AppText>
 
                 <View style={styles.otpRow}>
                   {otp.map((digit, i) => (
@@ -414,99 +426,80 @@ export default function CreateAccountScreen() {
                   ))}
                 </View>
 
-                {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
+                {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
 
                 <TouchableOpacity onPress={handleVerify} activeOpacity={0.85} disabled={hookLoading}>
                   <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                    {hookLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Verify Code</Text>}
+                    {hookLoading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Verify Code</AppText>}
                   </LinearGradient>
                 </TouchableOpacity>
 
                 <View style={styles.resendRow}>
-                  <Text style={styles.resendLabel}>Didn't receive a code? </Text>
+                  <AppText style={styles.resendLabel}>Didn't receive a code? </AppText>
                   <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0 || !canResend}>
-                    <Text style={[styles.resendLink, (resendTimer > 0 || !canResend) && styles.resendLinkDisabled]}>
+                    <AppText style={[styles.resendLink, (resendTimer > 0 || !canResend) && styles.resendLinkDisabled]}>
                       {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
-                    </Text>
+                    </AppText>
                   </TouchableOpacity>
                 </View>
-
-                {!canResend && (
-                  <Text style={styles.resendLimitMsg}>Maximum resend attempts reached</Text>
-                )}
+                {!canResend && <AppText style={styles.resendLimitMsg}>Maximum resend attempts reached</AppText>}
               </>
             ) : (
               /* Biometric step */
               <View style={styles.biometricWrap}>
                 {registrationStep === 'creating' ? (
-                  /* Profile creation in progress */
                   <>
                     <ActivityIndicator size="large" color={COLORS.blue} style={{ marginBottom: 20 }} />
-                    <Text style={styles.cardTitle}>Creating your profile...</Text>
-                    <Text style={styles.cardSub}>Please wait while we set up your account.</Text>
+                    <AppText style={styles.cardTitle}>Creating your profile...</AppText>
+                    <AppText style={styles.cardSub}>Please wait while we set up your account.</AppText>
                   </>
                 ) : registrationStep === 'error' ? (
-                  /* Profile creation failed */
                   <>
                     <View style={styles.biometricIcon}>
-                      <Ionicons name="alert-circle-outline" size={70} color={COLORS.missed} />
+                      <AppIcon name="alert-circle-outline" size={70} color={COLORS.missed} fixedColor />
                     </View>
-                    <Text style={styles.cardTitle}>Profile Creation Failed</Text>
-                    <Text style={[styles.cardSub, { textAlign: 'center', marginBottom: 16 }]}>
+                    <AppText style={styles.cardTitle}>Profile Creation Failed</AppText>
+                    <AppText style={[styles.cardSub, { textAlign: 'center', marginBottom: 16 }]}>
                       {hookError ?? 'Something went wrong. Please try again.'}
-                    </Text>
-
+                    </AppText>
                     <TouchableOpacity onPress={retryProfileCreation} activeOpacity={0.85}>
                       <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                        <Text style={styles.primaryBtnText}>Retry</Text>
+                        <AppText style={styles.primaryBtnText} fixedColor>Retry</AppText>
                       </LinearGradient>
                     </TouchableOpacity>
-
                     {hookError && (hookError.toLowerCase().includes('upload') || hookError.toLowerCase().includes('photo') || hookError.toLowerCase().includes('storage')) && (
                       <TouchableOpacity onPress={proceedWithoutPhoto} activeOpacity={0.85} style={{ marginTop: 12 }}>
                         <View style={styles.secondaryBtn}>
-                          <Text style={styles.secondaryBtnText}>Continue without photo</Text>
+                          <AppText style={styles.secondaryBtnText}>Continue without photo</AppText>
                         </View>
                       </TouchableOpacity>
                     )}
-                    
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setStep('details');
-                        setErrorMsg('');
-                      }} 
-                      activeOpacity={0.85} 
-                      style={{ marginTop: 12 }}
-                    >
+                    <TouchableOpacity onPress={() => { setStep('details'); setErrorMsg(''); }} activeOpacity={0.85} style={{ marginTop: 12 }}>
                       <View style={styles.secondaryBtn}>
-                        <Text style={styles.secondaryBtnText}>Change Phone Number</Text>
+                        <AppText style={styles.secondaryBtnText}>Change Phone Number</AppText>
                       </View>
                     </TouchableOpacity>
                   </>
                 ) : (
-                  /* Default biometric prompt */
                   <>
                     <View style={styles.biometricIcon}>
-                      <Ionicons name="finger-print" size={70} color={COLORS.blue} />
+                      <AppIcon name="finger-print" size={70} color={COLORS.blue} fixedColor />
                     </View>
-                    <Text style={styles.cardTitle}>Two-Factor Verification</Text>
-                    <Text style={styles.cardSub}>
+                    <AppText style={styles.cardTitle}>Two-Factor Verification</AppText>
+                    <AppText style={styles.cardSub}>
                       For your security, please verify your identity using{'\n'}
                       your device's biometrics.
-                    </Text>
-
-                    {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
-
+                    </AppText>
+                    {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
                     <TouchableOpacity onPress={handleBiometric} activeOpacity={0.85} disabled={loading}>
                       <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-                        {loading
-                          ? <ActivityIndicator color="#fff" />
-                          : <Text style={styles.primaryBtnText}>Verify with Biometrics</Text>}
+                        {loading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Verify with Biometrics</AppText>}
                       </LinearGradient>
                     </TouchableOpacity>
                   </>
                 )}
-              </View>            )}
+              </View>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -529,56 +522,61 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 20, fontWeight: '700', color: COLORS.text, marginBottom: 6 },
   cardSub:   { fontSize: 13, color: COLORS.sub, marginBottom: 20, lineHeight: 19 },
 
-  // Avatar
-  avatarWrap: { alignItems: 'center', marginBottom: 20, gap: 6 },
-  avatarImg: { width: 90, height: 90, borderRadius: 45, borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)' },
-  avatarPlaceholder: { width: 90, height: 90, borderRadius: 45, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.40)' },
-  avatarInitials: { fontSize: 30, fontWeight: '800', color: '#fff' },
-  cameraBadge: {
-    width: 28, 
-    height: 28, 
-    borderRadius: 14,
-    backgroundColor: 'rgba(30,156,240,0.15)',
-    borderWidth: 1.5, 
-    borderColor: COLORS.blue,
-    alignItems: 'center', 
-    justifyContent: 'center',
-    marginTop: -14,
-    shadowColor: '#1E9CF0',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
+  // Avatar — matches ProfileScreen
+  avatarSection: { alignItems: 'center', marginBottom: 20, gap: 10 },
+  avatarWrap:    { width: 110, height: 110, borderRadius: 55, ...SHADOW.glow },
+  avatarImg: {
+    width: 110, height: 110, borderRadius: 55,
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
   },
-  avatarHint: { fontSize: 11, color: COLORS.sub, marginTop: 2 },
+  avatarPlaceholder: {
+    width: 110, height: 110, borderRadius: 55,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
+  },
+  avatarInitials: { fontSize: 38, fontWeight: '800', color: '#fff' },
+  cameraBadge: {
+    position: 'absolute', bottom: 2, right: 2,
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.45)',
+    ...SHADOW.button,
+  },
+  avatarHint: { fontSize: 12, color: COLORS.sub },
 
-  inputWrap: { 
-    backgroundColor: 'rgba(30,156,240,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    borderRadius: RADIUS.md, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginBottom: 12 
+  inputWrap: {
+    borderRadius: RADIUS.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   inputIcon: { paddingLeft: 14 },
   inputFlex: { flex: 1, marginBottom: 0 },
-  input:     { flex: 1, paddingHorizontal: 12, paddingVertical: 13, fontSize: 15, color: COLORS.text },
+  input:     { flex: 1, paddingHorizontal: 10, paddingVertical: 13, fontSize: 15, color: COLORS.text },
 
-  phoneRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  dialBtn:  { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 5, 
-    paddingHorizontal: 12, 
-    paddingVertical: 13, 
-    backgroundColor: 'rgba(30,156,240,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    borderRadius: RADIUS.md 
+  phoneRow: { flexDirection: 'row', gap: 6, marginBottom: 12, alignItems: 'stretch' },
+
+  // Tappable flag — bare, no box
+  flagBtn: {
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  dialFlag: { fontSize: 20 },
-  dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.text },
+  dialFlag: { fontSize: 26 },
+  dialCodePrefix: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    paddingLeft: 12,
+    paddingRight: 6,
+  },
+  dialDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: COLORS.border,
+    marginRight: 2,
+  },
 
   error: { fontSize: 13, color: COLORS.missed, marginBottom: 10, marginTop: -4 },
 
@@ -632,39 +630,19 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     ...SHADOW.glow,
   },
-
-  iconTile: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(30,156,240,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.50)',
-    borderTopColor: 'rgba(255,255,255,0.75)',
-    shadowColor: '#1E9CF0',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 4,
-  },
 });
 
 const picker = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.bg2 },
+  root: { flex: 1, overflow: 'hidden' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   title:    { flex: 1, fontSize: 17, fontWeight: '700', color: COLORS.text },
-  searchWrap: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    margin: 12, 
-    marginBottom: 6, 
-    backgroundColor: 'rgba(30,156,240,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    borderRadius: RADIUS.md, 
-    paddingHorizontal: 10 
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 12,
+    marginBottom: 6,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 10,
   },
   searchInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: COLORS.text },
   item: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 13, gap: 12 },

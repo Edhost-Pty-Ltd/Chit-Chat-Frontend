@@ -421,8 +421,8 @@ function SelectContactSheet({
           </Animated.View>
         ) : (
           <View style={{ flex: 1 }}>
-            <Text style={[styles.sheetTitle, { color: textColor }]}>Select contact</Text>
-            <Text style={[styles.sheetSub, { color: FG.secondary }]}>{contacts.length} contacts</Text>
+            <AppText style={[styles.sheetTitle, { color: textColor }]}>Select contact</AppText>
+            <AppText style={[styles.sheetSub, { color: FG.secondary }]}>{contacts.length} contacts</AppText>
           </View>
         )}
 
@@ -481,25 +481,25 @@ function SelectContactSheet({
       {contactsLoading ? (
         <View style={styles.emptyWrap}>
           <ActivityIndicator size="large" color={COLORS.blue} />
-          <Text style={[styles.emptyText, { color: FG.secondary }]}>Loading contacts…</Text>
+          <AppText style={[styles.emptyText, { color: FG.secondary }]}>Loading contacts…</AppText>
         </View>
       ) : contactsError ? (
         <View style={styles.emptyWrap}>
-          <Ionicons name="people-outline" size={52} color={COLORS.sub} />
-          <Text style={[styles.emptyText, { color: FG.secondary }]}>{contactsError}</Text>
+          <AppIcon name="people-outline" size={52} color={COLORS.sub} />
+          <AppText style={[styles.emptyText, { color: FG.secondary }]}>{contactsError}</AppText>
           <TouchableOpacity style={styles.retryBtn} onPress={reloadContacts} activeOpacity={0.8}>
             <LinearGradient colors={GRADIENTS.primary} style={styles.retryBtnGrad}>
               <AppIcon name="refresh" size={16} color="#fff" fixedColor />
-              <Text style={styles.retryBtnText}>{hasPermission ? 'Retry' : 'Grant Permission'}</Text>
+              <AppText style={styles.retryBtnText} fixedColor>{hasPermission ? 'Retry' : 'Grant Permission'}</AppText>
             </LinearGradient>
           </TouchableOpacity>
         </View>
       ) : filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <Ionicons name="people-outline" size={52} color={COLORS.sub} />
-          <Text style={[styles.emptyText, { color: FG.secondary }]}>
+          <AppIcon name="people-outline" size={52} color={COLORS.sub} />
+          <AppText style={[styles.emptyText, { color: FG.secondary }]}>
             {searchQuery.trim() ? `No contacts match "${searchQuery}"` : 'No registered contacts found'}
-          </Text>
+          </AppText>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
@@ -801,7 +801,7 @@ export default function ChatsScreen() {
       </Modal>
 
       {/* ── Header ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.headerRow}>
           <AppText style={[styles.appName, { color: textColor, fontFamily }]}>ChitChat</AppText>
 
@@ -930,7 +930,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'column',
     paddingHorizontal: 14,
-    paddingTop: 56,
     paddingBottom: 10,
     gap: 8,
   },
@@ -1020,10 +1019,10 @@ const styles = StyleSheet.create({
   fabInner: { flex: 1, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
 
   // ── Bottom sheet ──────────────────────────────────────────────────────────
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.22)' },
+  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    height: '88%',
+    height: '90%',
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
     overflow: 'hidden',
     ...SHADOW.glow,
@@ -1046,9 +1045,6 @@ const styles = StyleSheet.create({
   actionBlock: { paddingHorizontal: 14, gap: 8, marginBottom: 4 },
   actionRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 13,
   },
@@ -1069,9 +1065,6 @@ const styles = StyleSheet.create({
   contactRow: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     marginHorizontal: 14, marginBottom: 8,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 14, paddingVertical: 11,
   },
@@ -1135,9 +1128,6 @@ const styles = StyleSheet.create({
   glassInput: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     marginHorizontal: 14, marginBottom: 10,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.md,
     paddingHorizontal: 14, paddingVertical: 12,
   },
@@ -1158,9 +1148,6 @@ const styles = StyleSheet.create({
   keyRow:  { flexDirection: 'row', gap: 10 },
   keyBtn:  {
     flex: 1, paddingVertical: 14,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADIUS.lg,
     alignItems: 'center', justifyContent: 'center',
   },
@@ -1169,14 +1156,11 @@ const styles = StyleSheet.create({
 
   // Action buttons row
   rowActions:  { flexDirection: 'row', gap: 10, marginHorizontal: 14, marginBottom: 20 },
-  cancelBtn:   { 
-    flex: 1, 
-    paddingVertical: 14, 
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: RADIUS.lg, 
-    alignItems: 'center', 
+  cancelBtn:   {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   cancelText:  { fontSize: 14, fontWeight: '600', color: COLORS.sub },

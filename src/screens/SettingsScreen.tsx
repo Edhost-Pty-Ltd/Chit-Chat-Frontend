@@ -11,6 +11,7 @@ import { RootStackParamList } from '../types';
 import { useAuth } from '../context/AuthContext';
 
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
 
@@ -35,7 +36,6 @@ const SETTINGS_SECTIONS: {
   },
   {
     items: [
-      { id: 'storage',    icon: 'server-outline',         label: 'Data and Storage' },
       { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices'  },
       { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'      },
     ],
@@ -57,6 +57,7 @@ export default function SettingsScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
   const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
 
   const handleItem = (id: string) => {
     if (id === 'signout')    { signOut(); return; }
@@ -73,7 +74,7 @@ export default function SettingsScreen() {
     <View style={styles.root}>
       <AppBg />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
         <AppText style={[styles.title, { color: textColor, fontFamily }]}>Settings</AppText>
       </View>
 
@@ -130,7 +131,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.sky1 },
 
-  header: { paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14 },
+  header: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 14 },
   title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
 
   scroll: { paddingHorizontal: 14, paddingBottom: 20, gap: 6 },

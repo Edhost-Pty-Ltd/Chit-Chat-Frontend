@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotifications, AppNotification, NotifType } from '../context/NotificationContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
@@ -88,13 +89,14 @@ export default function NotificationsScreen() {
   const { FG }     = useForeground();
   const { textColor, fontFamily } = useTypography();
   const { notifications, unreadCount, markAllRead, clearAll } = useNotifications();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.root}>
       <AppBg />
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
           <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
         </TouchableOpacity>
@@ -153,7 +155,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: Platform.OS === 'web' ? 16 : 52, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14,
     borderBottomWidth: 1, gap: 10,
   },
   back:         { width: 34 },

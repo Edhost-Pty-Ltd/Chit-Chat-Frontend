@@ -6,6 +6,7 @@ export * from './LocationMessageBubble';
 export * from './ForwardModal';
 export * from './MessageInfoModal';
 export * from './FloatingCallOverlay';
+export * from './NotificationTestButton';
 
 import React from 'react';
 import {
@@ -20,6 +21,9 @@ import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList, ContactStatus } from '../types';
 import { AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useUnreadCount } from '../hooks/useUnreadCount';
+import { useUnviewedStatus } from '../hooks/useUnviewedStatus';
+import { useMissedCalls } from '../hooks/useMissedCalls';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -82,6 +86,12 @@ export function BottomNav({ active }: BottomNavProps) {
   const { fontFamily } = useTypography();
   const { bevel } = useGlass();
   const insets = useSafeAreaInsets();
+  const { userId } = useAuth();
+  
+  // Use the hooks directly (now properly imported at the top)
+  const { totalUnread } = useUnreadCount(userId);
+  const { hasUnviewedStatus } = useUnviewedStatus(userId);
+  const { missedCount } = useMissedCalls(userId);
 
   // Sit the pill just above the device's system navigation bar / gesture area.
   // insets.bottom adapts per device (0 on devices w/o a system bar, larger for
@@ -92,6 +102,10 @@ export function BottomNav({ active }: BottomNavProps) {
     <View style={[styles.navBar, bevel, { marginBottom: bottomSpace }]}>
       {TABS.map((t) => {
         const isActive = active === t.id;
+        const showChatsBadge = t.id === 'chats' && totalUnread > 0;
+        const showCallsBadge = t.id === 'calls' && missedCount > 0;
+        const showStatusDot = t.id === 'status' && hasUnviewedStatus;
+        
         return (
           <TouchableOpacity
             key={t.id}
@@ -99,15 +113,34 @@ export function BottomNav({ active }: BottomNavProps) {
             activeOpacity={0.75}
             onPress={() => navigation.navigate(t.screen as any)}
           >
-            {isActive ? (
-              <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
-                <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
-              </LinearGradient>
-            ) : (
-              <View style={styles.iconTileInactive}>
-                <AppIcon name={t.icon} size={20} color={FG.secondary} />
-              </View>
-            )}
+            <View>
+              {isActive ? (
+                <LinearGradient colors={GRADIENTS.primary} style={styles.iconTileActive}>
+                  <AppIcon name={t.iconActive} size={20} color="#fff" fixedColor />
+                </LinearGradient>
+              ) : (
+                <View style={styles.iconTileInactive}>
+                  <AppIcon name={t.icon} size={20} color={FG.secondary} />
+                </View>
+              )}
+              {showChatsBadge && (
+                <View style={styles.badge}>
+                  <AppText style={styles.badgeText} fixedColor>
+                    {totalUnread > 99 ? '99+' : totalUnread}
+                  </AppText>
+                </View>
+              )}
+              {showCallsBadge && (
+                <View style={styles.badge}>
+                  <AppText style={styles.badgeText} fixedColor>
+                    {missedCount > 99 ? '99+' : missedCount}
+                  </AppText>
+                </View>
+              )}
+              {showStatusDot && !showChatsBadge && !showCallsBadge && (
+                <View style={styles.statusDot} />
+              )}
+            </View>
             <AppText style={[
               styles.navLabel,
               { color: isActive ? COLORS.blue : FG.secondary, fontFamily },
@@ -220,6 +253,37 @@ const styles = StyleSheet.create({
 
   navLabel:       { fontSize: 10, fontWeight: '500' },
   navLabelActive: { fontWeight: '700', color: COLORS.blue },
+  
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  statusDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#10b981',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
 
   header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12, ...GLASS.header },
   headerSide:     { width: 40 },

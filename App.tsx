@@ -20,6 +20,7 @@ import { FloatingCallManager } from './src/components/FloatingCallManager';
 import { CallHost } from './src/components/CallHost';
 import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
 import { BiometricGate } from './src/components/BiometricGate';
+import { usePushNotifications } from './src/hooks/usePushNotifications';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -51,6 +52,13 @@ function ActivityWatcher() {
     return () => events.forEach((e) => window.removeEventListener(e, refreshActivity));
   }, [refreshActivity]);
 
+  return null;
+}
+
+// Push notification setup
+function PushNotificationManager() {
+  const { userId } = useAuth();
+  usePushNotifications(userId);
   return null;
 }
 
@@ -111,6 +119,7 @@ export default function App() {
               <FloatingCallProvider>
                 <ActiveCallProvider>
                   <ActivityWatcher />
+                  <PushNotificationManager />
                   <NavigationContainer>
                     <StatusBar style="auto" />
                     <AppNavigator />

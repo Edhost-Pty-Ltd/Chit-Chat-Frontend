@@ -28,6 +28,7 @@ export interface FireMessage {
   fileSize:   number | null;
   mimeType:   string | null;
   thumbnailUrl: string | null;
+  blockedMessage?: boolean; // Message sent while recipient was blocked
   location?: {
     latitude: number;
     longitude: number;
@@ -93,6 +94,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
               fileSize: d.fileSize ?? null,
               mimeType: d.mimeType ?? null,
               thumbnailUrl: d.thumbnailUrl ?? null,
+              blockedMessage: d.blockedMessage ?? false,
               location: d.location ?? null,
               isLiveLocation: d.isLiveLocation ?? false,
               liveLocationExpiry: d.liveLocationExpiry

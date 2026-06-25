@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { View, Switch, TouchableOpacity, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
 
 type Visibility = 'Everyone' | 'Contacts' | 'Nobody';
@@ -59,6 +60,7 @@ export default function PrivacySettingsScreen() {
   const navigation = useNavigation();
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const insets = useSafeAreaInsets();
 
   const [lastSeen,      setLastSeen]      = useState<Visibility>('Contacts');
   const [profilePhoto,  setProfilePhoto]  = useState<Visibility>('Contacts');
@@ -71,7 +73,7 @@ export default function PrivacySettingsScreen() {
   return (
     <View style={styles.root}>
       <AppBg />
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
           <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
         </TouchableOpacity>
@@ -117,7 +119,7 @@ export default function PrivacySettingsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingTop: Platform.OS === 'web' ? 16 : 52, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1 },
   back:   { width: 36 },
   title:  { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
   scroll: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 40, gap: 8 },
