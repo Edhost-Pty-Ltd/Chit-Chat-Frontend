@@ -12,6 +12,7 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { fetchUserPrivacySettings } from './usePrivacySettings';
 
 export interface GroupCallData {
   callId: string;
@@ -71,8 +72,22 @@ export function useGroupCall() {
         console.log('[useGroupCall] Group call document created:', callId);
 
         // Create individual call notifications for each group member (except initiator)
-        const notificationPromises = groupMemberIds
-          .filter(memberId => memberId !== initiatorId)
+        // Skip members who have turned off calls ('Nobody').
+        const eligibleMembers = await Promise.all(
+          groupMemberIds
+            .filter(memberId => memberId !== initiatorId)
+            .map(async (memberId) => {
+              try {
+                const privacy = await fetchUserPrivacySettings(memberId);
+                return privacy.calls === 'Nobody' ? null : memberId;
+              } catch {
+                return memberId; // default to allow on error
+              }
+            })
+        );
+        const notifiableMembers = eligibleMembers.filter(Boolean) as string[];
+
+        const notificationPromises = notifiableMembers
           .map(async (memberId) => {
             try {
               const notificationRef = doc(

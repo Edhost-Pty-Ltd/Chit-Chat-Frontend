@@ -1,5 +1,5 @@
 ﻿// ─── Screen: Calls ───────────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet,
   Modal, Pressable, ScrollView, Alert, ActivityIndicator,
@@ -18,7 +18,9 @@ import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useContacts } from '../hooks/useContacts';
+import { usePhoneBook } from '../hooks/usePhoneBook';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
+import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -72,6 +74,8 @@ function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'out
 // ─── Call Info Sheet ──────────────────────────────────────────────────────────
 function CallInfoSheet({
   call,
+  resolvedName,
+  resolvedPhone,
   visible,
   onClose,
   onAudioCall,
@@ -79,6 +83,8 @@ function CallInfoSheet({
   onMessage,
 }: {
   call: CallHistoryItem | null;
+  resolvedName: string;
+  resolvedPhone: string;
   visible: boolean;
   onClose: () => void;
   onAudioCall: () => void;
@@ -105,15 +111,15 @@ function CallInfoSheet({
         {/* Contact info header */}
         <View style={styles.infoHeader}>
           <Avatar 
-            initials={getInitials(call.otherParty.displayName)} 
+            initials={getInitials(resolvedName)} 
             color={COLORS.blue} 
             size={64} 
             imageUrl={call.otherParty.photoUrl}
           />
           <View style={styles.infoMeta}>
-            <AppText style={styles.infoName}>{call.otherParty.displayName}</AppText>
+            <AppText style={styles.infoName}>{resolvedName}</AppText>
             <AppText style={styles.infoNum}>
-              {call.otherParty.userId || 'No number saved'}
+              {resolvedPhone || 'No number saved'}
             </AppText>
           </View>
         </View>
@@ -268,14 +274,44 @@ export default function CallsScreen() {
   const { user } = useAuth();
   const { callHistory, loading, error } = useCallHistory(user?.uid ?? null);
   const { contacts, loading: contactsLoading } = useContacts();
+  const { resolveName } = usePhoneBook();
   const outgoingCall = useOutgoingCall();
   const { bevel } = useGlass();
+
+  // Build a userId → phone map from device contacts so we can resolve names
+  // for call-history entries using the phone-book rule (saved name > phone number).
+  const userIdToPhone = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      if (c.userId) map.set(c.userId, c.phone);
+    }
+    return map;
+  }, [contacts]);
+
+  /** Resolve a display name for a call participant: phone-book name → phone number. */
+  const resolveCallerName = useCallback(
+    (userId: string, fallbackName: string): string => {
+      const phone = userIdToPhone.get(userId);
+      if (!phone) return fallbackName; // not a saved contact — use whatever was stored
+      return resolveName(phone, phone); // saved → contact name; unsaved → phone number
+    },
+    [userIdToPhone, resolveName]
+  );
   
   const [tab, setTab] = useState<CallTab>('All');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [calling, setCalling] = useState(false);
   const [selectedCall, setSelectedCall] = useState<CallHistoryItem | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
+
+  // Resolved display name for the currently-selected call in the info sheet.
+  const selectedCallName = selectedCall
+    ? resolveCallerName(selectedCall.otherParty.userId, selectedCall.otherParty.displayName)
+    : '';
+  // Resolved phone number for the selected call (shown under the name in the sheet).
+  const selectedCallPhone = selectedCall
+    ? (userIdToPhone.get(selectedCall.otherParty.userId) ?? '')
+    : '';
 
   // Filter based on tab
   const filtered = tab === 'Missed' 
@@ -293,6 +329,15 @@ export default function CallsScreen() {
     setCalling(true);
 
     try {
+      // Check the callee's privacyCalls setting before starting
+      const calleePrivacy = await fetchUserPrivacySettings(userId);
+      if (calleePrivacy.calls === 'Nobody') {
+        Alert.alert("Can't call", `${displayName} has turned off calls.`);
+        return;
+      }
+      // 'Contacts' — since this contact is in the caller's device contacts (they
+      // came from useContacts), the call is allowed.
+
       console.log('[CallsScreen] Initiating audio call to:', displayName);
       
       // Fetch current user's profile from Firestore
@@ -317,15 +362,10 @@ export default function CallsScreen() {
       );
 
       if (callId) {
-        // Navigate to audio call screen
         navigation.navigate('AudioCall', {
           callId,
           isOutgoing: true,
-          otherParty: {
-            userId,
-            displayName,
-            photoUrl,
-          },
+          otherParty: { userId, displayName, photoUrl },
         });
       } else {
         Alert.alert('Call Failed', 'Unable to initiate call');
@@ -349,6 +389,13 @@ export default function CallsScreen() {
     setCalling(true);
 
     try {
+      // Check the callee's privacyCalls setting before starting
+      const calleePrivacy = await fetchUserPrivacySettings(userId);
+      if (calleePrivacy.calls === 'Nobody') {
+        Alert.alert("Can't call", `${displayName} has turned off calls.`);
+        return;
+      }
+
       console.log('[CallsScreen] Initiating video call to:', displayName);
       
       // Fetch current user's profile from Firestore
@@ -406,6 +453,13 @@ export default function CallsScreen() {
     try {
       const typeToUse = callType || item.type; // Use passed type or fallback to item type
       console.log('[CallsScreen] Calling back:', item.otherParty.displayName, 'Type:', typeToUse);
+
+      // Check the callee's privacyCalls setting before starting
+      const calleePrivacy = await fetchUserPrivacySettings(item.otherParty.userId);
+      if (calleePrivacy.calls === 'Nobody') {
+        Alert.alert("Can't call", `${resolveCallerName(item.otherParty.userId, item.otherParty.displayName)} has turned off calls.`);
+        return;
+      }
       
       // Fetch current user's profile from Firestore
       const userProfileRef = doc(db, 'users', user.uid);
@@ -474,6 +528,7 @@ export default function CallsScreen() {
 
   const renderCall = ({ item }: { item: CallHistoryItem }) => {
     const isMissed = item.status === 'missed';
+    const resolvedName = resolveCallerName(item.otherParty.userId, item.otherParty.displayName);
     const statusLabel = item.status === 'completed' && item.duration
       ? formatDuration(item.duration)
       : item.status === 'missed' ? 'Missed'
@@ -488,13 +543,13 @@ export default function CallsScreen() {
         activeOpacity={0.7}
       >
         <Avatar 
-          initials={getInitials(item.otherParty.displayName)} 
+          initials={getInitials(resolvedName)} 
           color={COLORS.blue} 
           size={48} 
           imageUrl={item.otherParty.photoUrl}
         />
         <View style={styles.callMeta}>
-          <AppText style={styles.callName}>{item.otherParty.displayName}</AppText>
+          <AppText style={styles.callName}>{resolvedName}</AppText>
           <View style={styles.callSubRow}>
             <CallDirectionIcon direction={item.direction} status={item.status} />
             <AppText 
@@ -527,7 +582,7 @@ export default function CallsScreen() {
       // Navigate to chat screen
       navigation.navigate('Chat', {
         chatId,
-        displayName: selectedCall.otherParty.displayName,
+        displayName: selectedCallName || selectedCall.otherParty.displayName,
         isGroup: false,
         otherUserId: selectedCall.otherParty.userId,
         otherUserPhoto: selectedCall.otherParty.photoUrl,
@@ -544,6 +599,8 @@ export default function CallsScreen() {
 
       <CallInfoSheet
         call={selectedCall}
+        resolvedName={selectedCallName}
+        resolvedPhone={selectedCallPhone}
         visible={infoOpen}
         onClose={() => setInfoOpen(false)}
         onAudioCall={handleInfoAudioCall}

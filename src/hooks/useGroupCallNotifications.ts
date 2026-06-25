@@ -9,6 +9,7 @@ import {
   onSnapshot,
   doc,
   updateDoc,
+  getDoc,
   Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -45,15 +46,14 @@ export function useGroupCallNotifications(userId: string | null) {
 
     const unsubscribe: Unsubscribe = onSnapshot(
       q,
-      (snapshot) => {
-        const newNotifications: GroupCallNotification[] = [];
+      async (snapshot) => {
         const now = Date.now();
+        const candidates: GroupCallNotification[] = [];
 
-        snapshot.forEach((docSnap) => {
+        for (const docSnap of snapshot.docs) {
           const data = docSnap.data();
 
-          // Ignore stale invites (call already ended/abandoned). Auto-dismiss
-          // them so they stop re-triggering as ghost calls on every login.
+          // 1. Ignore stale invites — auto-dismiss them.
           const createdAtMs =
             data.createdAt && typeof data.createdAt.toMillis === 'function'
               ? data.createdAt.toMillis()
@@ -67,10 +67,29 @@ export function useGroupCallNotifications(userId: string | null) {
             ).catch((err) =>
               console.warn('[useGroupCallNotifications] Failed to dismiss stale notification:', err)
             );
-            return; // skip — don't surface as an incoming call
+            continue;
           }
 
-          newNotifications.push({
+          // 2. Ignore calls from blocked users — auto-dismiss silently.
+          const initiatorId: string = data.initiatorId;
+          if (initiatorId) {
+            try {
+              const blockedRef = doc(db, 'users', userId, 'blockedUsers', initiatorId);
+              const blockedSnap = await getDoc(blockedRef);
+              if (blockedSnap.exists()) {
+                console.log('[useGroupCallNotifications] Ignoring call from blocked user:', initiatorId);
+                updateDoc(
+                  doc(db, 'users', userId, 'groupCallNotifications', docSnap.id),
+                  { status: 'dismissed' }
+                ).catch(() => {});
+                continue;
+              }
+            } catch {
+              // Non-fatal — if we can't check, allow the call through
+            }
+          }
+
+          candidates.push({
             callId: data.callId,
             chatId: data.chatId,
             roomName: data.roomName,
@@ -80,10 +99,10 @@ export function useGroupCallNotifications(userId: string | null) {
             status: data.status,
             createdAt: data.createdAt,
           });
-        });
+        }
 
-        console.log('[useGroupCallNotifications] Received notifications:', newNotifications.length);
-        setNotifications(newNotifications);
+        console.log('[useGroupCallNotifications] Received notifications:', candidates.length);
+        setNotifications(candidates);
       },
       (error) => {
         console.error('[useGroupCallNotifications] Error listening for notifications:', error);

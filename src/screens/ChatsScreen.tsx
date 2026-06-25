@@ -14,6 +14,7 @@ import { BottomNav } from '../components';
 import { useAuth } from '../hooks/useAuth';
 import { useChats, ChatPreview } from '../hooks/useChats';
 import { useContacts, AppContact } from '../hooks/useContacts';
+import { fetchUserPrivacySettings, isVisibleTo } from '../hooks/usePrivacySettings';
 import { useStatus } from '../hooks/useStatus';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
@@ -191,16 +192,60 @@ function NewGroupSheet({
   currentUserId: string;
   onNavigateToGroup: (chatId: string, groupName: string) => void;
 }) {
-  const [selected,  setSelected]  = useState<string[]>([]);
-  const [groupName, setGroupName] = useState('');
-  const [nameError, setNameError] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [selected,    setSelected]    = useState<string[]>([]);
+  const [groupName,   setGroupName]   = useState('');
+  const [nameError,   setNameError]   = useState('');
+  const [creating,    setCreating]    = useState(false);
+  // Map of userId → privacyGroups setting, fetched once when the sheet opens
+  const [privacyMap,  setPrivacyMap]  = useState<Map<string, string>>(new Map());
+  const [privacyLoading, setPrivacyLoading] = useState(true);
   const { bevel } = useGlass();
   const { FG } = useForeground();
   const { textColor } = useTypography();
 
-  const toggle = (userId: string) =>
-    setSelected((prev) => prev.includes(userId) ? prev.filter((x) => x !== userId) : [...prev, userId]);
+  // Fetch each contact's privacyGroups setting once on mount
+  useEffect(() => {
+    if (!contacts.length) { setPrivacyLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      const map = new Map<string, string>();
+      await Promise.all(
+        contacts.map(async (c) => {
+          try {
+            const snap = await (await import('firebase/firestore')).getDoc(
+              (await import('firebase/firestore')).doc(db, 'users', c.userId)
+            );
+            if (snap.exists()) {
+              map.set(c.userId, snap.data().privacyGroups ?? 'Everyone');
+            } else {
+              map.set(c.userId, 'Everyone');
+            }
+          } catch {
+            map.set(c.userId, 'Everyone');
+          }
+        })
+      );
+      if (!cancelled) { setPrivacyMap(map); setPrivacyLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [contacts]);
+
+  /** Returns true if the current user is allowed to add this contact to a group. */
+  const canAdd = (userId: string): boolean => {
+    const setting = privacyMap.get(userId) ?? 'Everyone';
+    // 'Everyone' → anyone can add
+    // 'Contacts' → only contacts can add — since all people in this list are
+    //              the creator's device contacts, we treat this as allowed.
+    // 'Nobody'   → nobody can add
+    return setting !== 'Nobody';
+  };
+
+  const toggle = (userId: string) => {
+    if (!canAdd(userId)) return; // silently ignore taps on blocked contacts
+    setSelected((prev) =>
+      prev.includes(userId) ? prev.filter((x) => x !== userId) : [...prev, userId]
+    );
+  };
 
   const handleCreate = async () => {
     if (!groupName.trim()) { setNameError('Please enter a group name.'); return; }
@@ -209,10 +254,17 @@ function NewGroupSheet({
     setCreating(true);
     try {
       const { createGroupChat } = await import('../hooks/useChatActions');
-      const chatId = await createGroupChat(currentUserId, selected, groupName.trim());
+      const { chatId, blockedByPrivacy } = await createGroupChat(currentUserId, selected, groupName.trim());
       console.log('[NewGroupSheet] Group created:', chatId);
-      onDone(); // Close modal
-      onNavigateToGroup(chatId, groupName.trim()); // Navigate to group chat
+      if (blockedByPrivacy.length > 0) {
+        const { Alert } = await import('react-native');
+        Alert.alert(
+          'Some members not added',
+          `${blockedByPrivacy.length} contact(s) have set their privacy to not allow being added to groups and were excluded.`,
+        );
+      }
+      onDone();
+      onNavigateToGroup(chatId, groupName.trim());
     } catch (err) {
       console.error('[NewGroupSheet] Failed to create group:', err);
       setNameError('Failed to create group. Please try again.');
@@ -288,10 +340,15 @@ function NewGroupSheet({
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
         {contacts.map((c) => {
           const sel = selected.includes(c.userId);
+          const addable = canAdd(c.userId);
           return (
             <TouchableOpacity key={c.userId}
-              style={[styles.contactRow, bevel, sel && styles.contactRowSelected]}
-              activeOpacity={0.75}
+              style={[
+                styles.contactRow, bevel,
+                sel && styles.contactRowSelected,
+                !addable && styles.contactRowDisabled,
+              ]}
+              activeOpacity={addable ? 0.75 : 1}
               onPress={() => toggle(c.userId)}>
               <ChatAvatar 
                 displayName={c.displayName}
@@ -300,14 +357,20 @@ function NewGroupSheet({
                 isSavedContact={c.isSaved}
               />
               <View style={styles.contactMeta}>
-                <AppText style={[styles.contactName, { color: textColor }]}>{c.displayName}</AppText>
-                <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>{formatSAPhone(c.phone)}</AppText>
+                <AppText style={[styles.contactName, { color: textColor, opacity: addable ? 1 : 0.45 }]}>
+                  {c.displayName}
+                </AppText>
+                <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>
+                  {addable ? formatSAPhone(c.phone) : "Can't be added to groups"}
+                </AppText>
               </View>
-              {sel && (
+              {sel ? (
                 <View style={styles.selectedIndicator}>
                   <AppIcon name="checkmark-circle" size={22} color={COLORS.blue} fixedColor />
                 </View>
-              )}
+              ) : !addable ? (
+                <AppIcon name="lock-closed-outline" size={18} color={COLORS.sub} />
+              ) : null}
             </TouchableOpacity>
           );
         })}
@@ -561,6 +624,8 @@ export default function ChatsScreen() {
 
   // Extra member info fetched from Firestore for users not in device contacts
   const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string; photoURL?: string }>>(new Map());
+  // Cache of privacy settings: userId → profilePhoto visibility ('Everyone'|'Contacts'|'Nobody')
+  const [privacyPhotoMap, setPrivacyPhotoMap] = useState<Map<string, string>>(new Map());
 
   // Animated width: 0 → 1 (multiplied by max width in style)
   const searchAnim = useRef(new Animated.Value(0)).current;
@@ -616,6 +681,7 @@ export default function ChatsScreen() {
     (async () => {
       const { doc, getDoc } = await import('firebase/firestore');
       const newInfo = new Map(memberInfo);
+      const newPrivacy = new Map(privacyPhotoMap);
 
       for (const uid of unknownIds) {
         try {
@@ -627,18 +693,55 @@ export default function ChatsScreen() {
               phone: data.phone ?? '',
               photoURL: data.photoURL || null,
             });
+            // Cache the profilePhoto privacy setting
+            newPrivacy.set(uid, data.privacyProfilePhoto ?? 'Contacts');
           }
         } catch (_) {}
       }
 
       setMemberInfo(newInfo);
+      setPrivacyPhotoMap(newPrivacy);
     })();
   }, [chats, userId, contacts]);
+
+  // Fetch privacyProfilePhoto for device contacts (they come from useContacts, not the effect above)
+  useEffect(() => {
+    if (!contacts.length) return;
+    const alreadyCached = new Set(privacyPhotoMap.keys());
+    const needed = contacts.filter((c) => c.userId && !alreadyCached.has(c.userId));
+    if (!needed.length) return;
+
+    (async () => {
+      const updates = new Map<string, string>();
+      await Promise.all(
+        needed.map(async (c) => {
+          try {
+            const privacy = await fetchUserPrivacySettings(c.userId);
+            updates.set(c.userId, privacy.profilePhoto);
+          } catch {}
+        })
+      );
+      if (updates.size > 0) {
+        setPrivacyPhotoMap((prev) => new Map([...prev, ...updates]));
+      }
+    })();
+    // Only run when the contact list changes, not on every privacyPhotoMap update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts]);
 
   // Resolve display name for a chat
   const getDisplayName = (chat: ChatPreview): string => {
     if (!userId) return 'Unknown';
     return resolveDisplayName(chat, userId, contactsMap, firestoreUsersMap);
+  };
+
+  /** Return the photo URI for another user, hiding it if their privacy setting blocks the viewer. */
+  const getVisiblePhoto = (uid: string | null | undefined, rawPhoto: string | null | undefined): string | null => {
+    if (!uid || !rawPhoto) return null;
+    const setting = privacyPhotoMap.get(uid) ?? 'Contacts';
+    // All people in the chat list are already contacts of the viewer
+    if (!isVisibleTo(setting as any, true)) return null;
+    return rawPhoto;
   };
 
   // Filter chats by tab
@@ -703,7 +806,7 @@ export default function ChatsScreen() {
     const otherMemberId = isGroup ? null : item.members.find((id) => id !== userId);
     const otherUser = otherMemberId ? firestoreUsersMap.get(otherMemberId) : null;
     const contactPhotoUri = otherUser?.contactPhotoUri;
-    const firebasePhotoURL = otherUser?.photoURL;
+    const firebasePhotoURL = getVisiblePhoto(otherMemberId, otherUser?.photoURL);
     const isSavedContact = !!(contactPhotoUri || (otherUser && contactsMap.has(otherUser.phone)));
     
     // Check if user has active status
@@ -747,7 +850,7 @@ export default function ChatsScreen() {
           <ChatAvatar 
             displayName={displayName} 
             contactPhotoUri={contactPhotoUri}
-            firebasePhotoURL={firebasePhotoURL}
+            firebasePhotoURL={firebasePhotoURL ?? undefined}
             isSavedContact={isSavedContact}
             hasStatus={hasStatus}
           />
@@ -1241,6 +1344,9 @@ const styles = StyleSheet.create({
   contactRowSelected: {
     backgroundColor: 'rgba(30,156,240,0.12)',
     borderColor: 'rgba(30,156,240,0.30)',
+  },
+  contactRowDisabled: {
+    opacity: 0.55,
   },
   selectedIndicator: { marginLeft: 8 },
 });

@@ -102,6 +102,7 @@ export interface FireStatus {
   statusId: string;
   userId: string;
   displayName: string;
+  userPhone: string | null; // Poster's E.164 phone, for contact-name resolution
   photoURL: string | null;
   
   // Media content

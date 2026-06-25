@@ -201,18 +201,18 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.optionCard, bevel, styles.optionDisabled]}
-                activeOpacity={1}
-                disabled
+                style={[styles.optionCard, bevel]}
+                activeOpacity={0.8}
+                onPress={() => pickMedia('video')}
               >
-                <LinearGradient colors={['#888888', '#666666']} style={styles.optionIcon}>
+                <LinearGradient colors={['#f97316', '#ef4444']} style={styles.optionIcon}>
                   <AppIcon name="videocam-outline" size={28} color="#fff" fixedColor />
                 </LinearGradient>
                 <View style={styles.optionMeta}>
-                  <AppText style={styles.optionTitle}>Video (Coming Soon)</AppText>
-                  <AppText style={styles.optionSub}>Video statuses not yet available</AppText>
+                  <AppText style={styles.optionTitle}>Video</AppText>
+                  <AppText style={styles.optionSub}>Share a video (up to 30s)</AppText>
                 </View>
-                <AppIcon name="lock-closed" size={16} color={COLORS.sub} />
+                <AppIcon name="chevron-forward" size={20} color={COLORS.sub} />
               </TouchableOpacity>
 
               <TouchableOpacity

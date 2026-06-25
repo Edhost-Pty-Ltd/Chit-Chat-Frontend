@@ -6,9 +6,11 @@ import { useState, useEffect } from 'react';
 import {
   collection, query, orderBy, onSnapshot,
   addDoc, doc, updateDoc, serverTimestamp,
-  Timestamp, increment,
+  Timestamp, increment, getDocs, getDoc,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { fetchUserPrivacySettings } from './usePrivacySettings';
+import { loadLocalMessages, mergeLocalMessages } from './useLocalMessages';
 
 export interface FireMessage {
   messageId:  string;
@@ -53,6 +55,19 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState<string | null>(null);
 
+  // ── Seed from local cache immediately on mount ────────────────
+  // This means messages appear instantly (even when offline) and
+  // locally-retained messages remain visible after Firestore deletes them.
+  useEffect(() => {
+    if (!chatId) return;
+    loadLocalMessages(chatId).then((cached) => {
+      if (cached.length > 0) {
+        setMessages(cached);
+        setLoading(false);
+      }
+    });
+  }, [chatId]);
+
   // ── Real-time listener ────────────────────────────────────────
   useEffect(() => {
     if (!chatId) return;
@@ -68,7 +83,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
       q,
       (snap) => {
         const now = new Date();
-        const msgs: FireMessage[] = snap.docs
+        const firestoreMsgs: FireMessage[] = snap.docs
           .map((doc) => {
             const d = doc.data();
             return {
@@ -100,20 +115,28 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
                 : null,
               replyTo: d.replyTo ?? null,
             };
-          })
-          // Filter out expired messages (72-hour TTL)
-          .filter((msg) => {
-            // Keep messages without expiry date (legacy messages)
-            if (!msg.expiresAt) return true;
-            // Keep messages that haven't expired yet
-            return msg.expiresAt > now;
           });
-        
-        setMessages(msgs);
-        setLoading(false);
+          // No client-side expiry filter here — we keep all messages Firestore
+          // sends us (Firestore already removed expired docs server-side via the
+          // Cloud Function). New messages flow through; expired ones simply stop
+          // appearing in future snapshots.
 
-        // Mark messages as read
-        if (currentUserId) markAsRead(chatId, currentUserId);
+        // Merge into local cache (keeps locally-retained messages alive).
+        mergeLocalMessages(chatId, firestoreMsgs).catch(() => {});
+
+        // Load the merged local state (includes locally-retained messages that
+        // Firestore has already deleted) and render it.
+        loadLocalMessages(chatId).then((merged) => {
+          setMessages(merged);
+          setLoading(false);
+        });
+
+        // Mark messages as read (respects the user's readReceipts privacy setting)
+        if (currentUserId) {
+          fetchUserPrivacySettings(currentUserId).then((privacy) => {
+            markAsRead(chatId, currentUserId, privacy.readReceipts);
+          });
+        }
       },
       (err) => {
         setError(err.message);
@@ -167,12 +190,15 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // Mark all messages in this chat as read by currentUser
-async function markAsRead(chatId: string, userId: string) {
+// If readReceipts is false, only reset the unread counter — do NOT add to readBy.
+async function markAsRead(chatId: string, userId: string, readReceipts = true) {
   try {
     const chatRef = doc(db, 'chats', chatId);
     await updateDoc(chatRef, {
       [`unreadCounts.${userId}`]: 0,
     });
+
+    if (!readReceipts) return; // User opted out — skip updating readBy / deliveredTo
 
     // Also mark undelivered messages as delivered
     const messagesRef = collection(db, 'chats', chatId, 'messages');

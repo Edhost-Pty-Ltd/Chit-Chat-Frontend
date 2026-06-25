@@ -6,27 +6,28 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   collection,
   query,
-  where,
   orderBy,
   onSnapshot,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
+  where,
   Timestamp,
   arrayUnion,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
 import type { FireStatus } from '../types';
+import { Platform } from 'react-native';
 
 // ΓöÇΓöÇΓöÇ Interfaces ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export interface StatusGroup {
   userId: string;
   displayName: string;
+  userPhone: string | null;
   photoURL: string | null;
   statuses: FireStatus[];
   hasUnviewed: boolean;
@@ -64,12 +65,8 @@ export function useStatus(currentUserId: string | null) {
     }
 
     const statusesRef = collection(db, 'statuses');
-    const q = query(
-      statusesRef,
-      where('expiresAt', '>', new Date()),
-      orderBy('expiresAt', 'desc'),
-      orderBy('createdAt', 'desc')
-    );
+    // Simple query — no composite index needed. We filter expired client-side.
+    const q = query(statusesRef, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(
       q,
@@ -83,6 +80,7 @@ export function useStatus(currentUserId: string | null) {
               statusId: docSnap.id,
               userId: data.userId,
               displayName: data.displayName,
+              userPhone: data.userPhone ?? null,
               photoURL: data.photoURL || null,
               mediaUrl: data.mediaUrl || null,
               mediaType: data.mediaType,
@@ -104,9 +102,14 @@ export function useStatus(currentUserId: string | null) {
             }
           });
 
-          // Separate my statuses and contact statuses
-          const mine = allStatuses.filter((s) => s.userId === currentUserId);
-          const others = allStatuses.filter((s) => s.userId !== currentUserId);
+          // Separate my statuses and contact statuses.
+          // Guard against malformed docs (empty userId) and always exclude self.
+          const mine = allStatuses.filter(
+            (s) => s.userId && s.userId === currentUserId
+          );
+          const others = allStatuses.filter(
+            (s) => s.userId && s.userId !== currentUserId
+          );
 
           setMyStatuses(mine);
 
@@ -117,6 +120,7 @@ export function useStatus(currentUserId: string | null) {
               grouped.set(status.userId, {
                 userId: status.userId,
                 displayName: status.displayName,
+                userPhone: status.userPhone ?? null,
                 photoURL: status.photoURL,
                 statuses: [],
                 hasUnviewed: false,
@@ -165,7 +169,8 @@ export function useStatus(currentUserId: string | null) {
       mediaUri: string | null,
       caption: string | null,
       backgroundColor: string | null,
-      textColor: string | null
+      textColor: string | null,
+      userPhone: string | null = null
     ): Promise<string> => {
       if (!currentUserId) throw new Error('User not authenticated');
 
@@ -176,17 +181,23 @@ export function useStatus(currentUserId: string | null) {
         // Upload media to Firebase Storage if provided
         if (mediaUri && mediaType !== 'text') {
           const timestamp = Date.now();
-          const fileName = `status_${currentUserId}_${timestamp}`;
+          const ext = mediaUri.split('.').pop()?.split('?')[0] ?? (mediaType === 'video' ? 'mp4' : 'jpg');
+          const fileName = `status_${currentUserId}_${timestamp}.${ext}`;
           const storageRef = ref(storage, `statuses/${currentUserId}/${fileName}`);
 
-          // Fetch the media file
-          const response = await fetch(mediaUri);
-          const blob = await response.blob();
+          // Use XMLHttpRequest blob — works on React Native where fetch() blobs
+          // are not available for local file:// URIs.
+          const blob: Blob = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = () => resolve(xhr.response as Blob);
+            xhr.onerror = () => reject(new Error('Failed to read media file'));
+            xhr.responseType = 'blob';
+            xhr.open('GET', mediaUri);
+            xhr.send();
+          });
 
-          // Upload to Firebase Storage
           await uploadBytes(storageRef, blob);
           mediaUrl = await getDownloadURL(storageRef);
-
           console.log('[useStatus] Media uploaded:', mediaUrl);
         }
 
@@ -196,6 +207,7 @@ export function useStatus(currentUserId: string | null) {
         const statusData = {
           userId: currentUserId,
           displayName,
+          userPhone,
           photoURL,
           mediaUrl,
           mediaType,

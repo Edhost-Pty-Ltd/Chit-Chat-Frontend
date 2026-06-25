@@ -23,13 +23,28 @@ export default function GroupCallNotificationManager() {
   const { joinGroupCall } = useGroupCall();
   const { startCall: startActiveCall } = useActiveCall();
   const [currentNotification, setCurrentNotification] = useState<typeof notifications[0] | null>(null);
+  // Pre-fetched member count for the current incoming call — distinguishes 1-on-1 from group.
+  const [callMemberCount, setCallMemberCount] = useState(2);
 
-  // Show the most recent notification
+  // Show the most recent notification and pre-fetch its chat member count.
   useEffect(() => {
     if (notifications.length > 0) {
-      setCurrentNotification(notifications[0]);
+      const notif = notifications[0];
+      setCurrentNotification(notif);
+      // Fetch member count so we can label "1-on-1 Call" vs "Group Call" correctly.
+      getDoc(doc(db, 'chats', notif.chatId))
+        .then((snap) => {
+          if (snap.exists()) {
+            const members = (snap.data().members as string[]) || [];
+            setCallMemberCount(members.length);
+          } else {
+            setCallMemberCount(2);
+          }
+        })
+        .catch(() => setCallMemberCount(2));
     } else {
       setCurrentNotification(null);
+      setCallMemberCount(2);
     }
   }, [notifications]);
 
@@ -116,6 +131,7 @@ export default function GroupCallNotificationManager() {
   return (
     <GroupCallNotification
       notification={currentNotification}
+      memberCount={callMemberCount}
       onJoin={handleJoin}
       onDismiss={handleDismiss}
     />

@@ -5,6 +5,7 @@ import {
   StyleSheet, TextInput, KeyboardAvoidingView, Platform,
   ActivityIndicator, PanResponder, Linking, Modal, Alert,
   GestureResponderEvent, PanResponderGestureState, Image, Dimensions,
+  Animated,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -52,6 +53,9 @@ import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useLocationSharing } from '../hooks/useLocationSharing';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { usePhoneBook } from '../hooks/usePhoneBook';
+import { useOtherUserPresence, useWritePresence } from '../hooks/usePresence';
+import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
+import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
@@ -236,6 +240,31 @@ export default function ChatScreen() {
   // ── Phone book name resolver (saved contact name, else phone number) ──
   const { resolveName } = usePhoneBook();
 
+  /** Resolve a senderId to the name shown in reply previews / reply bubbles. */
+  const resolveSenderName = (senderId: string): string => {
+    if (senderId === userId) return 'You';
+    // For 1-on-1 chats the other person's name is already phone-book-resolved
+    // and available as the `displayName` route param.
+    if (!isGroup) return displayName;
+    // For group chats, look up from the already-resolved groupMembers list.
+    const member = groupMembers.find((m) => m.userId === senderId);
+    return member?.displayName ?? displayName;
+  };
+
+  // ── Presence: write current user online, watch other user's status ────────
+  useWritePresence(userId);
+  // viewerIsContact: true by default — chats only exist between contacts.
+  const { statusText: presenceText, isOnline, photoURL: livePhotoURL } = useOtherUserPresence(
+    isGroup ? null : otherUserId ?? null,
+    isGroup,
+    true, // they're in your contacts if you have a chat with them
+  );
+  // The photo to display for the other user: the live, privacy-filtered value
+  // once loaded, otherwise the value passed via navigation params.
+  const headerPhoto = isGroup
+    ? otherUserPhoto
+    : (livePhotoURL === undefined ? otherUserPhoto : livePhotoURL);
+
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
 
@@ -253,7 +282,14 @@ export default function ChatScreen() {
   // ── Search state ────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<FireMessage[]>([]);
+  // Ordered list of messageIds that match the current query (oldest → newest).
+  const [searchMatchIds, setSearchMatchIds] = useState<string[]>([]);
+  // Index within searchMatchIds of the currently "active" (navigated-to) match.
+  const [searchCurrentIndex, setSearchCurrentIndex] = useState(0);
+  // The message ID currently being highlighted after a search-result tap.
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const highlightAnim = useRef(new Animated.Value(0)).current;
+  const searchInputRef = useRef<TextInput>(null);
 
   // ── Group members state ─────────────────────────────────────────
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
@@ -370,10 +406,11 @@ export default function ChatScreen() {
             
             if (userSnap.exists()) {
               const userData = userSnap.data();
+              const photoPrivacy = userData.privacyProfilePhoto ?? 'Contacts';
               return {
                 userId: memberId,
                 displayName: resolveName(userData.phone, 'Unknown'),
-                photoURL: userData.photoURL || null,
+                photoURL: photoPrivacy === 'Nobody' ? null : (userData.photoURL || null),
                 status: userData.status || 'offline',
               } as GroupMember;
             }
@@ -571,22 +608,50 @@ export default function ChatScreen() {
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
     if (!query.trim()) {
-      setSearchResults([]);
+      setSearchMatchIds([]);
+      setSearchCurrentIndex(0);
+      setHighlightedMessageId(null);
       return;
     }
-    const results = messages.filter(msg => 
-      msg.text?.toLowerCase().includes(query.toLowerCase())
-    );
-    setSearchResults(results);
-  }, [messages]);
+    const q = query.toLowerCase();
+    // Collect matching IDs oldest→newest (messages are already sorted asc).
+    const ids = messages
+      .filter((m) => m.type === 'text' && m.text?.toLowerCase().includes(q))
+      .map((m) => m.messageId);
+    setSearchMatchIds(ids);
+    // Jump to the most recent match (last index) like WhatsApp.
+    const startIdx = ids.length > 0 ? ids.length - 1 : 0;
+    setSearchCurrentIndex(startIdx);
+    if (ids.length > 0) scrollToAndHighlight(ids[startIdx]);
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Navigate up/down through matches. direction: -1 = up (older), +1 = down (newer). */
+  const navigateMatch = useCallback((direction: -1 | 1) => {
+    setSearchCurrentIndex((prev) => {
+      const next = Math.max(0, Math.min(searchMatchIds.length - 1, prev + direction));
+      if (searchMatchIds[next]) scrollToAndHighlight(searchMatchIds[next]);
+      return next;
+    });
+  }, [searchMatchIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const scrollToAndHighlight = (messageId: string) => {
+    const index = messages.findIndex(m => m.messageId === messageId);
+    if (index !== -1 && listRef.current) {
+      listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+    }
+    setHighlightedMessageId(messageId);
+    highlightAnim.setValue(1);
+    Animated.timing(highlightAnim, {
+      toValue: 0,
+      duration: 1500,
+      useNativeDriver: true,
+    }).start(() => setHighlightedMessageId(null));
+  };
 
   // ── Scroll to message handler ───────────────────────────────────
   const scrollToMessage = useCallback((messageId: string) => {
-    const index = messages.findIndex(m => m.messageId === messageId);
-    if (index !== -1 && listRef.current) {
-      listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-    }
-  }, [messages]);
+    scrollToAndHighlight(messageId);
+  }, [messages, highlightAnim]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Upload and send voice note ──────────────────────────────────
   const handleVoiceUploadAndSend = useCallback(async (result: RecordingResult) => {
@@ -881,6 +946,15 @@ export default function ChatScreen() {
           Alert.alert('Cannot make call', 'User information not available.');
           return;
         }
+
+        // Check the other user's privacyCalls setting before starting
+        const calleePrivacy = await fetchUserPrivacySettings(otherUserId);
+        if (calleePrivacy.calls === 'Nobody') {
+          Alert.alert("Can't call", `${displayName} has turned off calls.`);
+          return;
+        }
+        // 'Contacts' — all users you have a direct chat with are contacts, so allowed.
+
         memberIds = [userId, otherUserId];
       }
 
@@ -1311,7 +1385,9 @@ export default function ChatScreen() {
       const snapshot = await getDocs(messagesRef);
 
       if (snapshot.empty) {
-        Alert.alert('Chat Empty', 'There are no messages to clear.');
+        // Firestore is already empty, but there may still be locally-retained messages.
+        await clearLocalMessages(chatId);
+        Alert.alert('Chat Cleared', 'Chat has been cleared.');
         return;
       }
 
@@ -1336,7 +1412,10 @@ export default function ChatScreen() {
 
       // Execute all batches
       await Promise.all(batches.map(batch => batch.commit()));
-      
+
+      // Wipe the local cache so the user sees an empty chat immediately.
+      await clearLocalMessages(chatId);
+
       console.log(`[ChatScreen] Successfully cleared ${totalMessages} messages`);
       Alert.alert('Success', 'Chat cleared successfully');
     } catch (error) {
@@ -1494,6 +1573,10 @@ export default function ChatScreen() {
   const renderMessage = ({ item }: { item: FireMessage }) => {
     const isOut = item.senderId === userId;
     const isSelected = selectedMessageId === item.messageId;
+    const isSearchMatch = searchQuery.trim().length > 0 &&
+      item.type === 'text' &&
+      item.text?.toLowerCase().includes(searchQuery.toLowerCase());
+    const isActiveMatch = searchMatchIds[searchCurrentIndex] === item.messageId;
     
     // Get tick status for outgoing messages
     const tickStatus = getTickStatus(item, userId, isGroup);
@@ -1586,12 +1669,12 @@ export default function ChatScreen() {
                   <View style={styles.replyBubbleBar} />
                   <View style={{ flex: 1 }}>
                     <AppText fixedColor style={styles.replyBubbleSender}>
-                      {item.replyTo.senderId === userId ? 'You' : 'Unknown'}
+                      {item.replyTo.senderId === userId ? 'You' : resolveSenderName(item.replyTo.senderId)}
                     </AppText>
                     <AppText fixedColor style={styles.replyBubbleText} numberOfLines={1}>
-                      {item.replyTo.type === 'text' && item.replyTo.text 
-                        ? item.replyTo.text 
-                        : item.replyTo.type === 'voice' 
+                      {item.replyTo.type === 'text' && item.replyTo.text
+                        ? item.replyTo.text
+                        : item.replyTo.type === 'voice'
                           ? '🎤 Voice message'
                           : item.replyTo.type === 'image'
                             ? '📷 Image'
@@ -1691,7 +1774,7 @@ export default function ChatScreen() {
                   <View style={[styles.replyBubbleBar, { backgroundColor: COLORS.blue }]} />
                   <View style={{ flex: 1 }}>
                     <AppText style={[styles.replyBubbleSender, { color: COLORS.blue }]}>
-                      {item.replyTo.senderId === userId ? 'You' : 'Unknown'}
+                      {item.replyTo.senderId === userId ? 'You' : resolveSenderName(item.replyTo.senderId)}
                     </AppText>
                     <AppText style={[styles.replyBubbleText, { color: textColor, opacity: 0.7 }]} numberOfLines={1}>
                       {item.replyTo.type === 'text' && item.replyTo.text 
@@ -1733,6 +1816,29 @@ export default function ChatScreen() {
       >
         <View style={[isSelected && styles.selectedMessage]}>
           {messageContent}
+          {/* Search match highlight — active match is orange-tinted, others blue-tinted */}
+          {isSearchMatch && (
+            <View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                styles.searchHighlightOverlay,
+                isActiveMatch && styles.searchHighlightOverlayActive,
+              ]}
+            />
+          )}
+          {/* Flash highlight after navigating from search */}
+          {item.messageId === highlightedMessageId && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                styles.searchHighlightOverlay,
+                styles.searchHighlightOverlayActive,
+                { opacity: highlightAnim },
+              ]}
+            />
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -1760,6 +1866,75 @@ export default function ChatScreen() {
           <AppBg />
 
           {/* ── Top bar ── */}
+          {searchOpen ? (
+            /* ── Inline search bar (replaces top bar while search is active) ── */
+            <View style={[styles.topBar, styles.searchBar]}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchOpen(false);
+                  setSearchQuery('');
+                  setSearchMatchIds([]);
+                  setSearchCurrentIndex(0);
+                  setHighlightedMessageId(null);
+                }}
+                style={styles.backBtn}
+              >
+                <AppIcon name="arrow-back" size={24} color={COLORS.blue} fixedColor />
+              </TouchableOpacity>
+
+              <TextInput
+                ref={searchInputRef}
+                style={[styles.searchBarInput, { color: textColor }]}
+                placeholder="Search messages…"
+                placeholderTextColor={COLORS.sub}
+                value={searchQuery}
+                onChangeText={handleSearch}
+                autoFocus
+                returnKeyType="search"
+              />
+
+              {/* Match counter */}
+              {searchQuery.trim().length > 0 && (
+                <AppText style={styles.searchMatchCount}>
+                  {searchMatchIds.length === 0
+                    ? '0 / 0'
+                    : `${searchMatchIds.length - searchCurrentIndex} / ${searchMatchIds.length}`}
+                </AppText>
+              )}
+
+              {/* Up arrow — older message */}
+              <TouchableOpacity
+                onPress={() => navigateMatch(-1)}
+                disabled={searchMatchIds.length === 0 || searchCurrentIndex === 0}
+                style={styles.searchNavBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              >
+                <AppIcon
+                  name="chevron-up"
+                  size={22}
+                  color={searchMatchIds.length === 0 || searchCurrentIndex === 0 ? COLORS.sub : COLORS.blue}
+                />
+              </TouchableOpacity>
+
+              {/* Down arrow — newer message */}
+              <TouchableOpacity
+                onPress={() => navigateMatch(1)}
+                disabled={searchMatchIds.length === 0 || searchCurrentIndex === searchMatchIds.length - 1}
+                style={styles.searchNavBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              >
+                <AppIcon
+                  name="chevron-down"
+                  size={22}
+                  color={
+                    searchMatchIds.length === 0 || searchCurrentIndex === searchMatchIds.length - 1
+                      ? COLORS.sub
+                      : COLORS.blue
+                  }
+                />
+              </TouchableOpacity>
+            </View>
+          ) : (
           <View style={styles.topBar}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
               <AppIcon name="chevron-back" size={24} color={COLORS.blue} fixedColor />
@@ -1775,12 +1950,14 @@ export default function ChatScreen() {
                 initials={getInitials(displayName)} 
                 color={COLORS.blue} 
                 size={40}
-                imageUrl={otherUserPhoto}
+                imageUrl={headerPhoto}
               />
               <View style={styles.contactInfo}>
                 <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
-                <AppText style={[styles.onlineText, { color: FG.secondary }]}>
-                  {isGroup ? 'Group chat' : 'Tap here for info'}
+                <AppText style={[styles.onlineText, { color: isOnline ? COLORS.blue : FG.secondary }]}>
+                  {isGroup
+                    ? 'Group chat'
+                    : presenceText || 'Tap here for info'}
                 </AppText>
               </View>
             </TouchableOpacity>
@@ -1797,6 +1974,7 @@ export default function ChatScreen() {
               <AppIcon name="ellipsis-vertical" size={20} color={COLORS.blue} fixedColor />
             </TouchableOpacity>
           </View>
+          )}{/* end searchOpen ternary */}
 
           {/* ── 3-dot menu dropdown ── */}
           <Modal visible={menuOpen} transparent animationType="none" onRequestClose={() => setMenuOpen(false)}>
@@ -1975,7 +2153,7 @@ export default function ChatScreen() {
               <View style={styles.replyPreviewContent}>
                 <View style={{ flex: 1 }}>
                   <AppText style={[styles.replyPreviewLabel, { color: COLORS.blue }]}>
-                    Replying to {replyingTo.senderId === userId ? 'yourself' : messages.find(m => m.senderId === replyingTo.senderId)?.senderId || 'Unknown'}
+                    Replying to {replyingTo.senderId === userId ? 'yourself' : resolveSenderName(replyingTo.senderId)}
                   </AppText>
                   <AppText style={[styles.replyPreviewText, { color: FG.secondary }]} numberOfLines={1}>
                     {replyingTo.type === 'text' && replyingTo.text 
@@ -2263,115 +2441,6 @@ export default function ChatScreen() {
         </Modal>
       )}
 
-      {/* ── Search Modal ── */}
-      <Modal
-        visible={searchOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setSearchOpen(false);
-          setSearchQuery('');
-          setSearchResults([]);
-        }}
-      >
-        <View style={styles.searchOverlay}>
-          <TouchableOpacity 
-            style={styles.searchBackdrop}
-            activeOpacity={1}
-            onPress={() => {
-              setSearchOpen(false);
-              setSearchQuery('');
-              setSearchResults([]);
-            }}
-          />
-          <View style={[styles.searchModal, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
-            {/* Search Input */}
-            <View style={[styles.searchInputContainer, { backgroundColor: 'rgba(30,156,240,0.06)', borderColor: 'rgba(30,156,240,0.18)' }]}>
-              <AppIcon name="search" size={20} color={COLORS.blue} fixedColor />
-              <TextInput
-                style={[styles.searchInput, { color: textColor }]}
-                placeholder="Search in chat..."
-                placeholderTextColor={FG.faint}
-                value={searchQuery}
-                onChangeText={handleSearch}
-                autoFocus
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => handleSearch('')}>
-                  <AppIcon name="close-circle" size={20} color={COLORS.sub} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Results List */}
-            {searchQuery.trim() && (
-              <View style={styles.searchResultsContainer}>
-                {searchResults.length === 0 ? (
-                  <View style={styles.searchEmpty}>
-                    <AppText style={[styles.searchEmptyText, { color: FG.secondary }]}>
-                      No messages found
-                    </AppText>
-                  </View>
-                ) : (
-                  <FlatList
-                    data={searchResults}
-                    keyExtractor={(item) => item.messageId}
-                    renderItem={({ item }) => {
-                      const isOut = item.senderId === userId;
-                      const messageText = item.text || '';
-                      const queryIndex = messageText.toLowerCase().indexOf(searchQuery.toLowerCase());
-                      
-                      return (
-                        <TouchableOpacity
-                          style={[styles.searchResultItem, bevel]}
-                          activeOpacity={0.7}
-                          onPress={() => {
-                            scrollToMessage(item.messageId);
-                            setSearchOpen(false);
-                            setSearchQuery('');
-                            setSearchResults([]);
-                          }}
-                        >
-                          <View style={styles.searchResultContent}>
-                            <View style={styles.searchResultHeader}>
-                              <AppText style={[styles.searchResultSender, { color: textColor, fontFamily }]}>
-                                {isOut ? 'You' : displayName}
-                              </AppText>
-                              <AppText style={[styles.searchResultTime, { color: FG.secondary }]}>
-                                {formatTime(item.timestamp)}
-                              </AppText>
-                            </View>
-                            <AppText 
-                              style={[styles.searchResultText, { color: FG.secondary }]}
-                              numberOfLines={2}
-                            >
-                              {queryIndex >= 0 ? (
-                                <>
-                                  {messageText.substring(0, queryIndex)}
-                                  <AppText style={[styles.searchResultHighlight, { color: COLORS.blue }]}>
-                                    {messageText.substring(queryIndex, queryIndex + searchQuery.length)}
-                                  </AppText>
-                                  {messageText.substring(queryIndex + searchQuery.length)}
-                                </>
-                              ) : (
-                                messageText
-                              )}
-                            </AppText>
-                          </View>
-                          <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
-                        </TouchableOpacity>
-                      );
-                    }}
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={styles.searchResultsList}
-                  />
-                )}
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
-
       {/* ── Profile Modal ── */}
       <Modal
         visible={profileModalOpen}
@@ -2405,14 +2474,14 @@ export default function ChatScreen() {
                     initials={getInitials(displayName)} 
                     color={COLORS.blue} 
                     size={80}
-                    imageUrl={otherUserPhoto}
+                    imageUrl={headerPhoto}
                   />
                 </View>
                 <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>
                   {displayName}
                 </AppText>
-                <AppText style={[styles.profileStatus, { color: FG.secondary }]}>
-                  {isGroup ? `Group · ${messages.length} messages` : 'Online'}
+                <AppText style={[styles.profileStatus, { color: isOnline ? COLORS.blue : FG.secondary }]}>
+                  {isGroup ? `Group · ${messages.length} messages` : (presenceText || 'Tap here for info')}
                 </AppText>
 
                 {/* Action buttons */}
@@ -3302,6 +3371,43 @@ const styles = StyleSheet.create({
   },
   searchResultHighlight: {
     fontWeight: '700',
+  },
+  searchHighlightOverlay: {
+    backgroundColor: 'rgba(30,156,240,0.18)',
+    borderRadius: RADIUS.md,
+    zIndex: 10,
+  },
+  searchHighlightOverlayActive: {
+    backgroundColor: 'rgba(251,191,36,0.40)', // amber for the current active match
+  },
+  // ── Inline search bar ─────────────────────────────────────────────────────
+  searchBar: {
+    gap: 6,
+    paddingRight: 6,
+  },
+  searchBarInput: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(30,156,240,0.08)',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.20)',
+    color: COLORS.text,
+  },
+  searchMatchCount: {
+    fontSize: 12,
+    color: COLORS.sub,
+    fontWeight: '600',
+    minWidth: 42,
+    textAlign: 'right',
+  },
+  searchNavBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // ── Block Contact in Profile Modal ────────────────────────────────────────

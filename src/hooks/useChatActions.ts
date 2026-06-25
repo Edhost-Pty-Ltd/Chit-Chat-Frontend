@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { uploadFile, generateFileName, getFileExtension } from '../config/storage';
+import { fetchUserPrivacySettings, isVisibleTo } from './usePrivacySettings';
 
 // ── Create or get existing 1-on-1 chat ───────────────────────────────────────
 export async function getOrCreateDirectChat(
@@ -61,8 +62,31 @@ export async function createGroupChat(
   currentUserId: string,
   memberIds: string[],   // include currentUserId
   groupName: string,
-): Promise<string> {
-  const allMembers = Array.from(new Set([currentUserId, ...memberIds]));
+): Promise<{ chatId: string; blockedByPrivacy: string[] }> {
+  const requested = Array.from(new Set([currentUserId, ...memberIds]));
+
+  // Check each non-self member's privacyGroups setting.
+  // "Contacts" is treated as allowed here since we can only add from contacts;
+  // "Nobody" means they have opted out of being added to groups entirely.
+  const blockedByPrivacy: string[] = [];
+  const allowed: string[] = [currentUserId];
+
+  await Promise.all(
+    requested
+      .filter((id) => id !== currentUserId)
+      .map(async (id) => {
+        const privacy = await fetchUserPrivacySettings(id);
+        // Simplified: 'Everyone' or 'Contacts' = allow (contacts are already
+        // verified at the call site). 'Nobody' = block.
+        if (privacy.groups === 'Nobody') {
+          blockedByPrivacy.push(id);
+        } else {
+          allowed.push(id);
+        }
+      }),
+  );
+
+  const allMembers = allowed;
 
   // Build unreadCounts map: { userId: 0 } for each member
   const unreadCounts = Object.fromEntries(
@@ -80,7 +104,7 @@ export async function createGroupChat(
     unreadCounts,
   });
 
-  return newChat.id;
+  return { chatId: newChat.id, blockedByPrivacy };
 }
 
 // ── Send a message with unread increments ─────────────────────────────────────

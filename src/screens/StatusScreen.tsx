@@ -2,10 +2,15 @@
 import React, { useState, useEffect } from 'react';
 import { View, FlatList, TouchableOpacity, StyleSheet, Platform, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { BottomNav, UserAvatar, StatusViewer, CreateStatusModal } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { useAuth } from '../hooks/useAuth';
 import { useStatus, type StatusGroup } from '../hooks/useStatus';
+import { usePhoneBook } from '../hooks/usePhoneBook';
+import { isVisibleTo } from '../hooks/usePrivacySettings';
+import type { FireStatus } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -46,6 +51,7 @@ export default function StatusScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
+  const { resolveName, contactsMap } = usePhoneBook();
 
   const {
     myStatuses,
@@ -57,10 +63,92 @@ export default function StatusScreen() {
     deleteStatus,
   } = useStatus(userId);
 
+  // ── Resolve poster names via phone book ─────────────────────────────────────
+  // Status docs store a denormalized displayName (often "Unknown" for phone-auth
+  // users). Per the app's contact-name rule we instead show the saved phone-book
+  // contact name, else the phone number. We need each poster's phone: it's on
+  // newer status docs (userPhone); for older docs we look it up from `users`.
+  const [phoneMap, setPhoneMap] = useState<Map<string, string>>(new Map());
+  // Cache of each poster's privacyProfilePhoto setting ('Everyone'|'Contacts'|'Nobody')
+  const [statusPrivacyPhotoMap, setStatusPrivacyPhotoMap] = useState<Map<string, string>>(new Map());
+  // Cache of each poster's privacyStatus setting (who can see their status updates)
+  const [statusVisibilityMap, setStatusVisibilityMap] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const missing = contactStatuses
+      .filter((g) => !g.userPhone && !phoneMap.has(g.userId))
+      .map((g) => g.userId);
+    // Also fetch privacy for any posters we don't have yet
+    const missingPrivacy = contactStatuses
+      .filter((g) => !statusPrivacyPhotoMap.has(g.userId) || !statusVisibilityMap.has(g.userId))
+      .map((g) => g.userId);
+    const allMissing = Array.from(new Set([...missing, ...missingPrivacy]));
+    if (allMissing.length === 0) return;
+
+    (async () => {
+      const phoneUpdates      = new Map<string, string>();
+      const privacyUpdates    = new Map<string, string>();
+      const visibilityUpdates = new Map<string, string>();
+      await Promise.all(
+        allMissing.map(async (uid) => {
+          try {
+            const snap = await getDoc(doc(db, 'users', uid));
+            if (snap.exists()) {
+              const data = snap.data();
+              const phone = data.phone ?? '';
+              if (phone && !phoneMap.has(uid)) phoneUpdates.set(uid, phone);
+              privacyUpdates.set(uid, data.privacyProfilePhoto ?? 'Contacts');
+              visibilityUpdates.set(uid, data.privacyStatus ?? 'Everyone');
+            }
+          } catch { /* ignore */ }
+        })
+      );
+      if (!cancelled) {
+        if (phoneUpdates.size > 0) setPhoneMap((prev) => new Map([...prev, ...phoneUpdates]));
+        if (privacyUpdates.size > 0) setStatusPrivacyPhotoMap((prev) => new Map([...prev, ...privacyUpdates]));
+        if (visibilityUpdates.size > 0) setStatusVisibilityMap((prev) => new Map([...prev, ...visibilityUpdates]));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [contactStatuses]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Only show statuses from posters who are:
+  //   1. Saved in the viewer's phone book (WhatsApp-style — you only see updates from contacts)
+  //   2. Whose privacyStatus setting allows this viewer to see their updates
+  // Posters whose phone hasn't loaded yet are withheld until we can verify (not optimistic).
+  const visibleContactStatuses = contactStatuses.filter((g) => {
+    // Must be a saved device contact.
+    const phone = g.userPhone || phoneMap.get(g.userId) || null;
+    if (!phone || !contactsMap.has(phone)) return false;
+
+    // Must allow the viewer per their privacy setting.
+    const setting = statusVisibilityMap.get(g.userId) ?? 'Everyone';
+    return isVisibleTo(setting as any, true);
+  });
+
+  // Resolve the name to show for a poster: saved contact name → phone number.
+  const nameForUser = (uid: string, userPhone: string | null): string => {
+    const phone = userPhone || phoneMap.get(uid) || null;
+    return resolveName(phone, phone ?? 'Unknown');
+  };
+
+  /** Return the poster's photoURL only if their privacyProfilePhoto allows it. */
+  const visiblePhotoForUser = (uid: string, rawPhoto: string | null | undefined): string | null => {
+    if (!rawPhoto) return null;
+    const setting = statusPrivacyPhotoMap.get(uid) ?? 'Contacts';
+    // All status viewers are contacts of the poster (they share statuses with contacts)
+    if (!isVisibleTo(setting as any, true)) return null;
+    return rawPhoto;
+  };
+
   const [createModalVisible, setCreateModalVisible] = useState(false);
-  const [viewerVisible, setViewerVisible] = useState(false);
-  const [viewingStatuses, setViewingStatuses] = useState<StatusGroup | null>(null);
-  const [viewingMyStatus, setViewingMyStatus] = useState(false);
+  const [viewerVisible, setViewerVisible]           = useState(false);
+  // Store the statuses to show in the viewer at open-time so they don't
+  // change mid-view when viewingMyStatus/viewingStatuses state is cleared.
+  const [viewerStatuses, setViewerStatuses]         = useState<FireStatus[]>([]);
+  const [viewerIsOwner, setViewerIsOwner]           = useState(false);
 
   // ── Handle create status ────────────────────────────────────────────────────
   const handleCreateStatus = async (
@@ -71,39 +159,53 @@ export default function StatusScreen() {
     textColor: string | null
   ) => {
     if (!userId) return;
-    await createStatus(displayName, photoURL, mediaType, mediaUri, caption, backgroundColor, textColor);
+    await createStatus(
+      displayName, photoURL, mediaType, mediaUri, caption, backgroundColor, textColor,
+      user?.phoneNumber ?? null,
+    );
   };
 
   // ── Handle view status ──────────────────────────────────────────────────────
   const handleViewMyStatus = () => {
     if (myStatuses.length === 0) return;
-    setViewingMyStatus(true);
+    setViewerStatuses(myStatuses);
+    setViewerIsOwner(true);
     setViewerVisible(true);
   };
 
   const handleViewContactStatus = (group: StatusGroup) => {
-    setViewingStatuses(group);
-    setViewingMyStatus(false);
+    // Inject the phone-book-resolved name and privacy-filtered photo so the
+    // viewer header shows the right name and hides photos that aren't allowed.
+    const resolved = nameForUser(group.userId, group.userPhone);
+    const visiblePhoto = visiblePhotoForUser(group.userId, group.photoURL);
+    setViewerStatuses(group.statuses.map((s) => ({
+      ...s,
+      displayName: resolved,
+      photoURL: visiblePhoto,
+    })));
+    setViewerIsOwner(false);
     setViewerVisible(true);
   };
 
   const handleCloseViewer = () => {
     setViewerVisible(false);
-    setViewingStatuses(null);
-    setViewingMyStatus(false);
   };
 
   const handleDeleteStatus = async (statusId: string) => {
     const status = myStatuses.find((s) => s.statusId === statusId);
     if (status) {
       await deleteStatus(statusId, status.mediaUrl);
+      // Remove from the viewer's local copy so it updates immediately
+      setViewerStatuses((prev) => prev.filter((s) => s.statusId !== statusId));
     }
   };
 
   // ── Render status row ───────────────────────────────────────────────────────
   const renderStatus = ({ item }: { item: StatusGroup }) => {
-    const color = stringToColor(item.displayName);
-    const initials = getInitials(item.displayName);
+    const name = nameForUser(item.userId, item.userPhone);
+    const visiblePhoto = visiblePhotoForUser(item.userId, item.photoURL);
+    const color = stringToColor(name);
+    const initials = getInitials(name);
 
     return (
       <TouchableOpacity
@@ -119,8 +221,8 @@ export default function StatusScreen() {
           end={{ x: 1, y: 1 }}
         >
           <View style={styles.ringInner}>
-            {item.photoURL ? (
-              <Image source={{ uri: item.photoURL }} style={styles.avatarImage} />
+            {visiblePhoto ? (
+              <Image source={{ uri: visiblePhoto }} style={styles.avatarImage} />
             ) : (
               <View style={[styles.avatarCircle, { backgroundColor: color }]}>
                 <AppText style={styles.avatarText}>{initials}</AppText>
@@ -131,7 +233,7 @@ export default function StatusScreen() {
 
         <View style={styles.statusMeta}>
           <AppText style={[styles.statusName, { color: textColor, fontFamily }]}>
-            {item.displayName}
+            {name}
           </AppText>
           <AppText style={[styles.statusTime, { color: FG.secondary }]}>
             {formatTimeAgo(item.latestTimestamp)}
@@ -205,7 +307,7 @@ export default function StatusScreen() {
           <AppIcon name="alert-circle-outline" size={52} color={COLORS.sub} />
           <AppText style={[styles.emptyText, { color: FG.secondary }]}>{error}</AppText>
         </View>
-      ) : contactStatuses.length === 0 ? (
+      ) : visibleContactStatuses.length === 0 ? (
         <>
           <AppText style={[styles.sectionText, { color: FG.secondary }]}>RECENT UPDATES</AppText>
           <View style={styles.centerContainer}>
@@ -221,11 +323,11 @@ export default function StatusScreen() {
       ) : (
         <>
           <AppText style={[styles.sectionText, { color: FG.secondary }]}>
-            RECENT UPDATES ({contactStatuses.length})
+            RECENT UPDATES ({visibleContactStatuses.length})
           </AppText>
 
           <FlatList
-            data={contactStatuses}
+            data={visibleContactStatuses}
             keyExtractor={(item) => item.userId}
             renderItem={renderStatus}
             showsVerticalScrollIndicator={false}
@@ -245,15 +347,15 @@ export default function StatusScreen() {
       />
 
       {/* Status Viewer */}
-      {viewerVisible && (viewingMyStatus ? myStatuses.length > 0 : viewingStatuses) && (
+      {viewerVisible && viewerStatuses.length > 0 && (
         <StatusViewer
           visible={viewerVisible}
           onClose={handleCloseViewer}
-          statuses={viewingMyStatus ? myStatuses : viewingStatuses?.statuses || []}
+          statuses={viewerStatuses}
           initialIndex={0}
           currentUserId={userId || ''}
           onStatusViewed={markAsViewed}
-          onDeleteStatus={viewingMyStatus ? handleDeleteStatus : undefined}
+          onDeleteStatus={viewerIsOwner ? handleDeleteStatus : undefined}
         />
       )}
     </View>

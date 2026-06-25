@@ -2,7 +2,7 @@
 // Full-screen WhatsApp-style story viewer with progress bars, tap navigation,
 // swipe gestures, and auto-advance timer.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEventListener } from 'expo';
 import type { FireStatus } from '../types';
 import { COLORS, SHADOW } from '../types/theme';
 
@@ -65,56 +67,100 @@ export function StatusViewer({
   const [loading, setLoading] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentStatus = statuses[currentIndex];
   const isOwner = currentStatus?.userId === currentUserId;
   const viewCount = currentStatus?.viewedBy?.length || 0;
+  const isVideo = currentStatus?.mediaType === 'video';
 
-  const DURATION = currentStatus?.mediaType === 'video' ? 15000 : 5000; // 15s for video, 5s for image/text
+  // Image/text display duration: 7 s (matches original behaviour).
+  // Videos run for their natural duration via the player events.
+  const IMAGE_DURATION = 7000;
 
-  // ΓöÇΓöÇ Auto-advance timer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Video player (always created, loaded only for video items) ──────────────
+  const player = useVideoPlayer(null, (p) => { p.loop = false; });
+
+  const goNext = useCallback(() => {
+    if (currentIndex < statuses.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+      setProgress(0);
+    } else {
+      onClose();
+    }
+  }, [currentIndex, statuses.length, onClose]);
+
+  // ── Load video when current item changes ─────────────────────────────────
   useEffect(() => {
-    if (!visible || isPaused || !currentStatus) return;
+    if (!visible || !currentStatus) return;
+    if (isVideo && currentStatus.mediaUrl) {
+      player.replace(currentStatus.mediaUrl);
+      if (!isPaused) player.play();
+    } else {
+      // Pause player when showing a non-video item
+      try { player.pause(); } catch {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStatus?.statusId, visible, isVideo]);
 
-    // Mark as viewed when opening
+  // Video: update progress bar from timeUpdate, advance on end
+  useEventListener(player, 'timeUpdate', ({ currentTime }: { currentTime: number }) => {
+    if (!isVideo) return;
+    const dur = player.duration && player.duration > 0 ? player.duration : 30;
+    setProgress(Math.min(currentTime / dur, 1));
+  });
+  useEventListener(player, 'playToEnd', () => { if (isVideo) goNext(); });
+
+  // Pause / resume video on long-press hold
+  useEffect(() => {
+    if (!isVideo) return;
+    if (isPaused) { try { player.pause(); } catch {} }
+    else { try { player.play(); } catch {} }
+  }, [isPaused, isVideo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Image / text auto-advance timer ────────────────────────────────────────
+  useEffect(() => {
+    if (!visible || isPaused || !currentStatus || isVideo) return;
+
+    // Mark as viewed
     if (!currentStatus.viewedBy.includes(currentUserId)) {
       onStatusViewed(currentStatus.statusId);
     }
 
     setProgress(0);
-    const interval = 50; // Update every 50ms
-    const increment = interval / DURATION;
+    const interval = 50;
+    const increment = interval / IMAGE_DURATION;
 
     timerRef.current = setInterval(() => {
       setProgress((prev) => {
         const next = prev + increment;
-        if (next >= 1) {
-          // Auto-advance to next status
-          if (currentIndex < statuses.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-          } else {
-            onClose();
-          }
-          return 0;
-        }
+        if (next >= 1) { goNext(); return 0; }
         return next;
       });
     }, interval);
 
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [visible, currentIndex, isPaused, currentStatus, statuses.length, currentUserId, onStatusViewed, onClose]);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [visible, currentIndex, isPaused, isVideo, currentStatus, currentUserId, onStatusViewed, goNext]);
 
-  // Reset index when opening
+  // Mark video statuses viewed immediately on open
+  useEffect(() => {
+    if (!visible || !currentStatus || !isVideo) return;
+    if (!currentStatus.viewedBy.includes(currentUserId)) {
+      onStatusViewed(currentStatus.statusId);
+    }
+  }, [visible, currentIndex, isVideo, currentStatus, currentUserId, onStatusViewed]);
+
+  // ── Reset state when modal opens ────────────────────────────────────────────
   useEffect(() => {
     if (visible) {
       setCurrentIndex(initialIndex);
       setProgress(0);
       setShowOptions(false);
+    } else {
+      // Stop video when closing
+      try { player.pause(); } catch {}
     }
-  }, [visible, initialIndex]);
+  }, [visible, initialIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ΓöÇΓöÇ Navigation handlers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   const handleTapLeft = () => {
@@ -127,12 +173,7 @@ export function StatusViewer({
   };
 
   const handleTapRight = () => {
-    if (currentIndex < statuses.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-      setProgress(0);
-    } else {
-      onClose();
-    }
+    goNext();
   };
 
   const handleLongPressStart = () => {
@@ -158,11 +199,13 @@ export function StatusViewer({
 
   if (!visible || !currentStatus) return null;
 
+  const displayName = currentStatus.displayName || 'Unknown';
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <StatusBar hidden />
       <View style={styles.container}>
-        {/* Background */}
+        {/* Layer 1: media background */}
         <View style={styles.background}>
           {currentStatus.mediaType === 'image' && currentStatus.mediaUrl ? (
             <Image
@@ -173,11 +216,12 @@ export function StatusViewer({
               onLoadEnd={() => setLoading(false)}
             />
           ) : currentStatus.mediaType === 'video' && currentStatus.mediaUrl ? (
-            <View style={styles.videoPlaceholder}>
-              <Ionicons name="play-circle" size={80} color="#ffffff" />
-              <Text style={styles.videoPlaceholderText}>Video playback coming soon</Text>
-              <Text style={styles.videoPlaceholderSubtext}>Video statuses are not yet supported</Text>
-            </View>
+            <VideoView
+              player={player}
+              style={styles.media}
+              contentFit="contain"
+              nativeControls={false}
+            />
           ) : currentStatus.mediaType === 'text' ? (
             <LinearGradient
               colors={[currentStatus.backgroundColor || '#1a7fe8', '#0a5bb8']}
@@ -187,18 +231,55 @@ export function StatusViewer({
                 {currentStatus.caption}
               </Text>
             </LinearGradient>
-          ) : null}
+          ) : (
+            <View style={styles.textBackground}>
+              <Ionicons name="image-outline" size={64} color="rgba(255,255,255,0.4)" />
+              <Text style={styles.missingText}>This status can't be displayed</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Layer 2: decorative gradients — never capture touches */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={['rgba(0,0,0,0.6)', 'transparent']}
+          style={styles.topGradient}
+        />
+        {(currentStatus.caption || isOwner) && (
+          <LinearGradient
+            pointerEvents="none"
+            colors={['transparent', 'rgba(0,0,0,0.6)']}
+            style={styles.bottomGradient}
+          />
+        )}
+
+        {/* Layer 3: full-screen tap zones (tap to skip, hold to pause) */}
+        <View style={styles.tapZones} pointerEvents="box-none">
+          <Pressable
+            style={styles.tapLeft}
+            onPress={handleTapLeft}
+            onLongPress={handleLongPressStart}
+            onPressOut={handleLongPressEnd}
+            delayLongPress={200}
+          />
+          <Pressable
+            style={styles.tapRight}
+            onPress={handleTapRight}
+            onLongPress={handleLongPressStart}
+            onPressOut={handleLongPressEnd}
+            delayLongPress={200}
+          />
         </View>
 
         {/* Loading indicator */}
         {loading && (
-          <View style={styles.loadingOverlay}>
+          <View style={styles.loadingOverlay} pointerEvents="none">
             <ActivityIndicator size="large" color="#ffffff" />
           </View>
         )}
 
-        {/* Top gradient overlay */}
-        <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.topGradient}>
+        {/* Layer 4: top controls (progress bars + header) — above tap zones */}
+        <View style={styles.topControls} pointerEvents="box-none">
           {/* Progress bars */}
           <View style={styles.progressContainer}>
             {statuses.map((_, index) => (
@@ -226,13 +307,13 @@ export function StatusViewer({
                 ) : (
                   <View style={[styles.avatarPlaceholder, { backgroundColor: COLORS.blue }]}>
                     <Text style={styles.avatarText}>
-                      {currentStatus.displayName.charAt(0).toUpperCase()}
+                      {displayName.charAt(0).toUpperCase()}
                     </Text>
                   </View>
                 )}
               </View>
               <View style={styles.userMeta}>
-                <Text style={styles.userName}>{currentStatus.displayName}</Text>
+                <Text style={styles.userName}>{displayName}</Text>
                 <Text style={styles.timestamp}>{formatTimeAgo(currentStatus.createdAt)}</Text>
               </View>
             </View>
@@ -266,11 +347,11 @@ export function StatusViewer({
               </TouchableOpacity>
             </View>
           )}
-        </LinearGradient>
+        </View>
 
-        {/* Bottom gradient overlay */}
+        {/* Layer 5: bottom info (caption + view count) — non-interactive */}
         {(currentStatus.caption || isOwner) && (
-          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.6)']} style={styles.bottomGradient}>
+          <View style={styles.bottomInfo} pointerEvents="none">
             {currentStatus.caption && currentStatus.mediaType !== 'text' && (
               <Text style={styles.caption}>{currentStatus.caption}</Text>
             )}
@@ -282,24 +363,8 @@ export function StatusViewer({
                 </Text>
               </View>
             )}
-          </LinearGradient>
+          </View>
         )}
-
-        {/* Tap zones for navigation */}
-        <View style={styles.tapZones}>
-          <Pressable
-            style={styles.tapLeft}
-            onPress={handleTapLeft}
-            onLongPress={handleLongPressStart}
-            onPressOut={handleLongPressEnd}
-          />
-          <Pressable
-            style={styles.tapRight}
-            onPress={handleTapRight}
-            onLongPress={handleLongPressStart}
-            onPressOut={handleLongPressEnd}
-          />
-        </View>
       </View>
     </Modal>
   );
@@ -341,6 +406,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
   topGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 160,
+  },
+  topControls: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -449,9 +521,22 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    height: 140,
+  },
+  bottomInfo: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     paddingHorizontal: 16,
     paddingTop: 40,
     paddingBottom: 30,
+  },
+  missingText: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 12,
+    textAlign: 'center',
   },
   caption: {
     fontSize: 15,
@@ -478,26 +563,5 @@ const styles = StyleSheet.create({
   },
   tapRight: {
     flex: 1,
-  },
-  videoPlaceholder: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000000',
-    padding: 40,
-  },
-  videoPlaceholderText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginTop: 20,
-    textAlign: 'center',
-  },
-  videoPlaceholderSubtext: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 8,
-    textAlign: 'center',
   },
 });
