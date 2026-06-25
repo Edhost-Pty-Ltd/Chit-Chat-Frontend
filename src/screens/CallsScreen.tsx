@@ -14,6 +14,7 @@ import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import type { CallHistoryItem } from '../types/call';
 import type { RootStackParamList } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
 import { useOutgoingCall } from '../hooks/useOutgoingCall';
@@ -92,10 +93,10 @@ function CallInfoSheet({
   onMessage?: () => void;
 }) {
   const { FG } = useForeground();
+  const { bevel } = useGlass();
 
   if (!call) return null;
 
-  // Determine call status text and color
   const isMissed = call.status === 'missed';
   const statusText = isMissed ? 'Missed call' : `${call.direction === 'outgoing' ? 'Outgoing' : 'Incoming'} ${call.type}`;
   const statusColor = isMissed ? COLORS.missed : FG.primary;
@@ -124,11 +125,8 @@ function CallInfoSheet({
           </View>
         </View>
 
-        {/* Call details card */}
-        <View style={[styles.detailCard, { 
-          backgroundColor: FG.glassBg, 
-          borderColor: FG.glassBorder 
-        }]}>
+        {/* Call detail card — bevel glass */}
+        <View style={[styles.detailCard, bevel]}>
           <View style={styles.detailRow}>
             <CallDirectionIcon direction={call.direction} status={call.status} />
             <AppText style={[styles.detailType, { color: statusColor }]} fixedColor={isMissed}>
@@ -140,46 +138,29 @@ function CallInfoSheet({
           </AppText>
         </View>
 
-        {/* Action buttons row */}
+        {/* Action buttons */}
         <View style={styles.actionRow}>
-          <View style={styles.actionItem}>
-            <TouchableOpacity onPress={onAudioCall} activeOpacity={0.85}>
-              <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
-                <AppIcon name="call" size={24} color="#fff" fixedColor />
-              </LinearGradient>
-            </TouchableOpacity>
-            <AppText style={styles.actionLabel}>Call</AppText>
-          </View>
-
-          <View style={styles.actionItem}>
-            <TouchableOpacity onPress={onVideoCall} activeOpacity={0.85}>
-              <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
-                <AppIcon name="videocam" size={24} color="#fff" fixedColor />
-              </LinearGradient>
-            </TouchableOpacity>
-            <AppText style={styles.actionLabel}>Video</AppText>
-          </View>
-
-          <View style={styles.actionItem}>
-            <TouchableOpacity 
-              onPress={() => {
-                onMessage?.();
-              }} 
-              activeOpacity={0.85}
-            >
-              <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
-                <AppIcon name="chatbubble" size={24} color="#fff" fixedColor />
-              </LinearGradient>
-            </TouchableOpacity>
-            <AppText style={styles.actionLabel}>Message</AppText>
-          </View>
+          {[
+            { icon: 'call'       as const, label: 'Call',    onPress: onAudioCall },
+            { icon: 'videocam'   as const, label: 'Video',   onPress: onVideoCall },
+            { icon: 'chatbubble' as const, label: 'Message', onPress: () => onMessage?.() },
+          ].map((btn) => (
+            <View key={btn.label} style={styles.actionItem}>
+              <TouchableOpacity onPress={btn.onPress} activeOpacity={0.85}>
+                <LinearGradient colors={GRADIENTS.primary} style={styles.actionBtn}>
+                  <AppIcon name={btn.icon} size={24} color="#fff" fixedColor />
+                </LinearGradient>
+              </TouchableOpacity>
+              <AppText style={styles.actionLabel}>{btn.label}</AppText>
+            </View>
+          ))}
         </View>
 
-        {/* Close button */}
-        <TouchableOpacity 
-          onPress={onClose} 
+        {/* Close — bevel glass */}
+        <TouchableOpacity
+          onPress={onClose}
           activeOpacity={0.85}
-          style={[styles.closeBtn, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}
+          style={[styles.closeBtn, bevel]}
         >
           <AppText style={styles.closeBtnText}>Close</AppText>
         </TouchableOpacity>
@@ -277,6 +258,7 @@ export default function CallsScreen() {
   const { resolveName } = usePhoneBook();
   const outgoingCall = useOutgoingCall();
   const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
 
   // Build a userId → phone map from device contacts so we can resolve names
   // for call-history entries using the phone-book rule (saved name > phone number).
@@ -617,7 +599,7 @@ export default function CallsScreen() {
         loading={contactsLoading}
       />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
         <AppText style={styles.title}>Calls</AppText>
         {/* New call button */}
         <TouchableOpacity 
@@ -703,7 +685,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 14,
+    paddingHorizontal: 20, paddingTop: 0, paddingBottom: 14,
   },
   title: { fontSize: 26, fontWeight: '800', color: COLORS.text },
   newCallBtn: {
@@ -832,7 +814,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 24,
     borderRadius: RADIUS.lg,
-    borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 12,
     ...SHADOW.card,
@@ -879,7 +860,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingVertical: 15,
     borderRadius: RADIUS.md,
-    borderWidth: 1,
     alignItems: 'center',
   },
   closeBtnText: {

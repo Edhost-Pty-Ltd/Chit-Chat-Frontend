@@ -12,6 +12,7 @@ import {
   GRADIENT_PRESETS, AppBackground,
   FONT_PRESETS, TEXT_COLOR_PRESETS, ICON_COLOR_PRESETS, TypographyPrefs,
 } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADIUS, SHADOW, GLASS, GRADIENTS } from '../types/theme';
 
 const SOLID_COLORS = [
@@ -29,6 +30,7 @@ export default function AppearanceScreen() {
   const navigation = useNavigation();
   const { background, setBackground, typography, setTypography } = useTheme();
   const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
 
   const [bgPreview, setBgPreview] = useState<AppBackground>(background);
   // typoPreview reads directly from context so it's always current
@@ -85,7 +87,7 @@ export default function AppearanceScreen() {
       <AppBg />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Platform.OS === 'web' ? 16 : insets.top + 14 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <AppIcon name="chevron-back" size={24} color={COLORS.blue} />
         </TouchableOpacity>
@@ -317,7 +319,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14,
     gap: 8, ...GLASS.header,
   },
   backBtn: { width: 36, alignItems: 'flex-start' },

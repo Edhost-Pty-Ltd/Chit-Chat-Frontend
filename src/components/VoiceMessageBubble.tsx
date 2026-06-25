@@ -1,11 +1,12 @@
 // ─── VoiceMessageBubble ──────────────────────────────────────────────────────
-// Renders a voice note message with play/pause controls, animated waveform
-// progress, and duration display. Styles match existing bubble patterns from
-// ChatScreen (gradient for incoming, glass for outgoing).
+// WhatsApp-style voice note bubble:
+//   [PlayBtn]  [▁▃▅▇●▅▃▁▃▅]  0:15
+//                                 21:28 ✓✓
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet,
+  ActivityIndicator, LayoutChangeEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,7 +33,6 @@ export interface VoiceMessageBubbleProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Simple deterministic hash from a string to generate waveform bar heights */
 function hashSeed(str: string): number {
   let hash = 5381;
   for (let i = 0; i < str.length; i++) {
@@ -41,27 +41,29 @@ function hashSeed(str: string): number {
   return Math.abs(hash);
 }
 
-/** Generate 30 deterministic bar heights (4–24px) seeded from messageId */
+/** 40 bars — taller in the middle, shorter at the edges, with natural variation */
 function generateBarHeights(messageId: string): number[] {
   const seed = hashSeed(messageId);
   const bars: number[] = [];
-  for (let i = 0; i < 30; i++) {
-    // Use a simple pseudo-random based on seed + index
-    const val = Math.abs(Math.sin(seed * (i + 1) * 0.1)) * 20 + 4;
-    bars.push(val);
+  const count = 40;
+  for (let i = 0; i < count; i++) {
+    const center = count / 2;
+    const distFromCenter = Math.abs(i - center) / center; // 0 at center, 1 at edges
+    const envelope = 1 - distFromCenter * 0.5; // 0.5–1.0 scale
+    const noise = Math.abs(Math.sin(seed * (i + 1) * 0.37 + i)) * 0.7 + 0.3;
+    const height = Math.round(envelope * noise * 22 + 3); // 3–25px range
+    bars.push(height);
   }
   return bars;
 }
 
-/** Format milliseconds to MM:SS */
 function formatMmSs(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-/** Format time to HH:MM */
 function formatTime(date: Date | null): string {
   if (!date) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -81,154 +83,172 @@ export function VoiceMessageBubble({
   timestamp,
   tickIcon,
 }: VoiceMessageBubbleProps) {
-  const isActiveMessage = playerState.activeMessageId === messageId;
-  const status = isActiveMessage ? playerState.status : 'idle';
-  const positionMs = isActiveMessage ? playerState.positionMs : 0;
+  const isActive = playerState.activeMessageId === messageId;
+  const status   = isActive ? playerState.status : 'idle';
+  const posMs    = isActive ? playerState.positionMs : 0;
 
-  // Debug logging for voice URL
-  React.useEffect(() => {
-    console.log('[VoiceMessageBubble] Rendering:', {
-      messageId,
-      voiceUrl: _voiceUrl,
-      durationMs,
-      isOutgoing,
-      isLocal: _voiceUrl.startsWith('file://'),
-      isFirebase: _voiceUrl.startsWith('https://firebasestorage'),
-    });
-  }, [messageId, _voiceUrl, durationMs, isOutgoing]);
+  const [waveWidth, setWaveWidth] = useState(0);
 
   const barHeights = React.useMemo(() => generateBarHeights(messageId), [messageId]);
+  const BAR_COUNT  = barHeights.length;
 
-  // Progress ratio for waveform fill
-  const effectiveDuration = isActiveMessage && playerState.durationMs > 0
+  const effectiveDuration = isActive && playerState.durationMs > 0
     ? playerState.durationMs
     : durationMs;
-  const progress = status === 'playing' || status === 'paused'
-    ? Math.min(positionMs / effectiveDuration, 1)
+
+  const progress   = (status === 'playing' || status === 'paused')
+    ? Math.min(posMs / effectiveDuration, 1)
     : 0;
+  const filledBars = Math.floor(progress * BAR_COUNT);
 
-  // Number of bars that should be filled
-  const filledBars = Math.floor(progress * 30);
-
-  // Duration display
   const displayTime = (status === 'playing' || status === 'paused')
-    ? formatMmSs(effectiveDuration - positionMs)
+    ? formatMmSs(effectiveDuration - posMs)
     : formatMmSs(durationMs);
 
-  // Skip handlers
-  const handleSkipBackward = () => {
-    if (!onSeek || !isActiveMessage) return;
-    const newPosition = Math.max(0, positionMs - 15000); // -15 seconds
-    onSeek(newPosition);
+  // ── Colors ───────────────────────────────────────────────────────
+  // isOutgoing = white/glass bubble  |  incoming = blue gradient bubble
+  const playBtnBg      = isOutgoing ? COLORS.blue          : '#ffffff';
+  const playIconColor  = isOutgoing ? '#ffffff'             : COLORS.blue;
+  const barFilled      = isOutgoing ? COLORS.blue           : '#ffffff';
+  const barEmpty       = isOutgoing ? 'rgba(0,0,0,0.18)'   : 'rgba(255,255,255,0.45)';
+  const durationColor  = isOutgoing ? COLORS.sub            : 'rgba(255,255,255,0.85)';
+  const dotColor       = isOutgoing ? COLORS.blue           : '#ffffff';
+  const dotBorder      = isOutgoing ? 'rgba(255,255,255,1)' : 'rgba(30,100,200,0.4)';
+
+  // ── Seek on tap ──────────────────────────────────────────────────
+  const handleWaveformPress = (e: any) => {
+    if (!onSeek || !isActive || waveWidth === 0) return;
+    const x     = e.nativeEvent.locationX;
+    const ratio = Math.max(0, Math.min(1, x / waveWidth));
+    onSeek(Math.floor(ratio * effectiveDuration));
   };
 
-  const handleSkipForward = () => {
-    if (!onSeek || !isActiveMessage) return;
-    const newPosition = Math.min(effectiveDuration, positionMs + 15000); // +15 seconds
-    onSeek(newPosition);
-  };
-
-  // ── Color tokens based on direction ─────────────────────────────────────
-  const barDefaultColor = isOutgoing
-    ? 'rgba(26,40,64,0.25)'
-    : 'rgba(255,255,255,0.40)';
-  const barFilledColor = isOutgoing
-    ? COLORS.blue
-    : '#ffffff';
-  const durationColor = isOutgoing
-    ? COLORS.sub
-    : 'rgba(255,255,255,0.80)';
-  const iconColor = isOutgoing ? COLORS.blue : '#ffffff';
-  const playBtnBg = isOutgoing
-    ? 'rgba(30,156,240,0.15)'
-    : 'rgba(255,255,255,0.25)';
-
-  // ── Error state ─────────────────────────────────────────────────────────
+  // ── Error state ──────────────────────────────────────────────────
   if (status === 'error') {
-    const content = (
-      <View style={styles.errorContainer}>
-        <TouchableOpacity style={[styles.playBtn, { backgroundColor: playBtnBg }]} onPress={onPlay}>
-          <Ionicons name="refresh" size={16} color={iconColor} />
-        </TouchableOpacity>
-        <Text style={[styles.errorText, { color: durationColor }]}>
-          Voice note unavailable
-        </Text>
-      </View>
-    );
-
-    if (isOutgoing) {
-      return <View style={[styles.bubble, styles.bubbleOut]}>{content}</View>;
-    }
     return (
-      <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
-        {content}
-      </LinearGradient>
+      <BubbleWrapper isOutgoing={isOutgoing}>
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={[styles.playBtn, { backgroundColor: playBtnBg }]}
+            onPress={onPlay}
+          >
+            <Ionicons name="refresh" size={20} color={playIconColor} />
+          </TouchableOpacity>
+          <Text style={[styles.duration, { color: durationColor }]}>Failed</Text>
+        </View>
+      </BubbleWrapper>
     );
   }
 
-  // ── Main voice content ──────────────────────────────────────────────────
-  const voiceContent = (
-    <View style={styles.container}>
-      {/* Play / Pause / Loading button */}
-      {status === 'loading' ? (
-        <View style={[styles.playBtn, { backgroundColor: playBtnBg }]}>
-          <ActivityIndicator size="small" color={iconColor} />
-        </View>
-      ) : (
-        <TouchableOpacity
-          style={[styles.playBtn, { backgroundColor: playBtnBg }]}
-          onPress={status === 'playing' ? onPause : onPlay}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={status === 'playing' ? 'pause' : 'play'}
-            size={18}
-            color={iconColor}
-          />
-        </TouchableOpacity>
-      )}
-
-      {/* Waveform bars */}
-      <View style={styles.waveform}>
-        {barHeights.map((height, i) => (
-          <View
-            key={i}
-            style={[
-              styles.waveBar,
-              {
-                height,
-                backgroundColor: i < filledBars ? barFilledColor : barDefaultColor,
-              },
-            ]}
-          />
-        ))}
-      </View>
-
-      {/* Microphone icon */}
-      <Ionicons name="mic" size={20} color={iconColor} style={styles.micIcon} />
-
-      {/* Timestamp and tick at bottom right */}
-      {timestamp && (
-        <View style={styles.timestampRow}>
-          <Text style={[styles.timestamp, { color: durationColor }]}>
-            {formatTime(timestamp)}
-          </Text>
-          {isOutgoing && tickIcon && (
-            <Ionicons name={tickIcon.icon} size={13} color={tickIcon.color} />
-          )}
-        </View>
-      )}
-    </View>
-  );
-
-  // ── Bubble wrapper ──────────────────────────────────────────────────────
-  if (isOutgoing) {
-    return <View style={[styles.bubble, styles.bubbleOut]}>{voiceContent}</View>;
-  }
+  // ── Playhead dot left offset ─────────────────────────────────────
+  const dotLeft = waveWidth > 0 ? progress * waveWidth - 5 : -999;
 
   return (
-    <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
-      {voiceContent}
+    <BubbleWrapper isOutgoing={isOutgoing}>
+      {/* ── Main row: play btn │ waveform only ── */}
+      <View style={styles.row}>
+
+        {/* Play / Pause / Loading */}
+        {status === 'loading' ? (
+          <View style={[styles.playBtn, { backgroundColor: playBtnBg }]}>
+            <ActivityIndicator size="small" color={playIconColor} />
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.playBtn, { backgroundColor: playBtnBg }]}
+            onPress={status === 'playing' ? onPause : onPlay}
+            activeOpacity={0.75}
+          >
+            <Ionicons
+              name={status === 'playing' ? 'pause' : 'play'}
+              size={20}
+              color={playIconColor}
+              style={status !== 'playing' ? { marginLeft: 2 } : undefined}
+            />
+          </TouchableOpacity>
+        )}
+
+        {/* Waveform + playhead dot — no duration inside here */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={styles.waveformWrap}
+          onPress={handleWaveformPress}
+          onLayout={(e: LayoutChangeEvent) => setWaveWidth(e.nativeEvent.layout.width)}
+          disabled={!isActive}
+        >
+          {barHeights.map((h, i) => (
+            <View
+              key={i}
+              style={[
+                styles.bar,
+                {
+                  height: h,
+                  backgroundColor: i < filledBars ? barFilled : barEmpty,
+                },
+              ]}
+            />
+          ))}
+
+          {/* Playhead dot — absolutely positioned within waveform */}
+          {isActive && (status === 'playing' || status === 'paused') && waveWidth > 0 && (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.playhead,
+                {
+                  left: Math.min(dotLeft, waveWidth - 12),
+                  backgroundColor: dotColor,
+                  borderColor: dotBorder,
+                },
+              ]}
+            />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Bottom row: duration left │ timestamp + ticks right ── */}
+      <View style={styles.metaRow}>
+        <Text style={[styles.duration, { color: durationColor }]}>
+          {displayTime}
+        </Text>
+
+        {timestamp && (
+          <View style={styles.timeRow}>
+            <Text style={[styles.time, { color: durationColor }]}>
+              {formatTime(timestamp)}
+            </Text>
+            {isOutgoing && tickIcon && (
+              <Ionicons name={tickIcon.icon} size={13} color={tickIcon.color} />
+            )}
+          </View>
+        )}
+      </View>
+    </BubbleWrapper>
+  );
+}
+
+// ─── Bubble wrapper ───────────────────────────────────────────────────────────
+
+function BubbleWrapper({
+  isOutgoing,
+  children,
+}: {
+  isOutgoing: boolean;
+  children: React.ReactNode;
+}) {
+  if (isOutgoing) {
+    return (
+      <View style={[styles.bubble, styles.bubbleOut]}>
+        {children}
+      </View>
+    );
+  }
+  return (
+    <LinearGradient
+      colors={GRADIENTS.chatSent}
+      style={[styles.bubble, styles.bubbleIn]}
+    >
+      {children}
     </LinearGradient>
   );
 }
@@ -237,13 +257,12 @@ export function VoiceMessageBubble({
 
 const styles = StyleSheet.create({
   bubble: {
-    maxWidth: '75%',
+    minWidth: '62%',
+    maxWidth: '80%',
     borderRadius: RADIUS.lg,
     paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  bubbleIn: {
-    borderBottomLeftRadius: 4,
+    paddingTop: 10,
+    paddingBottom: 6,
     ...SHADOW.card,
   },
   bubbleOut: {
@@ -251,58 +270,76 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.50)',
     borderBottomRightRadius: 4,
-    ...SHADOW.card,
   },
-  container: {
+  bubbleIn: {
+    borderBottomLeftRadius: 4,
+  },
+
+  // ── Main row ─────────────────────────────────────────────────────
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingRight: 36,
   },
+
+  // ── Play button ──────────────────────────────────────────────────
   playBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+    ...SHADOW.button,
   },
-  waveform: {
+
+  // ── Waveform ─────────────────────────────────────────────────────
+  waveformWrap: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    height: 34,
     gap: 2,
-    height: 26,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  bar: {
     flex: 1,
+    borderRadius: 2,
+    minWidth: 2,
   },
-  waveBar: {
-    width: 3,
-    borderRadius: 1.5,
-    flex: 1,
-  },
-  micIcon: {
-    flexShrink: 0,
-    marginLeft: 4,
-  },
-  timestampRow: {
+
+  // ── Playhead dot ─────────────────────────────────────────────────
+  playhead: {
     position: 'absolute',
-    bottom: 4,
-    right: 10,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    top: '50%',
+    marginTop: -6,
+    zIndex: 10,
+  },
+
+  // ── Meta row: duration left, timestamp+ticks right ────────────────
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    paddingLeft: 50,    // aligns under the waveform (play btn 42 + gap 8)
+  },
+  duration: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
   },
-  timestamp: {
+  time: {
     fontSize: 10,
     fontWeight: '400',
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 2,
-  },
-  errorText: {
-    fontSize: 12,
-    fontWeight: '500',
   },
 });

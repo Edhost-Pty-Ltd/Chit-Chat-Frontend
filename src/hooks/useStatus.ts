@@ -1,6 +1,6 @@
-﻿// ΓöÇΓöÇΓöÇ Hook: useStatus ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Hook: useStatus ──────────────────────────────────────────────────────────
 // Manages WhatsApp-style status updates with 24-hour expiry, view tracking,
-// and real-time sync with Firestore.
+// video/image support with duration tracking, and real-time sync with Firestore.
 
 import { useState, useEffect, useCallback } from 'react';
 import {
@@ -22,7 +22,14 @@ import { db, storage } from '../config/firebase';
 import type { FireStatus } from '../types';
 import { Platform } from 'react-native';
 
-// ΓöÇΓöÇΓöÇ Interfaces ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+export const IMAGE_STATUS_DURATION_MS = 5000; // 5s for images
+export const VIDEO_STATUS_DURATION_MS = 15000; // 15s max for videos
+export const TEXT_STATUS_DURATION_MS = 5000; // 5s for text
+export const MAX_VIDEO_STATUS_MS = 30000; // 30s maximum video length
+
+// ─── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface StatusGroup {
   userId: string;
@@ -34,7 +41,7 @@ export interface StatusGroup {
   latestTimestamp: Date;
 }
 
-// ΓöÇΓöÇΓöÇ Helper Functions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Helper Functions ─────────────────────────────────────────────────────────
 
 /** Convert Firestore timestamp to Date */
 function toDate(timestamp: any): Date {
@@ -49,7 +56,7 @@ function isExpired(expiresAt: Date): boolean {
   return new Date() > expiresAt;
 }
 
-// ΓöÇΓöÇΓöÇ Hook ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useStatus(currentUserId: string | null) {
   const [myStatuses, setMyStatuses] = useState<FireStatus[]>([]);
@@ -57,7 +64,7 @@ export function useStatus(currentUserId: string | null) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ΓöÇΓöÇ Fetch all statuses ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Fetch all statuses ────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentUserId) {
       setLoading(false);
@@ -85,6 +92,7 @@ export function useStatus(currentUserId: string | null) {
               mediaUrl: data.mediaUrl || null,
               mediaType: data.mediaType,
               thumbnailUrl: data.thumbnailUrl || null,
+              durationMs: data.durationMs || IMAGE_STATUS_DURATION_MS,
               caption: data.caption || null,
               backgroundColor: data.backgroundColor || null,
               textColor: data.textColor || null,
@@ -160,7 +168,7 @@ export function useStatus(currentUserId: string | null) {
     return () => unsubscribe();
   }, [currentUserId]);
 
-  // ΓöÇΓöÇ Create status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Create status ──────────────────────────────────────────────────────────
   const createStatus = useCallback(
     async (
       displayName: string,
@@ -170,7 +178,8 @@ export function useStatus(currentUserId: string | null) {
       caption: string | null,
       backgroundColor: string | null,
       textColor: string | null,
-      userPhone: string | null = null
+      userPhone: string | null = null,
+      durationMs?: number
     ): Promise<string> => {
       if (!currentUserId) throw new Error('User not authenticated');
 
@@ -201,6 +210,22 @@ export function useStatus(currentUserId: string | null) {
           console.log('[useStatus] Media uploaded:', mediaUrl);
         }
 
+        // Determine duration based on media type
+        let finalDuration = durationMs;
+        if (!finalDuration) {
+          if (mediaType === 'image') {
+            finalDuration = IMAGE_STATUS_DURATION_MS;
+          } else if (mediaType === 'video') {
+            finalDuration = VIDEO_STATUS_DURATION_MS;
+          } else {
+            finalDuration = TEXT_STATUS_DURATION_MS;
+          }
+        }
+        // Cap video duration at 30s
+        if (mediaType === 'video') {
+          finalDuration = Math.min(finalDuration, MAX_VIDEO_STATUS_MS);
+        }
+
         const now = new Date();
         const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
 
@@ -212,6 +237,7 @@ export function useStatus(currentUserId: string | null) {
           mediaUrl,
           mediaType,
           thumbnailUrl,
+          durationMs: finalDuration,
           caption,
           backgroundColor,
           textColor,
@@ -232,7 +258,7 @@ export function useStatus(currentUserId: string | null) {
     [currentUserId]
   );
 
-  // ΓöÇΓöÇ Mark status as viewed ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Mark status as viewed ──────────────────────────────────────────────────
   const markAsViewed = useCallback(
     async (statusId: string) => {
       if (!currentUserId) return;
@@ -250,7 +276,7 @@ export function useStatus(currentUserId: string | null) {
     [currentUserId]
   );
 
-  // ΓöÇΓöÇ Delete status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Delete status ──────────────────────────────────────────────────────────
   const deleteStatus = useCallback(async (statusId: string, mediaUrl: string | null) => {
     try {
       // Delete media from Storage if exists
@@ -273,7 +299,7 @@ export function useStatus(currentUserId: string | null) {
     }
   }, []);
 
-  // ΓöÇΓöÇ Delete expired statuses (cleanup) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Delete expired statuses (cleanup) ────────────────────────────────────
   const deleteExpiredStatuses = useCallback(async () => {
     try {
       const statusesRef = collection(db, 'statuses');

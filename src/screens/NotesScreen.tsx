@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { Note, NoteAttachment, DrawStroke } from '../types';
@@ -70,9 +71,17 @@ interface DrawCanvasProps {
 function DrawCanvas({ strokes, onChange }: DrawCanvasProps) {
   const { FG } = useForeground();
   const [penColor, setPenColor] = useState('#1a7fe8');
-  const [penWidth] = useState(3);
+  const penWidth = 4;  // slightly thicker for smooth visible lines
+
+  // Use refs so PanResponder callbacks always read the current values
+  const penColorRef  = useRef(penColor);
+  const strokesRef   = useRef(strokes);
   const currentStroke = useRef<{ x: number; y: number }[]>([]);
   const [, forceUpdate] = useState(0);
+
+  // Keep refs in sync every render
+  penColorRef.current  = penColor;
+  strokesRef.current   = strokes;
 
   const panResponder = useRef(
     PanResponder.create({
@@ -85,12 +94,17 @@ function DrawCanvas({ strokes, onChange }: DrawCanvasProps) {
       },
       onPanResponderMove: (e: GestureResponderEvent) => {
         const { locationX, locationY } = e.nativeEvent;
-        currentStroke.current = [...currentStroke.current, { x: locationX, y: locationY }];
+        // Push directly to avoid re-creating the array on every pixel
+        currentStroke.current.push({ x: locationX, y: locationY });
         forceUpdate((n) => n + 1);
       },
       onPanResponderRelease: () => {
         if (currentStroke.current.length > 1) {
-          onChange([...strokes, { points: currentStroke.current, color: penColor, width: penWidth }]);
+          // Read from refs — always current, no stale closure
+          onChange([
+            ...strokesRef.current,
+            { points: [...currentStroke.current], color: penColorRef.current, width: penWidth },
+          ]);
         }
         currentStroke.current = [];
         forceUpdate((n) => n + 1);
@@ -98,22 +112,70 @@ function DrawCanvas({ strokes, onChange }: DrawCanvasProps) {
     })
   ).current;
 
-  // Render strokes as a series of tiny square dots along each path
-  const renderStroke = (stroke: DrawStroke, key: string) =>
-    stroke.points.map((pt, i) => (
-      <View
-        key={`${key}-${i}`}
-        style={{
-          position: 'absolute',
-          left:   pt.x - stroke.width / 2,
-          top:    pt.y - stroke.width / 2,
-          width:  stroke.width,
-          height: stroke.width,
-          borderRadius: stroke.width / 2,
-          backgroundColor: stroke.color,
-        }}
-      />
-    ));
+  // Render strokes as connected LINE SEGMENTS between consecutive points
+  const renderStroke = (stroke: DrawStroke, key: string) => {
+    const segs: React.ReactElement[] = [];
+    for (let i = 1; i < stroke.points.length; i++) {
+      const p1 = stroke.points[i - 1];
+      const p2 = stroke.points[i];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 0.5) continue;
+      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      const midX  = (p1.x + p2.x) / 2;
+      const midY  = (p1.y + p2.y) / 2;
+      segs.push(
+        <View
+          key={`${key}-${i}`}
+          style={{
+            position:        'absolute',
+            width:           len,
+            height:          stroke.width,
+            backgroundColor: stroke.color,
+            borderRadius:    stroke.width / 2,
+            left:  midX - len / 2,
+            top:   midY - stroke.width / 2,
+            transform: [{ rotate: `${angle}deg` }],
+          }}
+        />,
+      );
+    }
+    return segs;
+  };
+
+  // Live stroke — same line-segment approach for the in-progress stroke
+  const renderLiveStroke = () => {
+    const pts = currentStroke.current;
+    const segs: React.ReactElement[] = [];
+    for (let i = 1; i < pts.length; i++) {
+      const p1 = pts[i - 1];
+      const p2 = pts[i];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 0.5) continue;
+      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      const midX  = (p1.x + p2.x) / 2;
+      const midY  = (p1.y + p2.y) / 2;
+      segs.push(
+        <View
+          key={`live-${i}`}
+          style={{
+            position:        'absolute',
+            width:           len,
+            height:          penWidth,
+            backgroundColor: penColor,
+            borderRadius:    penWidth / 2,
+            left:  midX - len / 2,
+            top:   midY - penWidth / 2,
+            transform: [{ rotate: `${angle}deg` }],
+          }}
+        />,
+      );
+    }
+    return segs;
+  };
 
   return (
     <View>
@@ -130,31 +192,15 @@ function DrawCanvas({ strokes, onChange }: DrawCanvasProps) {
         <TouchableOpacity style={draw.clearBtn} onPress={() => onChange([])}>
           <AppIcon name="trash-outline" size={16} color={COLORS.missed} fixedColor />
         </TouchableOpacity>
-        <AppText style={[draw.hint, { color: FG.secondary }]}>Draw here</AppText>
       </View>
 
-      {/* Canvas surface */}
+      {/* Canvas — must NOT be inside a ScrollView or touches are hijacked */}
       <View
         style={[draw.canvas, { borderColor: FG.glassBorder, backgroundColor: FG.glassBg }]}
         {...panResponder.panHandlers}
       >
-        {/* Committed strokes */}
         {strokes.map((s, i) => renderStroke(s, `s${i}`))}
-        {/* Active stroke */}
-        {currentStroke.current.map((pt, i) => (
-          <View
-            key={`cur-${i}`}
-            style={{
-              position: 'absolute',
-              left:   pt.x - penWidth / 2,
-              top:    pt.y - penWidth / 2,
-              width:  penWidth,
-              height: penWidth,
-              borderRadius: penWidth / 2,
-              backgroundColor: penColor,
-            }}
-          />
-        ))}
+        {renderLiveStroke()}
         {strokes.length === 0 && currentStroke.current.length === 0 && (
           <AppText style={[draw.canvasHint, { color: FG.faint }]}>
             ✏️  Draw with your finger
@@ -211,6 +257,7 @@ export default function NotesScreen() {
   const { FG }     = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel }  = useGlass();
+  const insets     = useSafeAreaInsets();
 
   const [notes,       setNotes]       = useState<Note[]>(NOTES);
   const [query,       setQuery]       = useState('');
@@ -404,7 +451,7 @@ export default function NotesScreen() {
       <AppBg />
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
           <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
         </TouchableOpacity>
@@ -460,7 +507,7 @@ export default function NotesScreen() {
           <KeyboardAvoidingView style={styles.editorContent} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
 
             {/* Editor header */}
-            <View style={[styles.editorHeader, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+            <View style={[styles.editorHeader, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, paddingTop: insets.top + 10 }]}>
               <TouchableOpacity onPress={() => setEditorOpen(false)} style={styles.editorHBtn}>
                 <AppText style={[styles.cancelTxt, { color: COLORS.sub }]}>Cancel</AppText>
               </TouchableOpacity>
@@ -597,10 +644,10 @@ export default function NotesScreen() {
                 </View>
               </>
             ) : (
-              /* ── Draw tab ── */
-              <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+              /* ── Draw tab — plain View, NOT ScrollView, so PanResponder gets all touches ── */
+              <View style={{ flex: 1 }}>
                 <DrawCanvas strokes={draftStrokes} onChange={setDraftStrokes} />
-              </ScrollView>
+              </View>
             )}
           </KeyboardAvoidingView>
         </View>
@@ -643,7 +690,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingTop: Platform.OS === 'web' ? 16 : 52, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14,
     borderBottomWidth: 1,
   },
   iconBtn:     { padding: 2 },
@@ -679,7 +726,7 @@ const styles = StyleSheet.create({
 
   editorHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1,
+    paddingHorizontal: 16, paddingTop: 0, paddingBottom: 10, borderBottomWidth: 1,
   },
   editorHBtn:   { minWidth: 70 },
   editorHTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center' },

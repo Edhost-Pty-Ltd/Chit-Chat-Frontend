@@ -20,7 +20,7 @@ export interface FireMessage {
   voiceUrl:   string | null;
   videoUrl:   string | null;
   fileUrl:    string | null;
-  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location';
+  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system';
   timestamp:  Date | null;
   expiresAt:  Date | null;
   readBy:     string[];
@@ -30,6 +30,7 @@ export interface FireMessage {
   fileSize:   number | null;
   mimeType:   string | null;
   thumbnailUrl: string | null;
+  blockedMessage?: boolean; // Message sent while recipient was blocked
   location?: {
     latitude: number;
     longitude: number;
@@ -46,7 +47,7 @@ export interface FireMessage {
     messageId: string;
     senderId: string;
     text: string | null;
-    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location';
+    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system';
   } | null;
 }
 
@@ -108,6 +109,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
               fileSize: d.fileSize ?? null,
               mimeType: d.mimeType ?? null,
               thumbnailUrl: d.thumbnailUrl ?? null,
+              blockedMessage: d.blockedMessage ?? false,
               location: d.location ?? null,
               isLiveLocation: d.isLiveLocation ?? false,
               liveLocationExpiry: d.liveLocationExpiry

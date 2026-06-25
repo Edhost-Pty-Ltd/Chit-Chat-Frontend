@@ -14,7 +14,8 @@
         "NSMicrophoneUsageDescription": "Chit-Chat needs access to your microphone to record voice notes.",
         "NSContactsUsageDescription": "Chit-Chat needs access to your contacts to help you find friends on the app.",
         "NSLocationWhenInUseUsageDescription": "Chit-Chat needs access to your location to share it with your contacts.",
-        "NSLocationAlwaysUsageDescription": "Chit-Chat needs access to your location to share live location updates."
+        "NSLocationAlwaysUsageDescription": "Chit-Chat needs access to your location to share live location updates.",
+        "NSUserNotificationsUsageDescription": "Chit-Chat needs permission to send you notifications for new messages, calls, and status updates."
       }
     },
     "plugins": [
@@ -77,7 +78,16 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0A2463",
+          "sounds": ["./assets/notification-sound.wav"],
+          "mode": "production"
+        }
+      ]
     ],
     "android": {
       "adaptiveIcon": {

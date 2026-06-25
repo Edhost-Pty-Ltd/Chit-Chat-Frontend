@@ -1,6 +1,6 @@
-﻿// ΓöÇΓöÇΓöÇ Component: StatusViewer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Component: StatusViewer ──────────────────────────────────────────────────
 // Full-screen WhatsApp-style story viewer with progress bars, tap navigation,
-// swipe gestures, and auto-advance timer.
+// video playback support, and auto-advance timer.
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -14,6 +14,7 @@ import {
   Pressable,
   ActivityIndicator,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +25,7 @@ import { COLORS, SHADOW } from '../types/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// ΓöÇΓöÇΓöÇ Interfaces ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Interfaces ───────────────────────────────────────────────────────────────
 
 interface StatusViewerProps {
   visible: boolean;
@@ -36,7 +37,7 @@ interface StatusViewerProps {
   onDeleteStatus?: (statusId: string) => void;
 }
 
-// ΓöÇΓöÇΓöÇ Helper Functions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Helper Functions ─────────────────────────────────────────────────────────
 
 function formatTimeAgo(date: Date): string {
   const now = new Date();
@@ -50,7 +51,7 @@ function formatTimeAgo(date: Date): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-// ΓöÇΓöÇΓöÇ Component ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function StatusViewer({
   visible,
@@ -62,15 +63,16 @@ export function StatusViewer({
   onDeleteStatus,
 }: StatusViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const currentStatus = statuses[currentIndex];
   const isOwner = currentStatus?.userId === currentUserId;
+  const isExcluded = currentStatus?.excludedUsers?.includes(currentUserId) || false;
   const viewCount = currentStatus?.viewedBy?.length || 0;
   const isVideo = currentStatus?.mediaType === 'video';
 
@@ -162,7 +164,7 @@ export function StatusViewer({
     }
   }, [visible, initialIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ΓöÇΓöÇ Navigation handlers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  // ── Navigation handlers ────────────────────────────────────────────────────
   const handleTapLeft = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
@@ -207,7 +209,16 @@ export function StatusViewer({
       <View style={styles.container}>
         {/* Layer 1: media background */}
         <View style={styles.background}>
-          {currentStatus.mediaType === 'image' && currentStatus.mediaUrl ? (
+          {isExcluded ? (
+            /* Blocked message */
+            <View style={styles.blockedContainer}>
+              <Ionicons name="ban-outline" size={64} color="rgba(255,255,255,0.6)" />
+              <Text style={styles.blockedTitle}>Status Hidden</Text>
+              <Text style={styles.blockedMessage}>
+                {currentStatus.displayName} blocked you from seeing this status
+              </Text>
+            </View>
+          ) : currentStatus.mediaType === 'image' && currentStatus.mediaUrl ? (
             <Image
               source={{ uri: currentStatus.mediaUrl }}
               style={styles.media}
@@ -288,9 +299,12 @@ export function StatusViewer({
                   style={[
                     styles.progressBarFill,
                     {
-                      width: `${
-                        index < currentIndex ? 100 : index === currentIndex ? progress * 100 : 0
-                      }%`,
+                      width:
+                        index < currentIndex
+                          ? '100%'
+                          : index === currentIndex
+                          ? `${Math.round(progress * 100)}%`
+                          : '0%',
                     },
                   ]}
                 />
@@ -370,7 +384,7 @@ export function StatusViewer({
   );
 }
 
-// ΓöÇΓöÇΓöÇ Styles ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -398,6 +412,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     lineHeight: 42,
+  },
+  blockedContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  blockedTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  blockedMessage: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

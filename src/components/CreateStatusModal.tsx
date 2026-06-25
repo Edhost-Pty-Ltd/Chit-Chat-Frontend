@@ -32,7 +32,8 @@ interface CreateStatusModalProps {
     mediaUri: string | null,
     caption: string | null,
     backgroundColor: string | null,
-    textColor: string | null
+    textColor: string | null,
+    durationMs?: number
   ) => Promise<void>;
 }
 
@@ -55,10 +56,15 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
   const [mode, setMode] = useState<'select' | 'text' | 'media'>('select');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
+  const [mediaDuration, setMediaDuration] = useState<number>(5000); // Default 5s for images
   const [caption, setCaption] = useState('');
   const [textStatus, setTextStatus] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
+  
+  // Privacy settings
+  const [privacyMode, setPrivacyMode] = useState<'everyone' | 'contacts' | 'custom'>('everyone');
+  const [showPrivacyMenu, setShowPrivacyMenu] = useState(false);
 
   const { FG } = useForeground();
   const { bevel } = useGlass();
@@ -67,9 +73,12 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
   const handleClose = () => {
     setMode('select');
     setMediaUri(null);
+    setMediaDuration(5000);
     setCaption('');
     setTextStatus('');
     setSelectedColorIndex(0);
+    setPrivacyMode('everyone');
+    setShowPrivacyMenu(false);
     onClose();
   };
 
@@ -90,8 +99,15 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
       });
 
       if (!result.canceled && result.assets[0]) {
-        setMediaUri(result.assets[0].uri);
+        const asset = result.assets[0];
+        setMediaUri(asset.uri);
         setMediaType(type);
+        // Set duration: 5s for images, video duration in ms (capped at 30s)
+        if (type === 'video' && asset.duration) {
+          setMediaDuration(Math.min(asset.duration, 30000));
+        } else {
+          setMediaDuration(5000);
+        }
         setMode('media');
       }
     } catch (err) {
@@ -139,9 +155,9 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
         }
 
         const color = TEXT_BG_COLORS[selectedColorIndex];
-        await onCreate('text', null, textStatus.trim(), color.bg, color.text);
+        await onCreate('text', null, textStatus.trim(), color.bg, color.text, 5000);
       } else if (mode === 'media' && mediaUri) {
-        await onCreate(mediaType, mediaUri, caption.trim() || null, null, null);
+        await onCreate(mediaType, mediaUri, caption.trim() || null, null, null, mediaDuration);
       }
 
       handleClose();
@@ -205,12 +221,12 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
                 activeOpacity={0.8}
                 onPress={() => pickMedia('video')}
               >
-                <LinearGradient colors={['#f97316', '#ef4444']} style={styles.optionIcon}>
+                <LinearGradient colors={['#f97316', '#e11d48']} style={styles.optionIcon}>
                   <AppIcon name="videocam-outline" size={28} color="#fff" fixedColor />
                 </LinearGradient>
                 <View style={styles.optionMeta}>
                   <AppText style={styles.optionTitle}>Video</AppText>
-                  <AppText style={styles.optionSub}>Share a video (up to 30s)</AppText>
+                  <AppText style={styles.optionSub}>Share a video (max 30s)</AppText>
                 </View>
                 <AppIcon name="chevron-forward" size={20} color={COLORS.sub} />
               </TouchableOpacity>
@@ -293,6 +309,73 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
                 ))}
               </ScrollView>
             </View>
+
+            {/* Privacy selector */}
+            <View style={[styles.privacySection, { backgroundColor: FG.glassBg }]}>
+              <AppText style={styles.privacyLabel}>Who can see this</AppText>
+              <TouchableOpacity
+                style={[styles.privacyButton, bevel]}
+                onPress={() => setShowPrivacyMenu(!showPrivacyMenu)}
+                activeOpacity={0.8}
+              >
+                <AppIcon 
+                  name={privacyMode === 'everyone' ? 'globe-outline' : privacyMode === 'contacts' ? 'people-outline' : 'lock-closed-outline'} 
+                  size={20} 
+                  color={COLORS.blue} 
+                  fixedColor 
+                />
+                <AppText style={styles.privacyButtonText}>
+                  {privacyMode === 'everyone' ? 'Everyone' : privacyMode === 'contacts' ? 'My Contacts' : 'Custom'}
+                </AppText>
+                <AppIcon name="chevron-down" size={18} color={COLORS.sub} />
+              </TouchableOpacity>
+
+              {showPrivacyMenu && (
+                <View style={[styles.privacyMenu, bevel]}>
+                  <TouchableOpacity
+                    style={styles.privacyOption}
+                    onPress={() => { setPrivacyMode('everyone'); setShowPrivacyMenu(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <AppIcon name="globe-outline" size={22} color={COLORS.blue} fixedColor />
+                    <View style={styles.privacyOptionText}>
+                      <AppText style={styles.privacyOptionTitle}>Everyone</AppText>
+                      <AppText style={styles.privacyOptionSub}>All users can see</AppText>
+                    </View>
+                    {privacyMode === 'everyone' && <AppIcon name="checkmark" size={20} color={COLORS.blue} fixedColor />}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.privacyOption}
+                    onPress={() => { setPrivacyMode('contacts'); setShowPrivacyMenu(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <AppIcon name="people-outline" size={22} color={COLORS.blue} fixedColor />
+                    <View style={styles.privacyOptionText}>
+                      <AppText style={styles.privacyOptionTitle}>My Contacts</AppText>
+                      <AppText style={styles.privacyOptionSub}>Only your contacts</AppText>
+                    </View>
+                    {privacyMode === 'contacts' && <AppIcon name="checkmark" size={20} color={COLORS.blue} fixedColor />}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.privacyOption}
+                    onPress={() => { 
+                      Alert.alert('Coming Soon', 'Custom privacy settings will be available soon');
+                      setShowPrivacyMenu(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <AppIcon name="lock-closed-outline" size={22} color={COLORS.blue} fixedColor />
+                    <View style={styles.privacyOptionText}>
+                      <AppText style={styles.privacyOptionTitle}>Custom</AppText>
+                      <AppText style={styles.privacyOptionSub}>Select specific contacts</AppText>
+                    </View>
+                    {privacyMode === 'custom' && <AppIcon name="checkmark" size={20} color={COLORS.blue} fixedColor />}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </>
         )}
 
@@ -327,6 +410,73 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
                 multiline
                 maxLength={200}
               />
+            </View>
+
+            {/* Privacy selector */}
+            <View style={[styles.privacySection, { backgroundColor: FG.glassBg }]}>
+              <AppText style={styles.privacyLabel}>Who can see this</AppText>
+              <TouchableOpacity
+                style={[styles.privacyButton, bevel]}
+                onPress={() => setShowPrivacyMenu(!showPrivacyMenu)}
+                activeOpacity={0.8}
+              >
+                <AppIcon 
+                  name={privacyMode === 'everyone' ? 'globe-outline' : privacyMode === 'contacts' ? 'people-outline' : 'lock-closed-outline'} 
+                  size={20} 
+                  color={COLORS.blue} 
+                  fixedColor 
+                />
+                <AppText style={styles.privacyButtonText}>
+                  {privacyMode === 'everyone' ? 'Everyone' : privacyMode === 'contacts' ? 'My Contacts' : 'Custom'}
+                </AppText>
+                <AppIcon name="chevron-down" size={18} color={COLORS.sub} />
+              </TouchableOpacity>
+
+              {showPrivacyMenu && (
+                <View style={[styles.privacyMenu, bevel]}>
+                  <TouchableOpacity
+                    style={styles.privacyOption}
+                    onPress={() => { setPrivacyMode('everyone'); setShowPrivacyMenu(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <AppIcon name="globe-outline" size={22} color={COLORS.blue} fixedColor />
+                    <View style={styles.privacyOptionText}>
+                      <AppText style={styles.privacyOptionTitle}>Everyone</AppText>
+                      <AppText style={styles.privacyOptionSub}>All users can see</AppText>
+                    </View>
+                    {privacyMode === 'everyone' && <AppIcon name="checkmark" size={20} color={COLORS.blue} fixedColor />}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.privacyOption}
+                    onPress={() => { setPrivacyMode('contacts'); setShowPrivacyMenu(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <AppIcon name="people-outline" size={22} color={COLORS.blue} fixedColor />
+                    <View style={styles.privacyOptionText}>
+                      <AppText style={styles.privacyOptionTitle}>My Contacts</AppText>
+                      <AppText style={styles.privacyOptionSub}>Only your contacts</AppText>
+                    </View>
+                    {privacyMode === 'contacts' && <AppIcon name="checkmark" size={20} color={COLORS.blue} fixedColor />}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.privacyOption}
+                    onPress={() => { 
+                      Alert.alert('Coming Soon', 'Custom privacy settings will be available soon');
+                      setShowPrivacyMenu(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <AppIcon name="lock-closed-outline" size={22} color={COLORS.blue} fixedColor />
+                    <View style={styles.privacyOptionText}>
+                      <AppText style={styles.privacyOptionTitle}>Custom</AppText>
+                      <AppText style={styles.privacyOptionSub}>Select specific contacts</AppText>
+                    </View>
+                    {privacyMode === 'custom' && <AppIcon name="checkmark" size={20} color={COLORS.blue} fixedColor />}
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </>
         )}
@@ -453,5 +603,51 @@ const styles = StyleSheet.create({
   captionField: {
     fontSize: 15,
     lineHeight: 20,
+  },
+  privacySection: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  privacyLabel: {
+    fontSize: 13,
+    color: COLORS.sub,
+    marginBottom: 10,
+    fontWeight: '600',
+  },
+  privacyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: RADIUS.lg,
+  },
+  privacyButtonText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  privacyMenu: {
+    marginTop: 12,
+    borderRadius: RADIUS.lg,
+    padding: 8,
+  },
+  privacyOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: RADIUS.md,
+  },
+  privacyOptionText: {
+    flex: 1,
+  },
+  privacyOptionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  privacyOptionSub: {
+    fontSize: 12,
+    color: COLORS.sub,
   },
 });

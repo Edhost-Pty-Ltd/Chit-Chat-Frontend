@@ -7,6 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import {
@@ -51,6 +52,7 @@ export default function AccountSettingsScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { phone, displayName, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [twoFA,            setTwoFA]            = useState(true);
   const [bioLoading,       setBioLoading]       = useState(false);
@@ -100,7 +102,7 @@ export default function AccountSettingsScreen() {
   return (
     <View style={styles.root}>
       <AppBg />
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
           <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
         </TouchableOpacity>
@@ -152,7 +154,7 @@ export default function AccountSettingsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingTop: Platform.OS === 'web' ? 16 : 52, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14, borderBottomWidth: 1 },
   back:   { width: 36 },
   title:  { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700' },
   scroll: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 40, gap: 8 },

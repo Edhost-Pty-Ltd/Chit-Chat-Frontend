@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, ScrollView, SectionList,
-  Modal, TextInput, Alert, Platform, PanResponder,
+  Modal, TextInput, Alert, Platform, PanResponder, KeyboardAvoidingView,
 } from 'react-native';
 // expo-calendar requires a native build � lazy load so Expo Go doesn't crash
 let Calendar: any = null;
@@ -188,7 +188,10 @@ function EventForm({ visible, initial, dateStr, calendars, onSave, onDelete, onC
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={form.overlay}>
+      <KeyboardAvoidingView
+        style={form.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <View style={form.sheet}>
           <AppBg />
           <View style={form.scrim} />
@@ -285,7 +288,7 @@ function EventForm({ visible, initial, dateStr, calendars, onSave, onDelete, onC
             )}
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

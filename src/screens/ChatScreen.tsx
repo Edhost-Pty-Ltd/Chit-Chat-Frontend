@@ -7,7 +7,7 @@ import {
   GestureResponderEvent, PanResponderGestureState, Image, Dimensions,
   Animated,
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -59,6 +59,9 @@ import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
+import { parseSystemMessage } from '../utils/systemMessageParser';
+import { useTypingIndicator } from '../hooks/useTypingIndicator';
+import { TypingIndicator } from '../components/TypingIndicator';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
@@ -222,8 +225,30 @@ export default function ChatScreen() {
   // ── Messages — real-time Firestore stream ───────────────────────
   const { messages, loading, sendMessage } = useMessages(chatId, userId);
 
+  // ── Filter out blocked messages for recipient ───────────────────
+  // If I receive a message that was sent while I was blocked, don't show it
+  // Exception: In group chats, show all messages regardless of block status
+  const filteredMessages = useMemo(() => {
+    // In group chats, show all messages (blocking doesn't affect group messages)
+    if (isGroup) {
+      return messages;
+    }
+    
+    // In 1-on-1 chats, filter out blocked messages for recipient
+    return messages.filter(msg => {
+      // If message has blockedMessage flag and I'm the recipient, hide it
+      if (msg.blockedMessage && msg.senderId !== userId) {
+        return false;
+      }
+      return true;
+    });
+  }, [messages, userId, isGroup]);
+
   // ── Voice player — single-active-player management ─────────────
   const player = useVoicePlayer();
+
+  // ── Typing presence ────────────────────────────────────────────
+  const { typingUsers, setTyping } = useTypingIndicator(chatId, userId);
 
   // ── Voice recorder ─────────────────────────────────────────────
   const recorder = useVoiceRecorder();
@@ -295,12 +320,23 @@ export default function ChatScreen() {
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
+  // Resolve typing user display names (depends on groupMembers)
+  const typingNames = useMemo(() => {
+    return typingUsers.map(({ userId: uid }) => {
+      if (!isGroup) return displayName;
+      const member = groupMembers.find((m) => m.userId === uid);
+      return member?.displayName ?? 'Someone';
+    });
+  }, [typingUsers, isGroup, displayName, groupMembers]);
+
   // ── Past members state ──────────────────────────────────────────
   const [pastMembers, setPastMembers] = useState<PastMember[]>([]);
   const [loadingPastMembers, setLoadingPastMembers] = useState(false);
 
   // ── Block contact state ─────────────────────────────────────────
   const [isBlocked, setIsBlocked] = useState(false);
+  const [blockedByMe, setBlockedByMe] = useState(false); // I blocked them
+  const [blockedByThem, setBlockedByThem] = useState(false); // They blocked me
   const [checkingBlockedStatus, setCheckingBlockedStatus] = useState(true);
   const [showBlockConfirmation, setShowBlockConfirmation] = useState(false);
 
@@ -547,19 +583,26 @@ export default function ChatScreen() {
         console.log('[ChatScreen] Checking if contact is blocked:', otherUserId);
         
         // Check if the current user has blocked the other user
-        const blockedRef = doc(db, 'users', userId, 'blockedUsers', otherUserId);
-        const blockedSnap = await getDoc(blockedRef);
+        const blockedByMeRef = doc(db, 'users', userId, 'blockedUsers', otherUserId);
+        const blockedByMeSnap = await getDoc(blockedByMeRef);
         
-        if (blockedSnap.exists()) {
-          console.log('[ChatScreen] Contact is blocked');
-          setIsBlocked(true);
-        } else {
-          console.log('[ChatScreen] Contact is not blocked');
-          setIsBlocked(false);
-        }
+        // Check if the other user has blocked the current user
+        const blockedMeRef = doc(db, 'users', otherUserId, 'blockedUsers', userId);
+        const blockedMeSnap = await getDoc(blockedMeRef);
+        
+        const iBlockedThem = blockedByMeSnap.exists();
+        const theyBlockedMe = blockedMeSnap.exists();
+        
+        setBlockedByMe(iBlockedThem);
+        setBlockedByThem(theyBlockedMe);
+        setIsBlocked(iBlockedThem || theyBlockedMe);
+        
+        console.log('[ChatScreen] Blocked status - by me:', iBlockedThem, ', by them:', theyBlockedMe);
       } catch (error) {
         console.error('[ChatScreen] Error checking blocked status:', error);
         setIsBlocked(false);
+        setBlockedByMe(false);
+        setBlockedByThem(false);
       } finally {
         setCheckingBlockedStatus(false);
       }
@@ -567,6 +610,32 @@ export default function ChatScreen() {
 
     checkBlockedStatus();
   }, [userId, otherUserId, isGroup]);
+
+  // ── Re-check blocked status when screen comes into focus ────────
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!isGroup && userId && otherUserId) {
+        (async () => {
+          try {
+            const blockedByMeRef = doc(db, 'users', userId, 'blockedUsers', otherUserId);
+            const blockedByMeSnap = await getDoc(blockedByMeRef);
+            
+            const blockedMeRef = doc(db, 'users', otherUserId, 'blockedUsers', userId);
+            const blockedMeSnap = await getDoc(blockedMeRef);
+            
+            const iBlockedThem = blockedByMeSnap.exists();
+            const theyBlockedMe = blockedMeSnap.exists();
+            
+            setBlockedByMe(iBlockedThem);
+            setBlockedByThem(theyBlockedMe);
+            setIsBlocked(iBlockedThem || theyBlockedMe);
+          } catch (error) {
+            console.error('[ChatScreen] Error re-checking blocked status:', error);
+          }
+        })();
+      }
+    }, [userId, otherUserId, isGroup])
+  );
 
   // ── Stop playback on unmount / navigation away ──────────────────
   useEffect(() => {
@@ -578,10 +647,10 @@ export default function ChatScreen() {
 
   // ── Auto-scroll when new messages arrive ────────────────────────
   useEffect(() => {
-    if (messages.length > 0) {
+    if (filteredMessages.length > 0) {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  }, [messages.length]);
+  }, [filteredMessages.length]);
 
   // ── Handle permission denied states ─────────────────────────────
   useEffect(() => {
@@ -712,6 +781,9 @@ export default function ChatScreen() {
     const trimmed = (text ?? input).trim();
     if (!trimmed) return;
 
+    // Stop typing indicator immediately on send
+    setTyping(false);
+
     try {
       // If replying to a message, include reply metadata
       if (replyingTo) {
@@ -722,6 +794,7 @@ export default function ChatScreen() {
           timestamp: serverTimestamp(),
           readBy: [userId],
           deliveredTo: [],
+          blockedMessage: isBlocked, // Mark if sent while either party is blocked
           replyTo: {
             messageId: replyingTo.messageId,
             senderId: replyingTo.senderId,
@@ -743,10 +816,35 @@ export default function ChatScreen() {
         setShowEmoji(false);
       } else {
         // Regular message without reply
-        const success = await sendMessage(trimmed);
-        if (success) {
+        // If either party has blocked the other, send message but mark it as blocked
+        if (isBlocked) {
+          await addDoc(collection(db, 'chats', chatId, 'messages'), {
+            senderId: userId,
+            text: trimmed,
+            type: 'text',
+            timestamp: serverTimestamp(),
+            readBy: [userId],
+            deliveredTo: [],
+            blockedMessage: true, // Mark message as sent while blocked
+          });
+
+          // Update chat's lastMessage
+          const chatRef = doc(db, 'chats', chatId);
+          await updateDoc(chatRef, {
+            'lastMessage.text': trimmed,
+            'lastMessage.senderId': userId,
+            'lastMessage.timestamp': serverTimestamp(),
+          });
+
           setInput('');
           setShowEmoji(false);
+        } else {
+          // Normal send
+          const success = await sendMessage(trimmed);
+          if (success) {
+            setInput('');
+            setShowEmoji(false);
+          }
         }
       }
     } catch (error) {
@@ -1471,6 +1569,7 @@ export default function ChatScreen() {
       
       console.log('[ChatScreen] Contact unblocked successfully');
       setIsBlocked(false);
+      setBlockedByMe(false);
       
       // Show confirmation
       Alert.alert('Contact Unblocked', `You can now send and receive messages from ${displayName}.`);
@@ -1571,6 +1670,20 @@ export default function ChatScreen() {
 
   // ── Render a single message bubble ──────────────────────────────
   const renderMessage = ({ item }: { item: FireMessage }) => {
+    // ── System messages (block/unblock notifications) ───────────────
+    if (item.type === 'system') {
+      const displayText = parseSystemMessage(item.text || '', userId);
+      return (
+        <View style={styles.systemMessageContainer}>
+          <View style={[styles.systemMessageBubble, { backgroundColor: FG.glassBg }]}>
+            <AppText style={[styles.systemMessageText, { color: FG.secondary }]}>
+              {displayText}
+            </AppText>
+          </View>
+        </View>
+      );
+    }
+
     const isOut = item.senderId === userId;
     const isSelected = selectedMessageId === item.messageId;
     const isSearchMatch = searchQuery.trim().length > 0 &&
@@ -1861,7 +1974,7 @@ export default function ChatScreen() {
 
   return (
     <>
-      <SafeAreaView style={styles.root} edges={['left', 'right', 'bottom']}>
+      <SafeAreaView style={[styles.root, { backgroundColor: COLORS.sky1 }]} edges={['left', 'right', 'bottom']}>
         <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <AppBg />
 
@@ -2039,10 +2152,10 @@ export default function ChatScreen() {
           </Modal>
 
           {/* ── Messages list ── */}
-          {loading ? renderLoading() : messages.length === 0 ? renderEmpty() : (
+          {loading ? renderLoading() : filteredMessages.length === 0 ? renderEmpty() : (
             <FlatList
               ref={listRef}
-              data={messages}
+              data={filteredMessages}
               keyExtractor={(item) => item.messageId}
               renderItem={renderMessage}
               contentContainerStyle={styles.messageList}
@@ -2053,6 +2166,11 @@ export default function ChatScreen() {
                     <AppText style={styles.datePillText}>Today</AppText>
                   </View>
                 </View>
+              }
+              ListFooterComponent={
+                typingNames.length > 0
+                  ? <TypingIndicator names={typingNames} />
+                  : null
               }
               onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             />
@@ -2178,27 +2296,95 @@ export default function ChatScreen() {
 
           {/* ── Input bar / Blocked banner ── */}
           {isBlocked ? (
-            /* Blocked Banner */
-            <View style={[styles.blockedBanner, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}>
-              <View style={styles.blockedBannerContent}>
-                <AppIcon name="ban-outline" size={20} color={COLORS.missed} fixedColor />
-                <View style={{ flex: 1 }}>
-                  <AppText style={[styles.blockedBannerTitle, { color: textColor, fontFamily }]}>
-                    {displayName} is blocked
-                  </AppText>
-                  <AppText style={[styles.blockedBannerSub, { color: FG.secondary }]}>
-                    You can't send or receive messages
-                  </AppText>
+            /* Show blocked banner + input bar */
+            <View style={styles.inputBarWithBanner}>
+              {/* Banner */}
+              <TouchableOpacity 
+                style={[styles.blockedBanner, { backgroundColor: FG.glassBg, borderTopColor: FG.glassBorder }]}
+                onPress={blockedByMe ? handleUnblockContact : undefined}
+                activeOpacity={blockedByMe ? 0.7 : 1}
+                disabled={!blockedByMe}
+              >
+                <View style={styles.blockedBannerContent}>
+                  <AppIcon name="ban-outline" size={20} color={COLORS.missed} fixedColor />
+                  <View style={{ flex: 1 }}>
+                    {blockedByMe ? (
+                      <AppText style={[styles.blockedBannerTitle, { color: textColor, fontFamily }]}>
+                        You blocked {displayName}. Tap here to unblock
+                      </AppText>
+                    ) : (
+                      <AppText style={[styles.blockedBannerTitle, { color: textColor, fontFamily }]}>
+                        {displayName} blocked you
+                      </AppText>
+                    )}
+                  </View>
+                  {blockedByMe && (
+                    <AppIcon name="chevron-forward" size={20} color={COLORS.blue} fixedColor />
+                  )}
                 </View>
-                <TouchableOpacity 
-                  style={[styles.unblockBtn, { borderColor: COLORS.blue }]}
-                  onPress={handleUnblockContact}
-                  activeOpacity={0.8}
-                >
-                  <AppText style={[styles.unblockBtnText, { color: COLORS.blue }]}>
-                    Unblock
-                  </AppText>
-                </TouchableOpacity>
+              </TouchableOpacity>
+
+              {/* Input bar - always show */}
+              <View style={styles.inputBar}>
+                {isRecording ? (
+                  <View style={styles.recordingOverlayContainer}>
+                    <VoiceRecordingOverlay
+                      durationMs={recorder.state.durationMs}
+                      isWarning={recorder.state.isWarning}
+                      onCancel={() => recorder.cancelRecording()}
+                    />
+                  </View>
+                ) : (
+                  <>
+                    {/* Attachments */}
+                    <TouchableOpacity style={styles.inputSideBtn} onPress={() => { setShowEmoji(false); setShowAttach(true); }}>
+                      <AppIcon name="add" size={26} color={COLORS.sub} />
+                    </TouchableOpacity>
+
+                    {/* Text field + emoji */}
+                    <View style={styles.inputFieldWrap}>
+                      <TextInput
+                        style={[styles.inputField, { color: FG.primary }]}
+                        placeholder="Message"
+                        placeholderTextColor={FG.faint}
+                        value={input}
+                        onChangeText={(text) => {
+                          setInput(text);
+                          setTyping(text.length > 0);
+                        }}
+                        multiline
+                        maxLength={500}
+                        onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
+                      />
+                      <TouchableOpacity style={styles.emojiBtn} onPress={() => { setShowAttach(false); setShowEmoji((e) => !e); }}>
+                        <AppIcon name={showEmoji ? 'keypad-outline' : 'happy-outline'} size={22} color={COLORS.sub} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Camera */}
+                    <TouchableOpacity style={styles.inputSideBtn} onPress={openCamera}>
+                      <AppIcon name="camera-outline" size={22} color={COLORS.sub} />
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                {/* Mic / Send button */}
+                {input.trim() ? (
+                  <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
+                    <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
+                      <AppIcon name="send" size={19} color="#fff" fixedColor />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ) : (
+                  <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
+                    <LinearGradient
+                      colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
+                      style={styles.sendBtnInner}
+                    >
+                      <AppIcon name="mic" size={19} color="#fff" fixedColor />
+                    </LinearGradient>
+                  </View>
+                )}
               </View>
             </View>
           ) : (
@@ -2226,7 +2412,10 @@ export default function ChatScreen() {
                     placeholder="Message"
                     placeholderTextColor={FG.faint}
                     value={input}
-                    onChangeText={setInput}
+                    onChangeText={(text) => {
+                      setInput(text);
+                      setTyping(text.length > 0);
+                    }}
                     multiline
                     maxLength={500}
                     onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
@@ -2725,8 +2914,21 @@ export default function ChatScreen() {
                       PRIVACY
                     </AppText>
 
-                    {/* Block Contact Button */}
-                    {!showBlockConfirmation ? (
+                    {/* Block/Unblock Contact Button */}
+                    {isBlocked && blockedByMe ? (
+                      /* Unblock User Button */
+                      <TouchableOpacity 
+                        style={[styles.profileBlockBtn, bevel]}
+                        onPress={handleUnblockContact}
+                        activeOpacity={0.8}
+                      >
+                        <AppIcon name="checkmark-circle-outline" size={20} color={COLORS.blue} fixedColor />
+                        <AppText style={[styles.profileBlockText, { color: COLORS.blue }]}>
+                          Unblock User
+                        </AppText>
+                      </TouchableOpacity>
+                    ) : !showBlockConfirmation ? (
+                      /* Block Contact Button */
                       <TouchableOpacity 
                         style={[styles.profileBlockBtn, bevel]}
                         onPress={() => setShowBlockConfirmation(true)}
@@ -2850,6 +3052,24 @@ const styles = StyleSheet.create({
   msgRow: { flexDirection: 'row', marginBottom: 4 },
   msgRowIn: { justifyContent: 'flex-start' },
   msgRowOut: { justifyContent: 'flex-end' },
+
+  // ── System messages ───────────────────────────────────────────────────────
+  systemMessageContainer: {
+    alignItems: 'center',
+    marginVertical: 8,
+    paddingHorizontal: 20,
+  },
+  systemMessageBubble: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    maxWidth: '80%',
+  },
+  systemMessageText: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
 
   bubble: { 
     maxWidth: '75%', 
@@ -3486,11 +3706,13 @@ const styles = StyleSheet.create({
   },
 
   // ── Blocked Banner ────────────────────────────────────────────────────────
+  inputBarWithBanner: {
+    // Container for banner + input bar when user blocks someone
+  },
   blockedBanner: {
     borderTopWidth: 1,
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+    paddingVertical: 14,
   },
   blockedBannerContent: {
     flexDirection: 'row',
@@ -3499,21 +3721,7 @@ const styles = StyleSheet.create({
   },
   blockedBannerTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  blockedBannerSub: {
-    fontSize: 12,
-  },
-  unblockBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-  },
-  unblockBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '500',
   },
 
   // ── Message Action Toolbar ────────────────────────────────────────────────

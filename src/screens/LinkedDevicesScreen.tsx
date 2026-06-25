@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -78,6 +79,7 @@ export default function LinkedDevicesScreen() {
   const navigation = useNavigation();
   const { FG }     = useForeground();
   const { fontFamily, textColor } = useTypography();
+  const insets = useSafeAreaInsets();
 
   const [devices, setDevices]           = useState<LinkedDevice[]>(INITIAL_DEVICES);
   const [pendingDevice, setPendingDevice] = useState<LinkedDevice | null>(null);
@@ -100,7 +102,7 @@ export default function LinkedDevicesScreen() {
       <AppBg />
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
           <AppIcon name="chevron-back" size={26} color={COLORS.blue} fixedColor />
         </TouchableOpacity>
@@ -282,7 +284,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: Platform.OS === 'web' ? 16 : 52, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14,
     borderBottomWidth: 1,
   },
   back:  { width: 36 },

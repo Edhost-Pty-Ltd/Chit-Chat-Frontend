@@ -13,6 +13,7 @@ import { db } from '../config/firebase';
 import { uploadFile, generateFileName } from '../config/storage';
 import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
 
 export default function ProfileScreen() {
@@ -21,6 +22,7 @@ export default function ProfileScreen() {
   const { FG }  = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
 
   const [editingName, setEditingName] = useState(false);
   const [draftName,   setDraftName]   = useState(displayName || 'John Doe');
@@ -120,7 +122,7 @@ export default function ProfileScreen() {
       <AppBg />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <AppIcon glass tileSize={36} name="chevron-back" size={20} />
         </TouchableOpacity>
@@ -221,7 +223,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: 56, paddingBottom: 12, paddingHorizontal: 14,
+    paddingTop: 0, paddingBottom: 12, paddingHorizontal: 14,
     gap: 8,
     ...GLASS.header,
   },

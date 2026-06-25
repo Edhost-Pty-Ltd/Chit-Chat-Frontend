@@ -1,5 +1,5 @@
 ﻿// ─── Screen: Status ──────────────────────────────────────────────────────────
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, FlatList, TouchableOpacity, StyleSheet, Platform, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, getDoc } from 'firebase/firestore';
@@ -12,6 +12,7 @@ import { usePhoneBook } from '../hooks/usePhoneBook';
 import { isVisibleTo } from '../hooks/usePrivacySettings';
 import type { FireStatus } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -156,7 +157,8 @@ export default function StatusScreen() {
     mediaUri: string | null,
     caption: string | null,
     backgroundColor: string | null,
-    textColor: string | null
+    textColor: string | null,
+    durationMs?: number
   ) => {
     if (!userId) return;
     await createStatus(
@@ -251,7 +253,7 @@ export default function StatusScreen() {
     <View style={styles.root}>
       <AppBg />
 
-      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1 }]}>
+      <View style={[styles.header, { backgroundColor: FG.glassBg, borderBottomColor: FG.glassBorder, borderBottomWidth: 1, paddingTop: Platform.OS === 'web' ? 16 : insets.top + 14 }]}>
         <AppText style={[styles.title, { color: textColor, fontFamily }]}>Updates</AppText>
       </View>
 
@@ -367,7 +369,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: Platform.OS === 'web' ? 16 : 56, paddingBottom: 14,
+    paddingHorizontal: 20, paddingTop: 0, paddingBottom: 14,
   },
   title:  { fontSize: 26, fontWeight: '800', color: COLORS.text },
 
