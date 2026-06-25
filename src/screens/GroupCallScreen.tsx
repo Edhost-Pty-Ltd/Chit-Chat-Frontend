@@ -328,6 +328,10 @@ function RoomView({
   // Ensure the mic is publishing once we've connected (safety net in addition
   // to LiveKitRoom audio={true}). Runs once when the local participant appears.
   const micInitRef = useRef(false);
+
+  // Tracks the current camera facing mode for the flip control. Camera starts
+  // on the front ('user') camera by default.
+  const cameraFacingRef = useRef<'user' | 'environment'>('user');
   useEffect(() => {
     if (localParticipant && !micInitRef.current) {
       micInitRef.current = true;
@@ -417,9 +421,17 @@ function RoomView({
 
   const handleFlipCamera = useCallback(async () => {
     try {
-      const track = localParticipant?.getTrackPublication(Track.Source.Camera)?.track;
-      // @ts-ignore - switchCamera exists on the local video track
-      await track?.switchCamera?.();
+      const pub = localParticipant?.getTrackPublication(Track.Source.Camera);
+      // LocalVideoTrack supports restartTrack with new capture options
+      const videoTrack: any = (pub as any)?.videoTrack ?? pub?.track;
+      if (!videoTrack || typeof videoTrack.restartTrack !== 'function') {
+        console.warn('[GroupCallScreen] No local camera track to flip');
+        return;
+      }
+      const next = cameraFacingRef.current === 'user' ? 'environment' : 'user';
+      await videoTrack.restartTrack({ facingMode: next });
+      cameraFacingRef.current = next;
+      console.log('[GroupCallScreen] Camera flipped to:', next);
     } catch (e) {
       console.warn('[GroupCallScreen] Flip camera failed:', e);
     }
@@ -635,7 +647,7 @@ function RoomView({
           />
         ))}
         {pipParticipants.length > 0 && <View style={styles.panelDivider} />}
-        <TouchableOpacity style={[styles.sideBtn, localIsMain && styles.sideBtnActive]} onPress={handleFlipCamera} activeOpacity={0.75} disabled={!localIsMain || !isCameraEnabled}>
+        <TouchableOpacity style={[styles.sideBtn, isCameraEnabled && styles.sideBtnActive]} onPress={handleFlipCamera} activeOpacity={0.75} disabled={!isCameraEnabled}>
           <AppIcon name="camera-reverse-outline" size={22} color="#fff" fixedColor />
           <AppText fixedColor style={styles.sideBtnLabel}>Flip</AppText>
         </TouchableOpacity>

@@ -33,6 +33,7 @@ if (Platform.OS !== 'web') {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useRegistration } from '../hooks/useRegistration';
+import { setBiometricEnabled } from '../utils/biometrics';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
@@ -253,6 +254,11 @@ export default function CreateAccountScreen() {
     try {
       const { success, message } = await runBiometric();
       if (success) {
+        // If a real biometric check passed, remember the preference so the app
+        // locks on future launches. (Skipped gracefully when no hardware/enrollment.)
+        if (message === 'ok') {
+          await setBiometricEnabled(true);
+        }
         // Trigger Firestore profile creation (hook manages 'creating' → 'done' / 'error')
         await createProfile();
       } else {

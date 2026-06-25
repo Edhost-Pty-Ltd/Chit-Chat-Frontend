@@ -19,6 +19,7 @@ import ToastOverlay from './src/components/ToastNotification';
 import { FloatingCallManager } from './src/components/FloatingCallManager';
 import { CallHost } from './src/components/CallHost';
 import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
+import { BiometricGate } from './src/components/BiometricGate';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -117,6 +118,7 @@ export default function App() {
                     <FloatingCallManager />
                     <GroupCallNotificationManager />
                     <CallHost />
+                    <BiometricGate />
                   </NavigationContainer>
                 </ActiveCallProvider>
               </FloatingCallProvider>
