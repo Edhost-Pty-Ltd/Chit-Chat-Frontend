@@ -1,10 +1,10 @@
 // ─── useBlockedContacts Hook ──────────────────────────────────────────────────
-// Manages blocked contacts list with real-time updates
+// Manages blocked contacts list with real-time updates and block notifications
 
 import { useState, useEffect, useCallback } from 'react';
 import {
   collection, doc, setDoc, deleteDoc, onSnapshot,
-  query, getDocs, Timestamp,
+  query, getDocs, Timestamp, addDoc, updateDoc, serverTimestamp, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -14,6 +14,79 @@ export interface BlockedContact {
   photoURL: string | null;
   phone?: string;
   blockedAt: Date;
+}
+
+// ─── Helper: Send block notification to chat ─────────────────────────────────
+async function sendBlockNotifications(
+  blockerId: string,
+  blockedId: string,
+  blockerName: string,
+  blockedName: string
+) {
+  try {
+    // Find the chat between these two users
+    const chatsRef = collection(db, 'chats');
+    const chatsSnapshot = await getDocs(query(chatsRef));
+    
+    let chatId: string | null = null;
+
+    for (const chatDoc of chatsSnapshot.docs) {
+      const data = chatDoc.data();
+      const members = data.members || [];
+      
+      // Check if this is a 1-on-1 chat between these two users
+      if (!data.isGroup && members.length === 2 && 
+          members.includes(blockerId) && members.includes(blockedId)) {
+        chatId = chatDoc.id;
+        break;
+      }
+    }
+
+    if (!chatId) {
+      console.log('[sendBlockNotifications] No chat found between users');
+      return;
+    }
+
+    const batch = writeBatch(db);
+
+    // Add system message to the chat
+    const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+    batch.set(msgRef, {
+      messageId: msgRef.id,
+      senderId: 'system',
+      text: `${blockerName} blocked ${blockedName}`,
+      imageUrl: null,
+      voiceUrl: null,
+      videoUrl: null,
+      fileUrl: null,
+      type: 'system',
+      timestamp: serverTimestamp(),
+      readBy: [],
+      deliveredTo: [],
+      duration: null,
+      fileName: null,
+      fileSize: null,
+      mimeType: null,
+      thumbnailUrl: null,
+      location: null,
+      isLiveLocation: false,
+      replyTo: null,
+    });
+
+    // Update chat's lastMessage
+    const chatRef = doc(db, 'chats', chatId);
+    batch.update(chatRef, {
+      'lastMessage.text': `${blockerName} blocked ${blockedName}`,
+      'lastMessage.senderId': 'system',
+      'lastMessage.timestamp': serverTimestamp(),
+    });
+
+    await batch.commit();
+    console.log('[sendBlockNotifications] Block notifications sent to chat:', chatId);
+  } catch (error) {
+    console.error('[sendBlockNotifications] Error sending notifications:', error);
+    // Non-critical - don't throw
+  }
 }
 
 export function useBlockedContacts(currentUserId: string | null) {
@@ -69,7 +142,8 @@ export function useBlockedContacts(currentUserId: string | null) {
       userId: string,
       displayName: string,
       photoURL?: string | null,
-      phone?: string
+      phone?: string,
+      blockerDisplayName?: string
     ): Promise<{ success: boolean; error?: string }> => {
       if (!currentUserId) {
         return { success: false, error: 'Not authenticated' };
@@ -87,7 +161,15 @@ export function useBlockedContacts(currentUserId: string | null) {
           blockedAt: new Date(),
         });
 
-        console.log('[useBlockedContacts] Contact blocked successfully');
+        // Send system message to both users' chats
+        await sendBlockNotifications(
+          currentUserId,
+          userId,
+          blockerDisplayName || 'You',
+          displayName
+        );
+
+        console.log('[useBlockedContacts] Contact blocked successfully with notifications');
         return { success: true };
       } catch (err: any) {
         console.error('[useBlockedContacts] Error blocking contact:', err);

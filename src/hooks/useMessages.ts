@@ -18,7 +18,7 @@ export interface FireMessage {
   voiceUrl:   string | null;
   videoUrl:   string | null;
   fileUrl:    string | null;
-  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location';
+  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system';
   timestamp:  Date | null;
   expiresAt:  Date | null;
   readBy:     string[];
@@ -44,7 +44,7 @@ export interface FireMessage {
     messageId: string;
     senderId: string;
     text: string | null;
-    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location';
+    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system';
   } | null;
 }
 
