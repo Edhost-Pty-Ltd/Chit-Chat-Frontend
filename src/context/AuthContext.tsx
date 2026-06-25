@@ -19,6 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth, onAuthStateChanged, signOut as fbSignOut } from '@react-native-firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { startStatusCleanupService, stopStatusCleanupService } from '../services/statusCleanupService';
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -81,6 +82,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const doSignOut = async () => {
     clearWebTimer();
+    // Stop status cleanup service
+    stopStatusCleanupService();
     // Sign out from Firebase Auth
     await fbSignOut(getAuth());
     // Clear AsyncStorage session data
@@ -132,11 +135,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setPhone(storedPhone);
               setIsSignedIn(true);
               scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
+              // Start status cleanup service for rehydrated web session
+              startStatusCleanupService();
             }
           } else {
             // Mobile — no expiry
             setPhone(storedPhone);
             setIsSignedIn(true);
+            // Start status cleanup service for rehydrated mobile session
+            startStatusCleanupService();
           }
         }
       } finally {
@@ -269,6 +276,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsSignedIn(true);
       console.log('[AuthContext] Sign-in completed successfully - isSignedIn state updated to true');
       console.log('[AuthContext] Current state - phone:', phoneNumber, 'isSignedIn:', true);
+      
+      // Start status cleanup service
+      startStatusCleanupService();
       
       if (Platform.OS === 'web') {
         scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS);

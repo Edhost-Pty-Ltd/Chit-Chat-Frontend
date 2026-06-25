@@ -22,6 +22,7 @@ export interface FireMessage {
   timestamp:  Date | null;
   expiresAt:  Date | null;
   readBy:     string[];
+  deliveredTo?: string[]; // Track who has received the message
   duration:   number | null;
   fileName:   string | null;
   fileSize:   number | null;
@@ -39,6 +40,12 @@ export interface FireMessage {
   } | null;
   isLiveLocation?: boolean;
   liveLocationExpiry?: Date | null;
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    text: string | null;
+    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location';
+  } | null;
 }
 
 export function useMessages(chatId: string | null, currentUserId: string | null) {
@@ -80,6 +87,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
                 ? (d.expiresAt as Timestamp).toDate()
                 : null,
               readBy: d.readBy ?? [],
+              deliveredTo: d.deliveredTo ?? [],
               duration: d.duration ?? null,
               fileName: d.fileName ?? null,
               fileSize: d.fileSize ?? null,
@@ -90,6 +98,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
               liveLocationExpiry: d.liveLocationExpiry
                 ? (d.liveLocationExpiry as Timestamp).toDate()
                 : null,
+              replyTo: d.replyTo ?? null,
             };
           })
           // Filter out expired messages (72-hour TTL)
@@ -131,6 +140,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
         type:      'text',
         timestamp: serverTimestamp(),
         readBy:    [currentUserId],
+        deliveredTo: [], // Will be populated when recipients come online
       });
 
       // 2. Update chat's lastMessage + unread counts for other members
@@ -163,7 +173,44 @@ async function markAsRead(chatId: string, userId: string) {
     await updateDoc(chatRef, {
       [`unreadCounts.${userId}`]: 0,
     });
-  } catch (_) {
+
+    // Also mark undelivered messages as delivered
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const q = query(messagesRef, orderBy('timestamp', 'desc'));
+    const snapshot = await getDocs(q);
+
+    const batch: any[] = [];
+    snapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      const deliveredTo = data.deliveredTo || [];
+      const readBy = data.readBy || [];
+
+      // If not delivered yet, mark as delivered
+      if (!deliveredTo.includes(userId) && data.senderId !== userId) {
+        batch.push({
+          ref: docSnap.ref,
+          updates: {
+            deliveredTo: [...deliveredTo, userId],
+            readBy: readBy.includes(userId) ? readBy : [...readBy, userId],
+          },
+        });
+      } else if (!readBy.includes(userId) && data.senderId !== userId) {
+        // If delivered but not read, mark as read
+        batch.push({
+          ref: docSnap.ref,
+          updates: {
+            readBy: [...readBy, userId],
+          },
+        });
+      }
+    });
+
+    // Execute batch updates
+    for (const item of batch) {
+      await updateDoc(item.ref, item.updates);
+    }
+  } catch (error) {
+    console.warn('[useMessages] Error marking messages:', error);
     // Non-critical — ignore silently
   }
 }

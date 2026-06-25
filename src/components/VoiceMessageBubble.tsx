@@ -22,6 +22,12 @@ export interface VoiceMessageBubbleProps {
   playerState: PlaybackState;
   onPlay: () => void;
   onPause: () => void;
+  onSeek?: (positionMs: number) => void;
+  timestamp?: Date | null;
+  tickIcon?: {
+    icon: 'checkmark' | 'checkmark-done';
+    color: string;
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -35,13 +41,13 @@ function hashSeed(str: string): number {
   return Math.abs(hash);
 }
 
-/** Generate 20 deterministic bar heights (4–18px) seeded from messageId */
+/** Generate 30 deterministic bar heights (4–24px) seeded from messageId */
 function generateBarHeights(messageId: string): number[] {
   const seed = hashSeed(messageId);
   const bars: number[] = [];
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 30; i++) {
     // Use a simple pseudo-random based on seed + index
-    const val = Math.abs(Math.sin(seed * (i + 1) * 0.1)) * 14 + 4;
+    const val = Math.abs(Math.sin(seed * (i + 1) * 0.1)) * 20 + 4;
     bars.push(val);
   }
   return bars;
@@ -55,6 +61,12 @@ function formatMmSs(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+/** Format time to HH:MM */
+function formatTime(date: Date | null): string {
+  if (!date) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function VoiceMessageBubble({
@@ -65,6 +77,9 @@ export function VoiceMessageBubble({
   playerState,
   onPlay,
   onPause,
+  onSeek,
+  timestamp,
+  tickIcon,
 }: VoiceMessageBubbleProps) {
   const isActiveMessage = playerState.activeMessageId === messageId;
   const status = isActiveMessage ? playerState.status : 'idle';
@@ -93,12 +108,25 @@ export function VoiceMessageBubble({
     : 0;
 
   // Number of bars that should be filled
-  const filledBars = Math.floor(progress * 20);
+  const filledBars = Math.floor(progress * 30);
 
   // Duration display
   const displayTime = (status === 'playing' || status === 'paused')
     ? formatMmSs(effectiveDuration - positionMs)
     : formatMmSs(durationMs);
+
+  // Skip handlers
+  const handleSkipBackward = () => {
+    if (!onSeek || !isActiveMessage) return;
+    const newPosition = Math.max(0, positionMs - 15000); // -15 seconds
+    onSeek(newPosition);
+  };
+
+  const handleSkipForward = () => {
+    if (!onSeek || !isActiveMessage) return;
+    const newPosition = Math.min(effectiveDuration, positionMs + 15000); // +15 seconds
+    onSeek(newPosition);
+  };
 
   // ── Color tokens based on direction ─────────────────────────────────────
   const barDefaultColor = isOutgoing
@@ -140,7 +168,7 @@ export function VoiceMessageBubble({
 
   // ── Main voice content ──────────────────────────────────────────────────
   const voiceContent = (
-    <View style={styles.voiceRow}>
+    <View style={styles.container}>
       {/* Play / Pause / Loading button */}
       {status === 'loading' ? (
         <View style={[styles.playBtn, { backgroundColor: playBtnBg }]}>
@@ -154,7 +182,7 @@ export function VoiceMessageBubble({
         >
           <Ionicons
             name={status === 'playing' ? 'pause' : 'play'}
-            size={14}
+            size={18}
             color={iconColor}
           />
         </TouchableOpacity>
@@ -176,10 +204,20 @@ export function VoiceMessageBubble({
         ))}
       </View>
 
-      {/* Duration label */}
-      <Text style={[styles.duration, { color: durationColor }]}>
-        {displayTime}
-      </Text>
+      {/* Microphone icon */}
+      <Ionicons name="mic" size={20} color={iconColor} style={styles.micIcon} />
+
+      {/* Timestamp and tick at bottom right */}
+      {timestamp && (
+        <View style={styles.timestampRow}>
+          <Text style={[styles.timestamp, { color: durationColor }]}>
+            {formatTime(timestamp)}
+          </Text>
+          {isOutgoing && tickIcon && (
+            <Ionicons name={tickIcon.icon} size={13} color={tickIcon.color} />
+          )}
+        </View>
+      )}
     </View>
   );
 
@@ -201,8 +239,8 @@ const styles = StyleSheet.create({
   bubble: {
     maxWidth: '75%',
     borderRadius: RADIUS.lg,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   bubbleIn: {
     borderBottomLeftRadius: 4,
@@ -215,11 +253,11 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
     ...SHADOW.card,
   },
-  voiceRow: {
+  container: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 2,
+    paddingRight: 36,
   },
   playBtn: {
     width: 32,
@@ -227,25 +265,35 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   waveform: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    height: 24,
-    overflow: 'hidden',
+    height: 26,
+    flex: 1,
   },
   waveBar: {
     width: 3,
-    borderRadius: 2,
+    borderRadius: 1.5,
+    flex: 1,
   },
-  duration: {
-    fontSize: 11,
-    fontWeight: '500',
-    minWidth: 34,
-    textAlign: 'right',
+  micIcon: {
     flexShrink: 0,
+    marginLeft: 4,
+  },
+  timestampRow: {
+    position: 'absolute',
+    bottom: 4,
+    right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  timestamp: {
+    fontSize: 10,
+    fontWeight: '400',
   },
   errorContainer: {
     flexDirection: 'row',

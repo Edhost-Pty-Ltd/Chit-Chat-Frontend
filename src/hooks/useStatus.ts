@@ -1,202 +1,295 @@
-// ─── useStatus Hook ──────────────────────────────────────────────────────────
-// Real-time status (story) updates: post images (7s each) and videos (<=30s),
-// view others' statuses, and auto-expire after 24h.
+﻿// ΓöÇΓöÇΓöÇ Hook: useStatus ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// Manages WhatsApp-style status updates with 24-hour expiry, view tracking,
+// and real-time sync with Firestore.
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  collection, query, onSnapshot, doc, setDoc, getDoc, updateDoc,
-  deleteDoc, serverTimestamp, arrayUnion,
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  Timestamp,
+  arrayUnion,
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
-import { uploadFile, generateFileName, getFileExtension } from '../config/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, storage } from '../config/firebase';
+import type { FireStatus } from '../types';
 
-/** Each image status is shown for this long. */
-export const IMAGE_STATUS_DURATION_MS = 7000;
-/** Videos longer than this are rejected / trimmed. */
-export const MAX_VIDEO_STATUS_MS = 30000;
-/** Statuses disappear after this many hours. */
-const STATUS_TTL_HOURS = 24;
+// ΓöÇΓöÇΓöÇ Interfaces ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-export interface StatusItem {
-  statusId: string;
+export interface StatusGroup {
   userId: string;
-  userPhone: string;
-  userPhotoURL: string | null;
-  type: 'image' | 'video';
-  mediaUrl: string;
-  durationMs: number;
-  createdAt: Date | null;
-  viewedBy: string[];
+  displayName: string;
+  photoURL: string | null;
+  statuses: FireStatus[];
+  hasUnviewed: boolean;
+  latestTimestamp: Date;
 }
 
-export function useStatus(userId: string | null, userPhone: string | null) {
-  const [statuses, setStatuses] = useState<StatusItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [posting, setPosting] = useState(false);
+// ΓöÇΓöÇΓöÇ Helper Functions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-  // ── Real-time listener (filter expired client-side) ──────────────
+/** Convert Firestore timestamp to Date */
+function toDate(timestamp: any): Date {
+  if (!timestamp) return new Date();
+  if (timestamp.toDate) return timestamp.toDate();
+  if (timestamp.seconds) return new Date(timestamp.seconds * 1000);
+  return new Date(timestamp);
+}
+
+/** Check if status is expired (24 hours) */
+function isExpired(expiresAt: Date): boolean {
+  return new Date() > expiresAt;
+}
+
+// ΓöÇΓöÇΓöÇ Hook ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
+export function useStatus(currentUserId: string | null) {
+  const [myStatuses, setMyStatuses] = useState<FireStatus[]>([]);
+  const [contactStatuses, setContactStatuses] = useState<StatusGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ΓöÇΓöÇ Fetch all statuses ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   useEffect(() => {
-    const q = query(collection(db, 'statuses'));
-    const unsub = onSnapshot(
+    if (!currentUserId) {
+      setLoading(false);
+      return;
+    }
+
+    const statusesRef = collection(db, 'statuses');
+    const q = query(
+      statusesRef,
+      where('expiresAt', '>', new Date()),
+      orderBy('expiresAt', 'desc'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(
       q,
-      (snap) => {
-        const now = Date.now();
-        const items: StatusItem[] = [];
-        snap.forEach((d) => {
-          const data = d.data();
-          const expiresAt = data.expiresAt?.toDate
-            ? data.expiresAt.toDate()
-            : data.expiresAt
-            ? new Date(data.expiresAt)
-            : null;
-          if (expiresAt && expiresAt.getTime() < now) return; // skip expired
-          items.push({
-            statusId: d.id,
-            userId: data.userId,
-            userPhone: data.userPhone ?? '',
-            userPhotoURL: data.userPhotoURL ?? null,
-            type: data.type,
-            mediaUrl: data.mediaUrl,
-            durationMs: data.durationMs ?? IMAGE_STATUS_DURATION_MS,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null,
-            viewedBy: data.viewedBy ?? [],
+      (snapshot) => {
+        try {
+          const allStatuses: FireStatus[] = [];
+
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const status: FireStatus = {
+              statusId: docSnap.id,
+              userId: data.userId,
+              displayName: data.displayName,
+              photoURL: data.photoURL || null,
+              mediaUrl: data.mediaUrl || null,
+              mediaType: data.mediaType,
+              thumbnailUrl: data.thumbnailUrl || null,
+              caption: data.caption || null,
+              backgroundColor: data.backgroundColor || null,
+              textColor: data.textColor || null,
+              createdAt: toDate(data.createdAt),
+              expiresAt: toDate(data.expiresAt),
+              viewedBy: data.viewedBy || [],
+              visibility: data.visibility || 'everyone',
+              excludedUsers: data.excludedUsers || [],
+              selectedUsers: data.selectedUsers || [],
+            };
+
+            // Skip expired statuses
+            if (!isExpired(status.expiresAt)) {
+              allStatuses.push(status);
+            }
           });
-        });
-        items.sort(
-          (a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0)
-        );
-        setStatuses(items);
-        setLoading(false);
+
+          // Separate my statuses and contact statuses
+          const mine = allStatuses.filter((s) => s.userId === currentUserId);
+          const others = allStatuses.filter((s) => s.userId !== currentUserId);
+
+          setMyStatuses(mine);
+
+          // Group contact statuses by userId
+          const grouped = new Map<string, StatusGroup>();
+          for (const status of others) {
+            if (!grouped.has(status.userId)) {
+              grouped.set(status.userId, {
+                userId: status.userId,
+                displayName: status.displayName,
+                photoURL: status.photoURL,
+                statuses: [],
+                hasUnviewed: false,
+                latestTimestamp: status.createdAt,
+              });
+            }
+            const group = grouped.get(status.userId)!;
+            group.statuses.push(status);
+            if (!status.viewedBy.includes(currentUserId)) {
+              group.hasUnviewed = true;
+            }
+            if (status.createdAt > group.latestTimestamp) {
+              group.latestTimestamp = status.createdAt;
+            }
+          }
+
+          // Sort groups by latest timestamp
+          const groupArray = Array.from(grouped.values()).sort(
+            (a, b) => b.latestTimestamp.getTime() - a.latestTimestamp.getTime()
+          );
+
+          setContactStatuses(groupArray);
+          setLoading(false);
+        } catch (err) {
+          console.error('[useStatus] Error processing statuses:', err);
+          setError('Failed to load statuses');
+          setLoading(false);
+        }
       },
       (err) => {
-        console.error('[useStatus] listener error:', err);
+        console.error('[useStatus] Snapshot error:', err);
+        setError('Failed to sync statuses');
         setLoading(false);
       }
     );
-    return () => unsub();
-  }, []);
 
-  // Resolve the poster's profile photo once per posting batch.
-  const fetchPhotoURL = useCallback(async (): Promise<string | null> => {
-    if (!userId) return null;
-    try {
-      const snap = await getDoc(doc(db, 'users', userId));
-      return snap.exists() ? snap.data().photoURL ?? null : null;
-    } catch {
-      return null;
-    }
-  }, [userId]);
+    return () => unsubscribe();
+  }, [currentUserId]);
 
-  const createStatusDoc = useCallback(
-    async (params: {
-      type: 'image' | 'video';
-      mediaUrl: string;
-      durationMs: number;
-      photoURL: string | null;
-    }) => {
-      if (!userId) return;
-      const ref = doc(collection(db, 'statuses'));
-      await setDoc(ref, {
-        statusId: ref.id,
-        userId,
-        userPhone: userPhone ?? '',
-        userPhotoURL: params.photoURL,
-        type: params.type,
-        mediaUrl: params.mediaUrl,
-        durationMs: params.durationMs,
-        createdAt: serverTimestamp(),
-        expiresAt: new Date(Date.now() + STATUS_TTL_HOURS * 60 * 60 * 1000),
-        viewedBy: [],
-      });
-    },
-    [userId, userPhone]
-  );
+  // ΓöÇΓöÇ Create status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  const createStatus = useCallback(
+    async (
+      displayName: string,
+      photoURL: string | null,
+      mediaType: 'image' | 'video' | 'text',
+      mediaUri: string | null,
+      caption: string | null,
+      backgroundColor: string | null,
+      textColor: string | null
+    ): Promise<string> => {
+      if (!currentUserId) throw new Error('User not authenticated');
 
-  // ── Post one or more image statuses ──────────────────────────────
-  const postImageStatuses = useCallback(
-    async (uris: string[]): Promise<boolean> => {
-      if (!userId || uris.length === 0) return false;
-      setPosting(true);
       try {
-        const photoURL = await fetchPhotoURL();
-        for (const uri of uris) {
-          const fileName = generateFileName(getFileExtension(uri));
-          const url = await uploadFile(uri, 'status', { userId, fileName });
-          await createStatusDoc({
-            type: 'image',
-            mediaUrl: url,
-            durationMs: IMAGE_STATUS_DURATION_MS,
-            photoURL,
-          });
+        let mediaUrl: string | null = null;
+        let thumbnailUrl: string | null = null;
+
+        // Upload media to Firebase Storage if provided
+        if (mediaUri && mediaType !== 'text') {
+          const timestamp = Date.now();
+          const fileName = `status_${currentUserId}_${timestamp}`;
+          const storageRef = ref(storage, `statuses/${currentUserId}/${fileName}`);
+
+          // Fetch the media file
+          const response = await fetch(mediaUri);
+          const blob = await response.blob();
+
+          // Upload to Firebase Storage
+          await uploadBytes(storageRef, blob);
+          mediaUrl = await getDownloadURL(storageRef);
+
+          console.log('[useStatus] Media uploaded:', mediaUrl);
         }
-        return true;
-      } catch (err) {
-        console.error('[useStatus] postImageStatuses error:', err);
-        return false;
-      } finally {
-        setPosting(false);
-      }
-    },
-    [userId, fetchPhotoURL, createStatusDoc]
-  );
 
-  // ── Post a video status (clamped to 30s) ─────────────────────────
-  const postVideoStatus = useCallback(
-    async (uri: string, durationMs: number): Promise<boolean> => {
-      if (!userId) return false;
-      setPosting(true);
-      try {
-        const photoURL = await fetchPhotoURL();
-        const fileName = generateFileName(getFileExtension(uri));
-        const url = await uploadFile(uri, 'status', { userId, fileName });
-        await createStatusDoc({
-          type: 'video',
-          mediaUrl: url,
-          durationMs: Math.min(durationMs || MAX_VIDEO_STATUS_MS, MAX_VIDEO_STATUS_MS),
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+
+        const statusData = {
+          userId: currentUserId,
+          displayName,
           photoURL,
-        });
-        return true;
+          mediaUrl,
+          mediaType,
+          thumbnailUrl,
+          caption,
+          backgroundColor,
+          textColor,
+          createdAt: Timestamp.fromDate(now),
+          expiresAt: Timestamp.fromDate(expiresAt),
+          viewedBy: [],
+          visibility: 'everyone',
+        };
+
+        const statusRef = await addDoc(collection(db, 'statuses'), statusData);
+        console.log('[useStatus] Status created:', statusRef.id);
+        return statusRef.id;
       } catch (err) {
-        console.error('[useStatus] postVideoStatus error:', err);
-        return false;
-      } finally {
-        setPosting(false);
+        console.error('[useStatus] Create status error:', err);
+        throw new Error('Failed to create status');
       }
     },
-    [userId, fetchPhotoURL, createStatusDoc]
+    [currentUserId]
   );
 
-  // ── Mark a status as viewed by the current user ──────────────────
-  const markViewed = useCallback(
+  // ΓöÇΓöÇ Mark status as viewed ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  const markAsViewed = useCallback(
     async (statusId: string) => {
-      if (!userId) return;
+      if (!currentUserId) return;
+
       try {
-        await updateDoc(doc(db, 'statuses', statusId), {
-          viewedBy: arrayUnion(userId),
+        const statusRef = doc(db, 'statuses', statusId);
+        await updateDoc(statusRef, {
+          viewedBy: arrayUnion(currentUserId),
         });
-      } catch {
-        // non-critical
+        console.log('[useStatus] Marked as viewed:', statusId);
+      } catch (err) {
+        console.error('[useStatus] Mark viewed error:', err);
       }
     },
-    [userId]
+    [currentUserId]
   );
 
-  // ── Delete one of the current user's statuses ────────────────────
-  const deleteStatus = useCallback(async (statusId: string) => {
+  // ΓöÇΓöÇ Delete status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  const deleteStatus = useCallback(async (statusId: string, mediaUrl: string | null) => {
     try {
+      // Delete media from Storage if exists
+      if (mediaUrl) {
+        try {
+          const mediaRef = ref(storage, mediaUrl);
+          await deleteObject(mediaRef);
+          console.log('[useStatus] Media deleted:', mediaUrl);
+        } catch (storageErr) {
+          console.warn('[useStatus] Storage delete warning:', storageErr);
+        }
+      }
+
+      // Delete status document from Firestore
       await deleteDoc(doc(db, 'statuses', statusId));
+      console.log('[useStatus] Status deleted:', statusId);
     } catch (err) {
-      console.error('[useStatus] deleteStatus error:', err);
+      console.error('[useStatus] Delete status error:', err);
+      throw new Error('Failed to delete status');
     }
   }, []);
+
+  // ΓöÇΓöÇ Delete expired statuses (cleanup) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  const deleteExpiredStatuses = useCallback(async () => {
+    try {
+      const statusesRef = collection(db, 'statuses');
+      const q = query(statusesRef, where('expiresAt', '<=', new Date()));
+      const snapshot = await getDocs(q);
+
+      console.log(`[useStatus] Found ${snapshot.size} expired statuses`);
+
+      const deletePromises = snapshot.docs.map(async (docSnap) => {
+        const data = docSnap.data();
+        await deleteStatus(docSnap.id, data.mediaUrl || null);
+      });
+
+      await Promise.all(deletePromises);
+      console.log('[useStatus] Expired statuses cleaned up');
+    } catch (err) {
+      console.error('[useStatus] Cleanup error:', err);
+    }
+  }, [deleteStatus]);
 
   return {
-    statuses,
+    myStatuses,
+    contactStatuses,
     loading,
-    posting,
-    postImageStatuses,
-    postVideoStatus,
-    markViewed,
+    error,
+    createStatus,
+    markAsViewed,
     deleteStatus,
+    deleteExpiredStatuses,
   };
 }
