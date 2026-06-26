@@ -82,9 +82,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/notification-icon.png",
           "color": "#0A2463",
-          "sounds": ["./assets/notification-sound.wav"],
           "mode": "production"
         }
       ]
@@ -115,10 +113,7 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION"
       ],
-      "softwareKeyboardLayoutMode": "pan",
-      "navigationBar": {
-        "visible": "leanback"
-      }
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
       "favicon": "./assets/favicon.png"
