@@ -52,6 +52,7 @@ import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useLocationSharing } from '../hooks/useLocationSharing';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { usePhoneBook } from '../hooks/usePhoneBook';
+import { useContacts, AppContact } from '../hooks/useContacts';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
@@ -261,6 +262,9 @@ export default function ChatScreen() {
   // ── Phone book name resolver (saved contact name, else phone number) ──
   const { resolveName } = usePhoneBook();
 
+  // ── Contacts (for share contact feature) ──────────────────────
+  const { contacts: phoneContacts } = useContacts();
+
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
 
@@ -337,6 +341,10 @@ export default function ChatScreen() {
   // ── Message info state ──────────────────────────────────────────
   const [messageInfoVisible, setMessageInfoVisible] = useState(false);
   const [messageForInfo, setMessageForInfo] = useState<FireMessage | null>(null);
+
+  // ── Contact picker state (share contact via 3-dot menu) ─────────
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [contactQuery, setContactQuery] = useState('');
 
   // ── Camera ref ──────────────────────────────────────────────────
   const cameraRef = useRef<any>(null);
@@ -1953,6 +1961,19 @@ export default function ChatScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuOpen(false);
+                  setContactQuery('');
+                  setContactPickerOpen(true);
+                }}
+                activeOpacity={0.75}
+              >
+                <AppIcon name="person-outline" size={20} color={COLORS.blue} fixedColor />
+                <AppText style={[styles.menuItemText, { color: textColor }]}>Share Contact</AppText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[styles.menuItem, styles.menuItemDanger]}
                 onPress={() => {
                   setMenuOpen(false);
@@ -2291,12 +2312,9 @@ export default function ChatScreen() {
           <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share</AppText>
           <View style={styles.attachGrid}>
             {[
-              { icon: 'images-outline' as const, label: 'Photos', action: openGallery },
-              { icon: 'document-outline' as const, label: 'Files', action: openDocuments },
-              { icon: 'camera-outline' as const, label: 'Camera', action: () => { setShowAttach(false); openCamera(); } },
-              { icon: 'musical-notes-outline' as const, label: 'Audio', action: openAudioPicker },
+              { icon: 'document-outline' as const, label: 'Files',    action: openDocuments },
+              { icon: 'camera-outline'   as const, label: 'Camera',   action: () => { setShowAttach(false); openCamera(); } },
               { icon: 'location-outline' as const, label: 'Location', action: handleOpenLocationMenu },
-              { icon: 'person-outline' as const, label: 'Contact', action: () => Alert.alert('Contact', 'Share contact') },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={[styles.attachItem, bevel]}
                 onPress={item.action} activeOpacity={0.8}>
@@ -2307,6 +2325,88 @@ export default function ChatScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      </Modal>
+
+      {/* ── Contact Picker Modal ── */}
+      <Modal visible={contactPickerOpen} transparent animationType="slide" onRequestClose={() => setContactPickerOpen(false)}>
+        <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setContactPickerOpen(false)} />
+        <View style={[styles.attachSheet, { backgroundColor: FG.glassBg }]}>
+          <AppBg />
+          <View style={styles.attachHandle} />
+          <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share Contact</AppText>
+
+          {/* Search */}
+          <View style={[styles.contactSearchWrap, bevel]}>
+            <AppIcon name="search-outline" size={16} color={COLORS.sub} />
+            <TextInput
+              style={[styles.contactSearchInput, { color: textColor }]}
+              placeholder="Search contacts…"
+              placeholderTextColor={COLORS.sub}
+              value={contactQuery}
+              onChangeText={setContactQuery}
+              autoFocus
+            />
+            {contactQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setContactQuery('')}>
+                <AppIcon name="close-circle" size={16} color={COLORS.sub} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Contact list */}
+          <ScrollView showsVerticalScrollIndicator={false} style={styles.contactPickerList} keyboardShouldPersistTaps="handled">
+            {phoneContacts
+              .filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery))
+              .map((c) => (
+                <TouchableOpacity
+                  key={c.userId || c.phone}
+                  style={[styles.contactPickerRow, bevel]}
+                  activeOpacity={0.75}
+                  onPress={async () => {
+                    setContactPickerOpen(false);
+                    if (!userId) return;
+                    // Send contact as a text message with contact card format
+                    const contactText = `📇 *${c.displayName}*\n📞 ${c.phone}`;
+                    try {
+                      await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                        senderId: userId,
+                        text: contactText,
+                        type: 'text',
+                        timestamp: serverTimestamp(),
+                        readBy: [userId],
+                        deliveredTo: [],
+                      });
+                      await updateDoc(doc(db, 'chats', chatId), {
+                        'lastMessage.text': `📇 ${c.displayName}`,
+                        'lastMessage.senderId': userId,
+                        'lastMessage.timestamp': serverTimestamp(),
+                      });
+                    } catch (err) {
+                      console.error('[ChatScreen] Failed to send contact:', err);
+                    }
+                  }}
+                >
+                  <Avatar
+                    initials={c.displayName.slice(0, 2).toUpperCase()}
+                    color={COLORS.blue}
+                    size={44}
+                    imageUrl={c.photoUri || c.firebasePhotoURL || null}
+                  />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <AppText style={[{ fontSize: 14, fontWeight: '600' }, { color: textColor }]}>{c.displayName}</AppText>
+                    <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>{c.phone}</AppText>
+                  </View>
+                  <AppIcon name="share-outline" size={18} color={COLORS.blue} fixedColor />
+                </TouchableOpacity>
+              ))}
+            {phoneContacts.filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase())).length === 0 && (
+              <View style={{ alignItems: 'center', paddingTop: 40, gap: 10 }}>
+                <AppIcon name="people-outline" size={44} color={COLORS.sub} />
+                <AppText style={{ color: COLORS.sub, fontSize: 14 }}>No contacts found</AppText>
+              </View>
+            )}
+          </ScrollView>
         </View>
       </Modal>
 
@@ -3766,5 +3866,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+
+  // ── Contact picker ────────────────────────────────────────────────────────
+  contactSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  contactSearchInput: { flex: 1, fontSize: 14, padding: 0 },
+  contactPickerList: { flex: 1, paddingHorizontal: 16 },
+  contactPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
 });
