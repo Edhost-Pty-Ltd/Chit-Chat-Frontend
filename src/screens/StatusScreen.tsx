@@ -1,5 +1,5 @@
 ﻿// ─── Screen: Status ──────────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, FlatList, TouchableOpacity, StyleSheet, Platform, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, getDoc } from 'firebase/firestore';
@@ -52,6 +52,7 @@ export default function StatusScreen() {
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
+  const insets = useSafeAreaInsets();
   const { resolveName, contactsMap } = usePhoneBook();
 
   const {

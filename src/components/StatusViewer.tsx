@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Animated,
+  GestureResponderEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -69,6 +70,9 @@ export function StatusViewer({
   const [progress, setProgress] = useState(0);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Signals that the current item finished and we should advance — avoids
+  // calling goNext() inside a setProgress updater (setState during render).
+  const shouldAdvanceRef = useRef(false);
 
   const currentStatus = statuses[currentIndex];
   const isOwner = currentStatus?.userId === currentUserId;
@@ -81,7 +85,15 @@ export function StatusViewer({
   const IMAGE_DURATION = 7000;
 
   // ── Video player (always created, loaded only for video items) ──────────────
-  const player = useVideoPlayer(null, (p) => { p.loop = false; });
+  // timeUpdateEventInterval: fire timeUpdate every 100ms for smooth progress.
+  const player = useVideoPlayer(null, (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.1;
+  });
+  // Guard: don't advance on playToEnd until the video has actually started.
+  // expo-video fires playToEnd when replacing the source (null → new URL),
+  // which would otherwise skip the video immediately.
+  const videoReadyRef = useRef(false);
 
   const goNext = useCallback(() => {
     if (currentIndex < statuses.length - 1) {
@@ -96,22 +108,27 @@ export function StatusViewer({
   useEffect(() => {
     if (!visible || !currentStatus) return;
     if (isVideo && currentStatus.mediaUrl) {
+      videoReadyRef.current = false;   // block premature playToEnd
       player.replace(currentStatus.mediaUrl);
       if (!isPaused) player.play();
     } else {
-      // Pause player when showing a non-video item
       try { player.pause(); } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStatus?.statusId, visible, isVideo]);
 
-  // Video: update progress bar from timeUpdate, advance on end
+  // Video: update progress bar from timeUpdate; mark ready on first tick
   useEventListener(player, 'timeUpdate', ({ currentTime }: { currentTime: number }) => {
     if (!isVideo) return;
+    if (currentTime > 0) videoReadyRef.current = true;  // video is genuinely playing
     const dur = player.duration && player.duration > 0 ? player.duration : 30;
     setProgress(Math.min(currentTime / dur, 1));
   });
-  useEventListener(player, 'playToEnd', () => { if (isVideo) goNext(); });
+
+  // Only advance on playToEnd once the video has actually played
+  useEventListener(player, 'playToEnd', () => {
+    if (isVideo && videoReadyRef.current) goNext();
+  });
 
   // Pause / resume video on long-press hold
   useEffect(() => {
@@ -136,7 +153,11 @@ export function StatusViewer({
     timerRef.current = setInterval(() => {
       setProgress((prev) => {
         const next = prev + increment;
-        if (next >= 1) { goNext(); return 0; }
+        if (next >= 1) {
+          // Signal advance — don't call goNext() here (setState during render).
+          shouldAdvanceRef.current = true;
+          return 1;
+        }
         return next;
       });
     }, interval);
@@ -152,6 +173,16 @@ export function StatusViewer({
     }
   }, [visible, currentIndex, isVideo, currentStatus, currentUserId, onStatusViewed]);
 
+  // Advance to the next item after the image/text timer completes.
+  // Using a separate effect avoids calling goNext() inside the setProgress
+  // updater, which would be a setState-during-render violation.
+  useEffect(() => {
+    if (progress >= 1 && shouldAdvanceRef.current) {
+      shouldAdvanceRef.current = false;
+      goNext();
+    }
+  }, [progress, goNext]);
+
   // ── Reset state when modal opens ────────────────────────────────────────────
   useEffect(() => {
     if (visible) {
@@ -165,26 +196,53 @@ export function StatusViewer({
   }, [visible, initialIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Navigation handlers ────────────────────────────────────────────────────
-  const handleTapLeft = () => {
+  const handleTapLeft = useCallback(() => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
       setProgress(0);
     } else {
       onClose();
     }
-  };
+  }, [currentIndex, onClose]);
 
-  const handleTapRight = () => {
+  const handleTapRight = useCallback(() => {
     goNext();
-  };
+  }, [goNext]);
 
-  const handleLongPressStart = () => {
-    setIsPaused(true);
-  };
+  // ── Gesture handling via responder system ──────────────────────────────────
+  // Pressable/TouchableOpacity don't work reliably over VideoView (native SurfaceView)
+  // on Android. The responder system fires at the JS bridge level BEFORE native views
+  // consume the touch, making it work regardless of what's underneath.
+  const touchStartXRef    = useRef(0);
+  const touchStartTimeRef = useRef(0);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleLongPressEnd = () => {
-    setIsPaused(false);
-  };
+  const handleTouchStart = useCallback((e: GestureResponderEvent) => {
+    touchStartXRef.current    = e.nativeEvent.locationX;
+    touchStartTimeRef.current = Date.now();
+    longPressTimerRef.current = setTimeout(() => {
+      setIsPaused(true);
+    }, 200);
+  }, []);
+
+  const handleTouchEnd = useCallback((e: GestureResponderEvent) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    const elapsed = Date.now() - touchStartTimeRef.current;
+    if (isPaused && elapsed >= 200) {
+      setIsPaused(false);
+      return;
+    }
+    if (elapsed > 400) return;
+    const tapX = e.nativeEvent.locationX;
+    if (tapX < SCREEN_WIDTH / 3) {
+      handleTapLeft();
+    } else {
+      handleTapRight();
+    }
+  }, [isPaused, handleTapLeft, handleTapRight]);
 
   const handleDelete = () => {
     if (onDeleteStatus && currentStatus) {
@@ -206,7 +264,12 @@ export function StatusViewer({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <StatusBar hidden />
-      <View style={styles.container}>
+      <View
+        style={styles.container}
+        onStartShouldSetResponder={() => true}
+        onResponderGrant={handleTouchStart}
+        onResponderRelease={handleTouchEnd}
+      >
         {/* Layer 1: media background */}
         <View style={styles.background}>
           {isExcluded ? (
@@ -227,12 +290,15 @@ export function StatusViewer({
               onLoadEnd={() => setLoading(false)}
             />
           ) : currentStatus.mediaType === 'video' && currentStatus.mediaUrl ? (
-            <VideoView
-              player={player}
-              style={styles.media}
-              contentFit="contain"
-              nativeControls={false}
-            />
+            /* pointerEvents="none" lets touches pass through to the tapZones above */
+            <View style={styles.media} pointerEvents="none">
+              <VideoView
+                player={player}
+                style={StyleSheet.absoluteFill}
+                contentFit="contain"
+                nativeControls={false}
+              />
+            </View>
           ) : currentStatus.mediaType === 'text' ? (
             <LinearGradient
               colors={[currentStatus.backgroundColor || '#1a7fe8', '#0a5bb8']}
@@ -263,24 +329,6 @@ export function StatusViewer({
             style={styles.bottomGradient}
           />
         )}
-
-        {/* Layer 3: full-screen tap zones (tap to skip, hold to pause) */}
-        <View style={styles.tapZones} pointerEvents="box-none">
-          <Pressable
-            style={styles.tapLeft}
-            onPress={handleTapLeft}
-            onLongPress={handleLongPressStart}
-            onPressOut={handleLongPressEnd}
-            delayLongPress={200}
-          />
-          <Pressable
-            style={styles.tapRight}
-            onPress={handleTapRight}
-            onLongPress={handleLongPressStart}
-            onPressOut={handleLongPressEnd}
-            delayLongPress={200}
-          />
-        </View>
 
         {/* Loading indicator */}
         {loading && (

@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const maxLoadingTimeout = setTimeout(() => {
       console.warn('[AuthContext] Maximum loading time reached, forcing app to open');
       setLoading(false);
-    }, 5000); // 5 seconds max loading time
+    }, 10000); // 10 seconds max loading time
 
     (async () => {
       try {
@@ -141,15 +141,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setPhone(storedPhone);
               setIsSignedIn(true);
               scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
-              // Start status cleanup service for rehydrated web session
-              startStatusCleanupService();
             }
           } else {
             // Mobile — no expiry
             setPhone(storedPhone);
             setIsSignedIn(true);
-            // Start status cleanup service for rehydrated mobile session
-            startStatusCleanupService();
           }
         }
       } finally {

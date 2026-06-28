@@ -34,6 +34,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { ActiveCallParams } from '../context/ActiveCallContext';
+import { SignalingService } from '../services/signalingService';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'GroupCall'>;
 type RouteP = RouteProp<RootStackParamList, 'GroupCall'>;
@@ -325,21 +326,42 @@ function RoomView({
     return () => clearInterval(t);
   }, []);
 
-  // Ensure the mic is publishing once we've connected (safety net in addition
-  // to LiveKitRoom audio={true}). Runs once when the local participant appears.
+  // Ensure mic and camera are publishing once the local participant connects.
+  // `LiveKitRoom audio/video` props handle the initial intent, but this safety
+  // net ensures the tracks are actually published even if the room connects
+  // before the tracks are ready (a common race condition on Android).
   const micInitRef = useRef(false);
 
   // Tracks the current camera facing mode for the flip control. Camera starts
   // on the front ('user') camera by default.
   const cameraFacingRef = useRef<'user' | 'environment'>('user');
   useEffect(() => {
-    if (localParticipant && !micInitRef.current) {
-      micInitRef.current = true;
-      localParticipant
-        .setMicrophoneEnabled(true)
-        .catch((e) => console.warn('[GroupCallScreen] Failed to enable mic:', e));
-    }
-  }, [localParticipant]);
+    if (!localParticipant || micInitRef.current) return;
+    micInitRef.current = true;
+
+    const publish = async () => {
+      try {
+        await localParticipant.setMicrophoneEnabled(true);
+      } catch (e) {
+        console.warn('[GroupCallScreen] Failed to enable mic:', e);
+      }
+
+      // For video calls, explicitly publish the camera so the feed appears
+      // immediately without requiring any user interaction.
+      if (!audioOnly) {
+        try {
+          // Small delay — gives the audio session time to fully start before
+          // the camera capture begins, avoiding Android audio routing glitches.
+          await new Promise<void>((r) => setTimeout(r, 500));
+          await localParticipant.setCameraEnabled(true);
+        } catch (e) {
+          console.warn('[GroupCallScreen] Failed to enable camera:', e);
+        }
+      }
+    };
+
+    publish();
+  }, [localParticipant, audioOnly]);
 
   // Build display name for a participant. The LiveKit participant name is the
   // person's phone number, so resolve it against the device phone book: saved
@@ -353,6 +375,29 @@ function RoomView({
   // Separate local + remote
   const remotes = participants.filter((p) => !p.isLocal);
   const localId = localParticipant?.identity;
+
+  // ── Auto-end 1-on-1 calls when the other participant leaves ─────────────────
+  // In a 2-person call, when remotes drops to 0 the call is over.
+  // We use a ref to avoid firing on the first render (before anyone has joined)
+  // and to prevent double-firing if the user already hung up manually.
+  const remoteJoinedRef = useRef(false);
+  useEffect(() => {
+    // Track when the first remote participant has joined
+    if (remotes.length > 0) {
+      remoteJoinedRef.current = true;
+      return;
+    }
+    // Only auto-end if: it was a 1-on-1 (memberCount <= 2), the remote had
+    // already joined at least once, and we haven't already written history.
+    if (
+      remoteJoinedRef.current &&
+      memberCount <= 2 &&
+      !historyWrittenRef.current
+    ) {
+      historyWrittenRef.current = true;
+      handleCallEnd(callDuration);
+    }
+  }, [remotes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Determine main participant (video mode)
   const allIds = participants.map((p) => p.identity);
@@ -379,6 +424,29 @@ function RoomView({
   const handleMuteToggle = useCallback(() => {
     localParticipant?.setMicrophoneEnabled(!isMicrophoneEnabled);
   }, [localParticipant, isMicrophoneEnabled]);
+
+  // Write call history then call onEnded (used for both hang-up and remote disconnect)
+  const handleCallEnd = useCallback(async (durationSec: number) => {
+    if (callId && userId) {
+      try {
+        const otherParticipant = participants.find((p) => !p.isLocal);
+        const otherPartyId = otherParticipant?.identity ?? '';
+        const otherPartyName = otherParticipant ? nameFor(otherParticipant) : groupName;
+        await SignalingService.saveToCallHistory(
+          userId,
+          callId,
+          { userId: otherPartyId, displayName: otherPartyName, photoUrl: null },
+          audioOnly ? 'audio' : 'video',
+          'outgoing',
+          durationSec > 0 ? 'completed' : 'missed',
+          durationSec > 0 ? durationSec : null,
+        );
+      } catch (e) {
+        console.warn('[GroupCallScreen] Failed to save call history:', e);
+      }
+    }
+    onEnded();
+  }, [callId, userId, participants, nameFor, groupName, audioOnly, onEnded]);
 
   const handleCameraToggle = useCallback(async () => {
     const enabling = !isCameraEnabled;
@@ -487,17 +555,20 @@ function RoomView({
         text: 'Leave',
         style: 'destructive',
         onPress: async () => {
+          historyWrittenRef.current = true;
           try {
             if (callId && userId) await groupCall.leaveGroupCall(callId, userId);
           } catch {}
           try { await room.disconnect(); } catch {}
-          onEnded();
+          await handleCallEnd(callDuration);
         },
       },
     ]);
-  }, [room, callId, userId, groupCall, onEnded]);
+  }, [room, callId, userId, groupCall, handleCallEnd, callDuration]);
 
   const isMuted = !isMicrophoneEnabled;
+  // Prevent double-writing history if we initiated the disconnect ourselves.
+  const historyWrittenRef = useRef(false);
 
   // ── AUDIO-ONLY LAYOUT (matches AudioCallScreen) ─────────────────────────────
   if (!isVideoMode) {

@@ -21,6 +21,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { db, storage } from '../config/firebase';
 import type { FireStatus } from '../types';
 import { Platform } from 'react-native';
+import { uploadFile, generateFileName, getFileExtension, deleteFile } from '../config/storage';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -190,23 +191,15 @@ export function useStatus(currentUserId: string | null) {
         // Upload media to Firebase Storage if provided
         if (mediaUri && mediaType !== 'text') {
           const timestamp = Date.now();
-          const ext = mediaUri.split('.').pop()?.split('?')[0] ?? (mediaType === 'video' ? 'mp4' : 'jpg');
+          const ext = getFileExtension(mediaUri) || (mediaType === 'video' ? 'mp4' : 'jpg');
           const fileName = `status_${currentUserId}_${timestamp}.${ext}`;
-          const storageRef = ref(storage, `statuses/${currentUserId}/${fileName}`);
 
-          // Use XMLHttpRequest blob — works on React Native where fetch() blobs
-          // are not available for local file:// URIs.
-          const blob: Blob = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.onload = () => resolve(xhr.response as Blob);
-            xhr.onerror = () => reject(new Error('Failed to read media file'));
-            xhr.responseType = 'blob';
-            xhr.open('GET', mediaUri);
-            xhr.send();
+          // Use uploadFile which handles both file:// and content:// URIs
+          // (content:// URIs from Android gallery need expo-file-system to read)
+          mediaUrl = await uploadFile(mediaUri, 'status', {
+            userId: currentUserId,
+            fileName,
           });
-
-          await uploadBytes(storageRef, blob);
-          mediaUrl = await getDownloadURL(storageRef);
           console.log('[useStatus] Media uploaded:', mediaUrl);
         }
 
@@ -282,8 +275,7 @@ export function useStatus(currentUserId: string | null) {
       // Delete media from Storage if exists
       if (mediaUrl) {
         try {
-          const mediaRef = ref(storage, mediaUrl);
-          await deleteObject(mediaRef);
+          await deleteFile(mediaUrl);
           console.log('[useStatus] Media deleted:', mediaUrl);
         } catch (storageErr) {
           console.warn('[useStatus] Storage delete warning:', storageErr);

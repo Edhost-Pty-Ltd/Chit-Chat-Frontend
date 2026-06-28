@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
@@ -61,7 +62,10 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
   const [textStatus, setTextStatus] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
-  
+
+  // Video player for preview (only used when mediaType === 'video')
+  const videoPlayer = useVideoPlayer(null, (p) => { p.loop = true; });
+
   // Privacy settings
   const [privacyMode, setPrivacyMode] = useState<'everyone' | 'contacts' | 'custom'>('everyone');
   const [showPrivacyMenu, setShowPrivacyMenu] = useState(false);
@@ -79,6 +83,7 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
     setSelectedColorIndex(0);
     setPrivacyMode('everyone');
     setShowPrivacyMenu(false);
+    try { videoPlayer.pause(); } catch {}
     onClose();
   };
 
@@ -107,6 +112,11 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
           setMediaDuration(Math.min(asset.duration, 30000));
         } else {
           setMediaDuration(5000);
+        }
+        // Load video into player for preview
+        if (type === 'video') {
+          videoPlayer.replace(asset.uri);
+          videoPlayer.play();
         }
         setMode('media');
       }
@@ -397,7 +407,16 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
             </View>
 
             <View style={styles.mediaPreview}>
-              <Image source={{ uri: mediaUri }} style={styles.mediaImage} resizeMode="contain" />
+              {mediaType === 'video' ? (
+                <VideoView
+                  player={videoPlayer}
+                  style={styles.mediaImage}
+                  contentFit="contain"
+                  nativeControls={false}
+                />
+              ) : (
+                <Image source={{ uri: mediaUri }} style={styles.mediaImage} resizeMode="contain" />
+              )}
             </View>
 
             <View style={[styles.captionInput, bevel]}>
