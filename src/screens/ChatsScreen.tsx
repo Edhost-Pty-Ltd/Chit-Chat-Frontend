@@ -1010,7 +1010,16 @@ const styles = StyleSheet.create({
   chatPreview:    { flex: 1, fontSize: 12, color: COLORS.sub, lineHeight: 17 },
   voiceNotePreview: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   chatTime:       { fontSize: 11, color: COLORS.sub, flexShrink: 0 },
-  badge:          { width: 20, height: 20, borderRadius: 10, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  badge:          { 
+    minWidth: 22, 
+    height: 22, 
+    borderRadius: 11, 
+    backgroundColor: '#25D366', // WhatsApp green
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    flexShrink: 0,
+    paddingHorizontal: 6,
+  },
   badgeText:      { color: '#fff', fontSize: 11, fontWeight: '700' },
 
   // ── FAB ──────────────────────────────────────────────────────────────────
