@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { AppNotification, NotifType } from '../context/NotificationContext';
 
 // Configure how notifications are handled when app is in foreground
 Notifications.setNotificationHandler({
@@ -13,49 +14,51 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
-export function usePushNotifications(userId: string | null) {
+// usePushNotifications.ts
+export function usePushNotifications(
+  userId: string | null,
+  onNotificationReceived?: (n: Omit<AppNotification, 'id' | 'time' | 'read'>) => void,
+) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<Notifications.Notification | null>(null);
-  const notificationListener = useRef<Notifications.Subscription>();
-  const responseListener = useRef<Notifications.Subscription>();
 
   useEffect(() => {
     if (!userId) return;
 
-    // Register for push notifications
     registerForPushNotificationsAsync().then((token) => {
       if (token) {
         setExpoPushToken(token);
-        // Save token to Firestore
         savePushToken(userId, token);
       }
     });
 
-    // Listener for notifications received while app is foregrounded
-    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('[usePushNotifications] Notification received:', notification);
-      setNotification(notification);
+    const subscription1 = Notifications.addNotificationReceivedListener((notif) => {
+      setNotification(notif);
+
+      // 🔑 Bridge into the in-app notification context
+      const data = notif.request.content.data as { type?: string; contactId?: number } | undefined;
+      onNotificationReceived?.({
+        type: (data?.type as NotifType) ?? 'system',
+        title: notif.request.content.title ?? '',
+        body: notif.request.content.body ?? '',
+        contactId: data?.contactId,
+      });
     });
 
-    // Listener for when a notification is tapped/interacted with
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      console.log('[usePushNotifications] Notification response:', response);
-      // Handle navigation based on notification data
+    const subscription2 = Notifications.addNotificationResponseReceivedListener((response) => {
       handleNotificationResponse(response);
     });
 
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      subscription1.remove();
+      subscription2.remove();
     };
-  }, [userId]);
+  }, [userId, onNotificationReceived]);
 
   return { expoPushToken, notification };
 }
@@ -94,10 +97,11 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   try {
-    // Get push token
-    token = (await Notifications.getExpoPushTokenAsync({
+    // Get push token (expo-notifications v56 API requires projectId)
+    const tokenData = await Notifications.getExpoPushTokenAsync({
       projectId: 'e68eeca5-8ee9-4c30-b23f-8cd3616b7c21',
-    })).data;
+    });
+    token = tokenData.data;
     console.log('[usePushNotifications] Push token:', token);
   } catch (error) {
     console.error('[usePushNotifications] Error getting push token:', error);
