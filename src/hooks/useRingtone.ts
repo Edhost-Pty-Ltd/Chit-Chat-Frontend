@@ -43,10 +43,13 @@ export function useRingtone() {
 
       // Try to load custom ringtone, fallback to beep pattern
       try {
-        // Load the audio file
-        player.replace({
-          uri: require('../../assets/ringtone.mp3'),
-        });
+        // Load the audio file from assets
+        const ringtoneAsset = require('../../assets/ringtone.mp3');
+        
+        console.log('[useRingtone] Loading ringtone asset');
+        
+        // Replace with the ringtone source (SDK 56 uses direct asset/URL)
+        player.replace(ringtoneAsset);
         
         // Enable looping
         player.loop = true;
@@ -58,7 +61,8 @@ export function useRingtone() {
         setIsPlaying(true);
         console.log('[useRingtone] Custom ringtone started');
       } catch (fileError) {
-        console.log('[useRingtone] Custom ringtone not found, using system beep pattern');
+        console.log('[useRingtone] Custom ringtone error:', fileError);
+        console.log('[useRingtone] Using system beep pattern');
         // Fallback: Use a beep pattern
         playSystemBeepPattern();
       }

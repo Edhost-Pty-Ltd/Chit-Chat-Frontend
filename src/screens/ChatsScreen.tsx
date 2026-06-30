@@ -880,7 +880,7 @@ export default function ChatsScreen() {
   return (
     <View style={styles.root}>
       <AppBg />
-
+      
       {/* ── Bottom sheet modal ── */}
       <Modal visible={sheetOpen} transparent animationType="slide"
         onRequestClose={() => setSheetOpen(false)} statusBarTranslucent>
