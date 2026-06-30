@@ -20,6 +20,7 @@ import { getAuth, onAuthStateChanged, signOut as fbSignOut } from '@react-native
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { startStatusCleanupService, stopStatusCleanupService } from '../services/statusCleanupService';
+import { writePresence } from '../hooks/usePresence';
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -82,6 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const doSignOut = async () => {
     clearWebTimer();
+    // Mark the user offline before clearing auth
+    try {
+      const currentUser = getAuth().currentUser;
+      if (currentUser) await writePresence(currentUser.uid, false);
+    } catch {}
     // Stop status cleanup service
     stopStatusCleanupService();
     // Sign out from Firebase Auth
@@ -107,7 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const maxLoadingTimeout = setTimeout(() => {
       console.warn('[AuthContext] Maximum loading time reached, forcing app to open');
       setLoading(false);
-    }, 5000); // 5 seconds max loading time
+    }, 10000); // 10 seconds max loading time
 
     (async () => {
       try {
@@ -135,15 +141,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setPhone(storedPhone);
               setIsSignedIn(true);
               scheduleWebExpiry(WEB_SESSION_TIMEOUT_MS - elapsed);
-              // Start status cleanup service for rehydrated web session
-              startStatusCleanupService();
             }
           } else {
             // Mobile — no expiry
             setPhone(storedPhone);
             setIsSignedIn(true);
-            // Start status cleanup service for rehydrated mobile session
-            startStatusCleanupService();
           }
         }
       } finally {
@@ -277,6 +279,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('[AuthContext] Sign-in completed successfully - isSignedIn state updated to true');
       console.log('[AuthContext] Current state - phone:', phoneNumber, 'isSignedIn:', true);
       
+      // Mark the user online
+      const currentUser = getAuth().currentUser;
+      if (currentUser) writePresence(currentUser.uid, true).catch(() => {});
+
       // Start status cleanup service
       startStatusCleanupService();
       

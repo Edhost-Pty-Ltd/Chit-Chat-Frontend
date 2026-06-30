@@ -6,21 +6,22 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   collection,
   query,
-  where,
   orderBy,
   onSnapshot,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
+  where,
   Timestamp,
   arrayUnion,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
 import type { FireStatus } from '../types';
+import { Platform } from 'react-native';
+import { uploadFile, generateFileName, getFileExtension, deleteFile } from '../config/storage';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ export const MAX_VIDEO_STATUS_MS = 30000; // 30s maximum video length
 export interface StatusGroup {
   userId: string;
   displayName: string;
+  userPhone: string | null;
   photoURL: string | null;
   statuses: FireStatus[];
   hasUnviewed: boolean;
@@ -63,7 +65,7 @@ export function useStatus(currentUserId: string | null) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Fetch all statuses ──────────────────────────────────────────────────────
+  // ── Fetch all statuses ────────────────────────────────────────────────────
   useEffect(() => {
     if (!currentUserId) {
       setLoading(false);
@@ -71,12 +73,8 @@ export function useStatus(currentUserId: string | null) {
     }
 
     const statusesRef = collection(db, 'statuses');
-    const q = query(
-      statusesRef,
-      where('expiresAt', '>', new Date()),
-      orderBy('expiresAt', 'desc'),
-      orderBy('createdAt', 'desc')
-    );
+    // Simple query — no composite index needed. We filter expired client-side.
+    const q = query(statusesRef, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(
       q,
@@ -90,6 +88,7 @@ export function useStatus(currentUserId: string | null) {
               statusId: docSnap.id,
               userId: data.userId,
               displayName: data.displayName,
+              userPhone: data.userPhone ?? null,
               photoURL: data.photoURL || null,
               mediaUrl: data.mediaUrl || null,
               mediaType: data.mediaType,
@@ -112,9 +111,14 @@ export function useStatus(currentUserId: string | null) {
             }
           });
 
-          // Separate my statuses and contact statuses
-          const mine = allStatuses.filter((s) => s.userId === currentUserId);
-          const others = allStatuses.filter((s) => s.userId !== currentUserId);
+          // Separate my statuses and contact statuses.
+          // Guard against malformed docs (empty userId) and always exclude self.
+          const mine = allStatuses.filter(
+            (s) => s.userId && s.userId === currentUserId
+          );
+          const others = allStatuses.filter(
+            (s) => s.userId && s.userId !== currentUserId
+          );
 
           setMyStatuses(mine);
 
@@ -125,6 +129,7 @@ export function useStatus(currentUserId: string | null) {
               grouped.set(status.userId, {
                 userId: status.userId,
                 displayName: status.displayName,
+                userPhone: status.userPhone ?? null,
                 photoURL: status.photoURL,
                 statuses: [],
                 hasUnviewed: false,
@@ -164,7 +169,7 @@ export function useStatus(currentUserId: string | null) {
     return () => unsubscribe();
   }, [currentUserId]);
 
-  // ── Create status ───────────────────────────────────────────────────────────
+  // ── Create status ──────────────────────────────────────────────────────────
   const createStatus = useCallback(
     async (
       displayName: string,
@@ -174,6 +179,7 @@ export function useStatus(currentUserId: string | null) {
       caption: string | null,
       backgroundColor: string | null,
       textColor: string | null,
+      userPhone: string | null = null,
       durationMs?: number
     ): Promise<string> => {
       if (!currentUserId) throw new Error('User not authenticated');
@@ -185,17 +191,15 @@ export function useStatus(currentUserId: string | null) {
         // Upload media to Firebase Storage if provided
         if (mediaUri && mediaType !== 'text') {
           const timestamp = Date.now();
-          const fileName = `status_${currentUserId}_${timestamp}`;
-          const storageRef = ref(storage, `statuses/${currentUserId}/${fileName}`);
+          const ext = getFileExtension(mediaUri) || (mediaType === 'video' ? 'mp4' : 'jpg');
+          const fileName = `status_${currentUserId}_${timestamp}.${ext}`;
 
-          // Fetch the media file
-          const response = await fetch(mediaUri);
-          const blob = await response.blob();
-
-          // Upload to Firebase Storage
-          await uploadBytes(storageRef, blob);
-          mediaUrl = await getDownloadURL(storageRef);
-
+          // Use uploadFile which handles both file:// and content:// URIs
+          // (content:// URIs from Android gallery need expo-file-system to read)
+          mediaUrl = await uploadFile(mediaUri, 'status', {
+            userId: currentUserId,
+            fileName,
+          });
           console.log('[useStatus] Media uploaded:', mediaUrl);
         }
 
@@ -221,6 +225,7 @@ export function useStatus(currentUserId: string | null) {
         const statusData = {
           userId: currentUserId,
           displayName,
+          userPhone,
           photoURL,
           mediaUrl,
           mediaType,
@@ -246,7 +251,7 @@ export function useStatus(currentUserId: string | null) {
     [currentUserId]
   );
 
-  // ── Mark status as viewed ───────────────────────────────────────────────────
+  // ── Mark status as viewed ──────────────────────────────────────────────────
   const markAsViewed = useCallback(
     async (statusId: string) => {
       if (!currentUserId) return;
@@ -264,14 +269,13 @@ export function useStatus(currentUserId: string | null) {
     [currentUserId]
   );
 
-  // ── Delete status ───────────────────────────────────────────────────────────
+  // ── Delete status ──────────────────────────────────────────────────────────
   const deleteStatus = useCallback(async (statusId: string, mediaUrl: string | null) => {
     try {
       // Delete media from Storage if exists
       if (mediaUrl) {
         try {
-          const mediaRef = ref(storage, mediaUrl);
-          await deleteObject(mediaRef);
+          await deleteFile(mediaUrl);
           console.log('[useStatus] Media deleted:', mediaUrl);
         } catch (storageErr) {
           console.warn('[useStatus] Storage delete warning:', storageErr);
@@ -287,7 +291,7 @@ export function useStatus(currentUserId: string | null) {
     }
   }, []);
 
-  // ── Delete expired statuses (cleanup) ───────────────────────────────────────
+  // ── Delete expired statuses (cleanup) ────────────────────────────────────
   const deleteExpiredStatuses = useCallback(async () => {
     try {
       const statusesRef = collection(db, 'statuses');

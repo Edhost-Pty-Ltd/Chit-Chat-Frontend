@@ -1,31 +1,32 @@
 // ─── Notification Context ────────────────────────────────────────────────────
 // Push notification system with native device notifications support.
-// Provides:
-//   • pushNotification()  — add a notification (shows toast + stores in inbox + device notification)
-//   • notifications       — full inbox list
-//   • unreadCount         — badge count
-//   • messageCount        — unread message count
-//   • callCount           — missed call count
-//   • markAllRead()       — clear badge
-//   • clearAll()          — clear inbox
-//   • toast               — currently showing toast (consumed by ToastOverlay)
-//   • dismissToast()      — hide the current toast
 import React, {
   createContext, useContext, useState, useCallback, useRef, useEffect,
 } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { useAuth } from '../hooks/useAuth';
+import { useNotificationSync } from '../hooks/useNotificationSync';
 
-// Configure how notifications are handled when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// NOTE: setNotificationHandler is already configured in usePushNotifications.ts.
+// We do NOT call it here again — calling it twice causes a render crash.
+
+// ─── Helper: Format notification time ────────────────────────────────────────
+function formatNotificationTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 14) return '1 week ago';
+  return date.toLocaleDateString();
+}
 
 export type NotifType = 'message' | 'call' | 'number_change' | 'system';
 
@@ -36,8 +37,8 @@ export interface AppNotification {
   body:      string;
   time:      string;
   read:      boolean;
-  /** Optional — navigate to Chat with this contact id when tapped */
-  contactId?: number;
+  /** Optional — user ID to navigate to chat with when tapped */
+  contactId?: string;
 }
 
 interface NotificationContextValue {
@@ -67,116 +68,8 @@ const NotificationContext = createContext<NotificationContextValue>({
 });
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  // ── Mock notifications for development ───────────────────────────
-  const mockNotifications: AppNotification[] = [
-    {
-      id: 'mock-1',
-      type: 'message',
-      title: 'Sarah Wilson',
-      body: 'Hey! Are we still meeting up tomorrow at the cafe?',
-      time: '2m ago',
-      read: false,
-      contactId: 1,
-    },
-    {
-      id: 'mock-2',
-      type: 'call',
-      title: 'Missed Call',
-      body: 'Michael Chen tried to call you',
-      time: '15m ago',
-      read: false,
-      contactId: 2,
-    },
-    {
-      id: 'mock-3',
-      type: 'message',
-      title: 'Project Team',
-      body: 'Alex: The presentation files are ready for review',
-      time: '1h ago',
-      read: false,
-      contactId: 3,
-    },
-    {
-      id: 'mock-4',
-      type: 'system',
-      title: 'Backup Complete',
-      body: 'Your chat history has been backed up successfully',
-      time: '2h ago',
-      read: true,
-    },
-    {
-      id: 'mock-5',
-      type: 'message',
-      title: 'Emily Rodriguez',
-      body: 'Thanks for sending those photos! They look amazing 📸',
-      time: '3h ago',
-      read: true,
-      contactId: 4,
-    },
-    {
-      id: 'mock-6',
-      type: 'call',
-      title: 'Missed Video Call',
-      body: 'Jessica Thompson tried to video call you',
-      time: '5h ago',
-      read: true,
-      contactId: 5,
-    },
-    {
-      id: 'mock-7',
-      type: 'number_change',
-      title: 'Contact Updated',
-      body: 'David Martinez changed their phone number',
-      time: 'Yesterday',
-      read: true,
-      contactId: 6,
-    },
-    {
-      id: 'mock-8',
-      type: 'message',
-      title: 'Mom',
-      body: "Don't forget to call your grandmother this weekend!",
-      time: 'Yesterday',
-      read: true,
-      contactId: 7,
-    },
-    {
-      id: 'mock-9',
-      type: 'system',
-      title: 'App Update Available',
-      body: 'Version 2.4.0 is available with new features and improvements',
-      time: '2 days ago',
-      read: true,
-    },
-    {
-      id: 'mock-10',
-      type: 'message',
-      title: 'Study Group',
-      body: 'Lisa: Meeting moved to 3 PM tomorrow',
-      time: '2 days ago',
-      read: true,
-      contactId: 8,
-    },
-    {
-      id: 'mock-11',
-      type: 'call',
-      title: 'Missed Call',
-      body: 'James Anderson tried to call you',
-      time: '3 days ago',
-      read: true,
-      contactId: 9,
-    },
-    {
-      id: 'mock-12',
-      type: 'system',
-      title: 'Privacy Update',
-      body: 'Review the latest privacy policy changes',
-      time: '1 week ago',
-      read: true,
-    },
-  ];
-
-  const [notifications, setNotifications] = useState<AppNotification[]>(mockNotifications);
+  const { user } = useAuth();
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [toast, setToast]                 = useState<AppNotification | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -211,10 +104,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const pushNotification = useCallback(
     async (n: Omit<AppNotification, 'id' | 'time' | 'read'>) => {
+      const callId = Math.random().toString(36).substring(7);
+      console.log(`[NotificationContext-${callId}] pushNotification called with:`, n);
+      
+      const now = new Date();
       const notif: AppNotification = {
         ...n,
         id:   `${Date.now()}-${Math.random()}`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: formatNotificationTime(now),
         read: false,
       };
 
@@ -238,29 +135,19 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               type: notif.type,
             },
           },
-          trigger: null, // Show immediately
+          trigger: null,
         });
       } catch (error) {
-        console.log('[Notifications] Failed to send native notification:', error);
+        console.log(`[NotificationContext-${callId}] Failed to send native notification:`, error);
       }
     },
     [],
   );
 
-  // ── Show welcome toast on mount (demo) ────────────────────────────
-  useEffect(() => {
-    // Delay slightly so the app UI loads first
-    const timeout = setTimeout(() => {
-      pushNotification({
-        type: 'message',
-        title: 'Sarah Wilson',
-        body: 'Hey! Are we still meeting up tomorrow at the cafe?',
-        contactId: 1,
-      });
-    }, 2000); // 2 seconds after app loads
-
-    return () => clearTimeout(timeout);
-  }, [pushNotification]);
+  // ── Sync real-time notifications from Firestore ───────────────────
+  // MUST be after pushNotification is defined — it is passed directly
+  // so the hook never needs to call useNotifications() itself.
+  useNotificationSync(user?.uid ?? null, pushNotification);
 
   const dismissToast = useCallback(() => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -290,47 +177,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       console.log('[Notifications] Failed to set badge count:', err);
     });
   }, [unreadCount]);
-
-  // ── Simulate incoming notifications (for demo purposes) ───────────
-  const simulateIncomingNotification = useCallback(() => {
-    const randomNotifs = [
-      {
-        type: 'message' as NotifType,
-        title: 'Sarah Wilson',
-        body: 'Hey! Just checking if you got my message?',
-        contactId: 1,
-      },
-      {
-        type: 'call' as NotifType,
-        title: 'Incoming Call',
-        body: 'Michael Chen is calling...',
-        contactId: 2,
-      },
-      {
-        type: 'message' as NotifType,
-        title: 'Project Team',
-        body: 'New message: The deadline has been extended!',
-        contactId: 3,
-      },
-      {
-        type: 'system' as NotifType,
-        title: 'Security Alert',
-        body: 'Your account was accessed from a new device',
-      },
-    ];
-
-    const randomNotif = randomNotifs[Math.floor(Math.random() * randomNotifs.length)];
-    pushNotification(randomNotif);
-  }, [pushNotification]);
-
-  // ── Auto-simulate notifications every 15 seconds (demo only) ──────
-  useEffect(() => {
-    const interval = setInterval(() => {
-      simulateIncomingNotification();
-    }, 15000); // Every 15 seconds
-
-    return () => clearInterval(interval);
-  }, [simulateIncomingNotification]);
 
   return (
     <NotificationContext.Provider value={{

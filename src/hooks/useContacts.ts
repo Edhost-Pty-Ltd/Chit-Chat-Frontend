@@ -94,7 +94,16 @@ export function useContacts() {
           const data = doc.data();
           const phone = data.phone as string;
           const contactName = phoneToName.get(phone);
-          
+
+          // Respect the user's profile-photo privacy. These contacts are all
+          // saved in the viewer's phone book, so 'Everyone' and 'Contacts' both
+          // allow the photo; only 'Nobody' hides the Firebase profile photo.
+          // (The device contact photo, photoUri, is the viewer's own data and
+          // always shows.)
+          const photoPrivacy = data.privacyProfilePhoto ?? 'Contacts';
+          const firebasePhotoURL =
+            photoPrivacy === 'Nobody' ? null : (data.photoURL || null);
+
           // All users in this result are in phone contacts (isSaved: true)
           // Use the contact name from phoneToName
           appContacts.push({
@@ -103,7 +112,7 @@ export function useContacts() {
             displayName: contactName ?? phone,
             isSaved:     true, // Always true since we queried for phones in contacts
             photoUri:    phoneToPhoto.get(phone), // Contact photo from device
-            firebasePhotoURL: data.photoURL || null, // Firebase profile photo
+            firebasePhotoURL, // Firebase profile photo (privacy-filtered)
           });
         }
       }

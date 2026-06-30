@@ -94,7 +94,7 @@ export function BiometricGate() {
       <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
       <View style={styles.center}>
         <Image
-          source={require('../../assets/chitchat-logo.png')}
+          source={require('../../assets/icon.png')}
           style={styles.logo}
           resizeMode="contain"
         />

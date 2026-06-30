@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './src/config/firebase';
 
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { useAuth as useHooksAuth } from './src/hooks/useAuth';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { CallProvider } from './src/context/CallContext';
 import { NotificationProvider } from './src/context/NotificationContext';
@@ -55,10 +56,11 @@ function ActivityWatcher() {
   return null;
 }
 
-// Push notification setup
+// Push notification setup — uses the Firebase Auth user uid from hooks/useAuth
 function PushNotificationManager() {
-  const { userId } = useAuth();
-  usePushNotifications(userId);
+  // hooks/useAuth exposes the native Firebase user object with uid
+  const { user } = useHooksAuth();
+  usePushNotifications(user?.uid ?? null);
   return null;
 }
 

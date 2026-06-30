@@ -9,6 +9,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNotifications, AppNotification, NotifType } from '../context/NotificationContext';
+import { useAuth } from '../hooks/useAuth';
+import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 
@@ -34,10 +36,29 @@ function NotifRow({ notif }: { notif: AppNotification }) {
   const { textColor, fontFamily } = useTypography();
   const { markRead } = useNotifications();
   const { bevel } = useGlass();
+  const { user } = useAuth();
 
-  const handlePress = () => {
+  const handlePress = async () => {
     markRead(notif.id);
-    if (notif.contactId != null) {
+    
+    // If notification has a contactId (user ID), open chat with them
+    if (notif.contactId && user?.uid) {
+      try {
+        const chatId = await getOrCreateDirectChat(user.uid, notif.contactId);
+        // We don't have display name here, but ChatScreen will fetch it
+        navigation.navigate('Chat', { 
+          chatId, 
+          displayName: notif.title, // Use title as temporary display name
+          isGroup: false,
+          otherUserId: notif.contactId,
+        });
+      } catch (error) {
+        console.error('[NotifRow] Failed to open chat:', error);
+        // Fallback: just navigate to Chats screen
+        navigation.navigate('Chats');
+      }
+    } else {
+      // No contactId or not logged in - just go to Chats
       navigation.navigate('Chats');
     }
   };

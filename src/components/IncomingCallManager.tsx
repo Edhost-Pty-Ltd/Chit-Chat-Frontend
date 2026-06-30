@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useIncomingCalls } from '../hooks/useIncomingCalls';
 import { useIncomingCallAnswer } from '../hooks/useIncomingCallAnswer';
 import { useCallContext } from '../context/CallContext';
+import { useRingtone } from '../hooks/useRingtone';
 import { SignalingService } from '../services/signalingService';
 import { IncomingCallOverlay } from '.';
 import type { RootStackParamList } from '../types';
@@ -20,9 +21,26 @@ export function IncomingCallManager() {
   const navigation = useNavigation<NavigationProp>();
   const { incomingCall, setIncomingCall, resetCallState } = useCallContext();
   const incomingCallAnswer = useIncomingCallAnswer();
+  const ringtone = useRingtone();
   
   // Listen for incoming calls
   useIncomingCalls(user?.uid || null);
+
+  // Play/stop ringtone when incoming call state changes
+  useEffect(() => {
+    if (incomingCall) {
+      console.log('[IncomingCallManager] Incoming call detected, playing ringtone');
+      ringtone.play();
+    } else {
+      console.log('[IncomingCallManager] No incoming call, stopping ringtone');
+      ringtone.stop();
+    }
+
+    // Cleanup: stop ringtone on unmount
+    return () => {
+      ringtone.stop();
+    };
+  }, [incomingCall]);
 
   // Handle answer
   const handleAnswer = async () => {

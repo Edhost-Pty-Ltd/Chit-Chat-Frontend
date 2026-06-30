@@ -1,6 +1,5 @@
 // ─── Firebase Storage Utilities ───────────────────────────────────────────────
-import { ref, getDownloadURL, deleteObject } from 'firebase/storage';
-import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage as firebaseStorage } from './firebase';
 
 export type UploadType = 'avatar' | 'chatMedia' | 'voice' | 'groupIcon' | 'status';
@@ -23,6 +22,11 @@ function buildPath(type: UploadType, params: {
 }
 
 // ── Upload any file and return download URL ───────────────────────────────────
+// React Native's XMLHttpRequest can create a Blob directly from a local URI
+// (file:// or content://) through the native layer without copying the entire
+// file into a JS string — so large videos won't cause an OOM error.
+// We then hand the Blob to Firebase Storage SDK's uploadBytesResumable which
+// supports progress reporting and automatic retries.
 export async function uploadFile(
   localUri:  string,
   type:      UploadType,
@@ -30,87 +34,45 @@ export async function uploadFile(
   onProgress?: (pct: number) => void,
 ): Promise<string> {
   const path = buildPath(type, params);
-  
-  try {
-    console.log('[Storage] Reading file from:', localUri);
-    
-    // Read file as base64
-    const base64 = await readAsStringAsync(localUri, {
-      encoding: EncodingType.Base64,
+  console.log('[Storage] Uploading file:', localUri, '→', path);
+
+  // Step 1: Obtain a Blob from the local URI without reading it as a string.
+  // The React Native XHR bridge handles this natively, keeping memory usage low.
+  const blob: Blob = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload  = () => resolve(xhr.response as Blob);
+    xhr.onerror = () => reject(new Error('Failed to read local file as blob'));
+    xhr.responseType = 'blob';
+    xhr.open('GET', localUri);
+    xhr.send();
+  });
+
+  // Step 2: Upload the Blob to Firebase Storage with progress reporting.
+  const storageRef = ref(firebaseStorage, path);
+  return new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, blob, {
+      contentType: getMimeType(localUri),
     });
-    
-    console.log('[Storage] File read successfully, getting auth token...');
-    
-    // Get authentication token from Firebase Auth
-    const { getAuth } = await import('@react-native-firebase/auth');
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-    
-    if (!currentUser) {
-      throw new Error('User not authenticated');
-    }
-    
-    const idToken = await currentUser.getIdToken();
-    console.log('[Storage] Got auth token, uploading via XMLHttpRequest...');
-    
-    // Use XMLHttpRequest to upload directly to Firebase Storage
-    // This avoids blob creation issues
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      
-      // Get upload URL from Firebase Storage
-      const storageRef = ref(firebaseStorage, path);
-      
-      // Convert base64 to Uint8Array (no blob needed!)
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      
-      // Upload progress
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
-          const pct = (event.loaded / event.total) * 100;
-          onProgress(Math.round(pct));
+
+    task.on(
+      'state_changed',
+      (snapshot) => {
+        if (onProgress && snapshot.totalBytes > 0) {
+          onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
         }
-      };
-      
-      xhr.onload = async () => {
-        if (xhr.status === 200) {
-          try {
-            // Get download URL after successful upload
-            const downloadURL = await getDownloadURL(storageRef);
-            console.log('[Storage] Upload complete:', downloadURL);
-            resolve(downloadURL);
-          } catch (error) {
-            reject(error);
-          }
-        } else {
-          console.error('[Storage] Upload failed. Status:', xhr.status, 'Response:', xhr.responseText);
-          reject(new Error(`Upload failed with status ${xhr.status}`));
+      },
+      (error) => reject(error),
+      async () => {
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          console.log('[Storage] Upload complete:', url);
+          resolve(url);
+        } catch (e) {
+          reject(e);
         }
-      };
-      
-      xhr.onerror = () => {
-        reject(new Error('Network error during upload'));
-      };
-      
-      // Use Firebase REST API for upload with authentication
-      const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${firebaseStorage.app.options.storageBucket}/o?name=${encodeURIComponent(path)}`;
-      
-      xhr.open('POST', uploadUrl, true);
-      const mimeType = getMimeType(localUri);
-      xhr.setRequestHeader('Content-Type', mimeType);
-      xhr.setRequestHeader('Authorization', `Bearer ${idToken}`);
-      
-      // Send the binary data
-      xhr.send(bytes);
-    });
-  } catch (error) {
-    console.error('[Storage] Upload preparation error:', error);
-    throw error;
-  }
+      },
+    );
+  });
 }
 
 // ── Delete a file from Storage ────────────────────────────────────────────────
@@ -134,29 +96,22 @@ export function getFileExtension(uri: string): string {
 // ── Detect MIME type from file extension ──────────────────────────────────────
 export function getMimeType(uri: string): string {
   const extension = getFileExtension(uri);
-  
+
   const mimeTypes: Record<string, string> = {
-    // Images
     'jpg': 'image/jpeg',
     'jpeg': 'image/jpeg',
     'png': 'image/png',
     'gif': 'image/gif',
     'webp': 'image/webp',
-    
-    // Videos
     'mp4': 'video/mp4',
     'mov': 'video/quicktime',
     'avi': 'video/x-msvideo',
-    
-    // Audio
     'm4a': 'audio/mp4',
     'mp3': 'audio/mpeg',
     'wav': 'audio/wav',
-    
-    // Documents
     'pdf': 'application/pdf',
     'txt': 'text/plain',
   };
-  
+
   return mimeTypes[extension] || 'application/octet-stream';
 }

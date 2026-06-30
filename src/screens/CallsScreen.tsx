@@ -1,14 +1,12 @@
 ﻿// ─── Screen: Calls ───────────────────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet,
-  Modal, Pressable, ScrollView, Alert, ActivityIndicator,
+  Modal, Pressable, ScrollView, Alert, ActivityIndicator, TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
 import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import type { CallHistoryItem } from '../types/call';
@@ -17,9 +15,12 @@ import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/The
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
-import { useOutgoingCall } from '../hooks/useOutgoingCall';
+import { useGroupCall } from '../hooks/useGroupCall';
+import { useActiveCall } from '../context/ActiveCallContext';
 import { useContacts } from '../hooks/useContacts';
+import { usePhoneBook } from '../hooks/usePhoneBook';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
+import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -73,6 +74,8 @@ function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'out
 // ─── Call Info Sheet ──────────────────────────────────────────────────────────
 function CallInfoSheet({
   call,
+  resolvedName,
+  resolvedPhone,
   visible,
   onClose,
   onAudioCall,
@@ -80,6 +83,8 @@ function CallInfoSheet({
   onMessage,
 }: {
   call: CallHistoryItem | null;
+  resolvedName: string;
+  resolvedPhone: string;
   visible: boolean;
   onClose: () => void;
   onAudioCall: () => void;
@@ -105,16 +110,16 @@ function CallInfoSheet({
 
         {/* Contact info header */}
         <View style={styles.infoHeader}>
-          <Avatar
-            initials={getInitials(call.otherParty.displayName)}
-            color={COLORS.blue}
-            size={64}
+          <Avatar 
+            initials={getInitials(resolvedName)} 
+            color={COLORS.blue} 
+            size={64} 
             imageUrl={call.otherParty.photoUrl}
           />
           <View style={styles.infoMeta}>
-            <AppText style={styles.infoName}>{call.otherParty.displayName}</AppText>
+            <AppText style={styles.infoName}>{resolvedName}</AppText>
             <AppText style={styles.infoNum}>
-              {call.otherParty.userId || 'No number saved'}
+              {resolvedPhone || 'No number saved'}
             </AppText>
           </View>
         </View>
@@ -180,24 +185,64 @@ function ContactPickerSheet({
   loading: boolean;
 }) {
   const { bevel } = useGlass();
+  const { FG } = useForeground();
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<TextInput>(null);
+
+  // Filter contacts by name or phone as the user types
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return contacts;
+    return contacts.filter(
+      (c) =>
+        c.displayName?.toLowerCase().includes(q) ||
+        c.phone?.toLowerCase().includes(q)
+    );
+  }, [contacts, query]);
+
+  const handleClose = () => {
+    setQuery('');
+    onClose();
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide"
-      onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.overlay} onPress={onClose} />
+      onRequestClose={handleClose} statusBarTranslucent>
+      <Pressable style={styles.overlay} onPress={handleClose} />
       <View style={styles.sheet}>
         <AppBg />
         <View style={styles.handle} />
 
         {/* Sheet header */}
         <View style={styles.sheetHeader}>
-          <TouchableOpacity onPress={onClose} style={styles.iconPad}>
+          <TouchableOpacity onPress={handleClose} style={styles.iconPad}>
             <AppIcon name="close" size={22} color={COLORS.sub} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <AppText style={styles.sheetTitle}>Call a contact</AppText>
-            <AppText style={styles.sheetSub}>{contacts.length} contacts</AppText>
+            <AppText style={styles.sheetSub}>{filtered.length} contacts</AppText>
           </View>
-          <AppIcon name="search-outline" size={22} color={COLORS.sub} style={styles.iconPad} />
+        </View>
+
+        {/* Search input */}
+        <View style={[styles.searchRow, { backgroundColor: FG.glassBg, borderColor: FG.glassBorder }]}>
+          <AppIcon name="search-outline" size={18} color={COLORS.sub} />
+          <TextInput
+            ref={searchRef}
+            style={[styles.searchInput, { color: COLORS.text }]}
+            placeholder="Search contacts…"
+            placeholderTextColor={COLORS.sub}
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
+            clearButtonMode="while-editing"
+          />
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <AppIcon name="close-circle" size={18} color={COLORS.sub} />
+            </TouchableOpacity>
+          )}
         </View>
 
         <AppText style={styles.sectionHint}>SELECT CONTACT TO CALL</AppText>
@@ -206,20 +251,22 @@ function ContactPickerSheet({
           <View style={styles.centerWrap}>
             <ActivityIndicator size="large" color={COLORS.blue} />
           </View>
-        ) : contacts.length === 0 ? (
+        ) : filtered.length === 0 ? (
           <View style={styles.centerWrap}>
             <AppIcon name="people-outline" size={48} color={COLORS.sub} />
-            <AppText style={styles.emptyText}>No contacts yet</AppText>
+            <AppText style={styles.emptyText}>
+              {query.trim() ? `No contacts matching "${query}"` : 'No contacts yet'}
+            </AppText>
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-            {contacts.map((c) => (
+            {filtered.map((c) => (
               <TouchableOpacity key={c.userId} style={[styles.contactCard, bevel]}
                 activeOpacity={0.75} onPress={() => onSelectAudio(c.userId, c.displayName, c.photoUri || c.firebasePhotoURL || null)}>
-                <Avatar 
-                  initials={getInitials(c.displayName)} 
-                  color={COLORS.blue} 
-                  size={46} 
+                <Avatar
+                  initials={getInitials(c.displayName)}
+                  color={COLORS.blue}
+                  size={46}
                   imageUrl={c.photoUri || c.firebasePhotoURL || null}
                 />
                 <View style={styles.contactMeta}>
@@ -249,9 +296,31 @@ export default function CallsScreen() {
   const { user } = useAuth();
   const { callHistory, loading, error } = useCallHistory(user?.uid ?? null);
   const { contacts, loading: contactsLoading } = useContacts();
-  const outgoingCall = useOutgoingCall();
+  const { resolveName } = usePhoneBook();
+  const groupCall = useGroupCall();
+  const { startCall: startActiveCall } = useActiveCall();
   const { bevel } = useGlass();
   const insets = useSafeAreaInsets();
+
+  // Build a userId → phone map from device contacts so we can resolve names
+  // for call-history entries using the phone-book rule (saved name > phone number).
+  const userIdToPhone = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      if (c.userId) map.set(c.userId, c.phone);
+    }
+    return map;
+  }, [contacts]);
+
+  /** Resolve a display name for a call participant: phone-book name → phone number. */
+  const resolveCallerName = useCallback(
+    (userId: string, fallbackName: string): string => {
+      const phone = userIdToPhone.get(userId);
+      if (!phone) return fallbackName; // not a saved contact — use whatever was stored
+      return resolveName(phone, phone); // saved → contact name; unsaved → phone number
+    },
+    [userIdToPhone, resolveName]
+  );
   
   const [tab, setTab] = useState<CallTab>('All');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -259,59 +328,70 @@ export default function CallsScreen() {
   const [selectedCall, setSelectedCall] = useState<CallHistoryItem | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
 
+  // Resolved display name for the currently-selected call in the info sheet.
+  const selectedCallName = selectedCall
+    ? resolveCallerName(selectedCall.otherParty.userId, selectedCall.otherParty.displayName)
+    : '';
+  // Resolved phone number for the selected call (shown under the name in the sheet).
+  const selectedCallPhone = selectedCall
+    ? (userIdToPhone.get(selectedCall.otherParty.userId) ?? '')
+    : '';
+
   // Filter based on tab
   const filtered = tab === 'Missed' 
     ? callHistory.filter((c) => c.status === 'missed') 
     : callHistory;
 
-  // Handle initiating an audio call from contact picker
-  const handleSelectAudioContact = async (userId: string, displayName: string, photoUrl: string | null) => {
-    if (!user) {
-      Alert.alert('Error', 'You must be logged in to make calls');
+  // ── Shared LiveKit call initiator ─────────────────────────────────────────
+  const startLiveKitCall = async (
+    calleeUserId: string,
+    displayName: string,
+    callType: 'audio' | 'video',
+  ) => {
+    if (!user) { Alert.alert('Error', 'You must be logged in to make calls'); return; }
+
+    // Privacy check
+    const calleePrivacy = await fetchUserPrivacySettings(calleeUserId);
+    if (calleePrivacy.calls === 'Nobody') {
+      Alert.alert("Can't call", `${displayName} has turned off calls.`);
       return;
     }
-    
+
+    // Get or create a direct chat to use as the call room anchor
+    const chatId = await getOrCreateDirectChat(user.uid, calleeUserId);
+    const roomName = `chitchat-${chatId}`;
+    const callerName = user.phoneNumber || user.displayName || 'Unknown';
+
+    const result = await groupCall.initiateGroupCall(
+      chatId,
+      user.uid,
+      callerName,
+      [user.uid, calleeUserId],
+      callType,
+    );
+
+    if (result) {
+      startActiveCall({
+        roomName: result.roomName,
+        displayName: callerName,
+        audioOnly: callType === 'audio',
+        groupName: displayName,   // other person's name for 1-on-1
+        memberCount: 2,
+        chatId,
+        callId: result.callId,
+      });
+    } else {
+      Alert.alert('Call Failed', 'Unable to start call. Please try again.');
+    }
+  };
+
+  // Handle initiating an audio call from contact picker
+  const handleSelectAudioContact = async (userId: string, displayName: string, photoUrl: string | null) => {
+    if (!user) { Alert.alert('Error', 'You must be logged in to make calls'); return; }
     setPickerOpen(false);
     setCalling(true);
-
     try {
-      console.log('[CallsScreen] Initiating audio call to:', displayName);
-      
-      // Fetch current user's profile from Firestore
-      const userProfileRef = doc(db, 'users', user.uid);
-      const userProfileSnap = await getDoc(userProfileRef);
-      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
-      
-      const callId = await outgoingCall.initiateCall(
-        user.uid,
-        userId,
-        { 
-          userId: user.uid, 
-          displayName: userProfile?.displayName || user.phoneNumber || 'Unknown', 
-          photoUrl: userProfile?.photoURL || null 
-        },
-        { 
-          userId, 
-          displayName, 
-          photoUrl 
-        },
-        'audio'
-      );
-
-      if (callId) {
-        // Navigate to audio call screen
-        navigation.navigate('AudioCall', {
-          callId,
-          isOutgoing: true,
-          otherParty: {
-            userId,
-            displayName,
-            photoUrl,
-          },
-        });
-      } else {
-        Alert.alert('Call Failed', 'Unable to initiate call');
-      }
+      await startLiveKitCall(userId, displayName, 'audio');
     } catch (err) {
       console.error('[CallsScreen] Audio call failed:', err);
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
@@ -322,52 +402,11 @@ export default function CallsScreen() {
 
   // Handle initiating a video call from contact picker
   const handleSelectVideoContact = async (userId: string, displayName: string, photoUrl: string | null) => {
-    if (!user) {
-      Alert.alert('Error', 'You must be logged in to make calls');
-      return;
-    }
-    
+    if (!user) { Alert.alert('Error', 'You must be logged in to make calls'); return; }
     setPickerOpen(false);
     setCalling(true);
-
     try {
-      console.log('[CallsScreen] Initiating video call to:', displayName);
-      
-      // Fetch current user's profile from Firestore
-      const userProfileRef = doc(db, 'users', user.uid);
-      const userProfileSnap = await getDoc(userProfileRef);
-      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
-      
-      const callId = await outgoingCall.initiateCall(
-        user.uid,
-        userId,
-        { 
-          userId: user.uid, 
-          displayName: userProfile?.displayName || user.phoneNumber || 'Unknown', 
-          photoUrl: userProfile?.photoURL || null 
-        },
-        { 
-          userId, 
-          displayName, 
-          photoUrl 
-        },
-        'video'
-      );
-
-      if (callId) {
-        // Navigate to video call screen
-        navigation.navigate('VideoCall', {
-          callId,
-          isOutgoing: true,
-          otherParty: {
-            userId,
-            displayName,
-            photoUrl,
-          },
-        });
-      } else {
-        Alert.alert('Call Failed', 'Unable to initiate call');
-      }
+      await startLiveKitCall(userId, displayName, 'video');
     } catch (err) {
       console.error('[CallsScreen] Video call failed:', err);
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
@@ -388,42 +427,16 @@ export default function CallsScreen() {
     try {
       const typeToUse = callType || item.type; // Use passed type or fallback to item type
       console.log('[CallsScreen] Calling back:', item.otherParty.displayName, 'Type:', typeToUse);
-      
-      // Fetch current user's profile from Firestore
-      const userProfileRef = doc(db, 'users', user.uid);
-      const userProfileSnap = await getDoc(userProfileRef);
-      const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
-      
-      const callId = await outgoingCall.initiateCall(
-        user.uid,
-        item.otherParty.userId,
-        { 
-          userId: user.uid, 
-          displayName: userProfile?.displayName || user.phoneNumber || 'Unknown', 
-          photoUrl: userProfile?.photoURL || null 
-        },
-        item.otherParty,
-        typeToUse
-      );
 
-      if (callId) {
-        // Navigate to appropriate call screen based on type
-        if (typeToUse === 'video') {
-          navigation.navigate('VideoCall', {
-            callId,
-            isOutgoing: true,
-            otherParty: item.otherParty,
-          });
-        } else {
-          navigation.navigate('AudioCall', {
-            callId,
-            isOutgoing: true,
-            otherParty: item.otherParty,
-          });
-        }
-      } else {
-        Alert.alert('Call Failed', 'Unable to initiate call');
+      // Check the callee's privacyCalls setting before starting
+      const calleePrivacy = await fetchUserPrivacySettings(item.otherParty.userId);
+      if (calleePrivacy.calls === 'Nobody') {
+        Alert.alert("Can't call", `${resolveCallerName(item.otherParty.userId, item.otherParty.displayName)} has turned off calls.`);
+        return;
       }
+
+      const callerDisplayName = resolveCallerName(item.otherParty.userId, item.otherParty.displayName);
+      await startLiveKitCall(item.otherParty.userId, callerDisplayName, typeToUse);
     } catch (err) {
       console.error('[CallsScreen] Call back failed:', err);
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
@@ -456,6 +469,7 @@ export default function CallsScreen() {
 
   const renderCall = ({ item }: { item: CallHistoryItem }) => {
     const isMissed = item.status === 'missed';
+    const resolvedName = resolveCallerName(item.otherParty.userId, item.otherParty.displayName);
     const statusLabel = item.status === 'completed' && item.duration
       ? formatDuration(item.duration)
       : item.status === 'missed' ? 'Missed'
@@ -470,13 +484,13 @@ export default function CallsScreen() {
         activeOpacity={0.7}
       >
         <Avatar 
-          initials={getInitials(item.otherParty.displayName)} 
+          initials={getInitials(resolvedName)} 
           color={COLORS.blue} 
           size={48} 
           imageUrl={item.otherParty.photoUrl}
         />
         <View style={styles.callMeta}>
-          <AppText style={styles.callName}>{item.otherParty.displayName}</AppText>
+          <AppText style={styles.callName}>{resolvedName}</AppText>
           <View style={styles.callSubRow}>
             <CallDirectionIcon direction={item.direction} status={item.status} />
             <AppText 
@@ -509,7 +523,7 @@ export default function CallsScreen() {
       // Navigate to chat screen
       navigation.navigate('Chat', {
         chatId,
-        displayName: selectedCall.otherParty.displayName,
+        displayName: selectedCallName || selectedCall.otherParty.displayName,
         isGroup: false,
         otherUserId: selectedCall.otherParty.userId,
         otherUserPhoto: selectedCall.otherParty.photoUrl,
@@ -526,6 +540,8 @@ export default function CallsScreen() {
 
       <CallInfoSheet
         call={selectedCall}
+        resolvedName={selectedCallName}
+        resolvedPhone={selectedCallPhone}
         visible={infoOpen}
         onClose={() => setInfoOpen(false)}
         onAudioCall={handleInfoAudioCall}
@@ -722,6 +738,22 @@ const styles = StyleSheet.create({
   sectionHint:{
     fontSize: 10, fontWeight: '700', color: COLORS.sub,
     letterSpacing: 1, paddingHorizontal: 20, paddingVertical: 6,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 14,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
   },
 
   // Contact cards in sheet

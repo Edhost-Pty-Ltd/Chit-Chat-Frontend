@@ -1,23 +1,34 @@
 // ─── usePushNotifications Hook ────────────────────────────────────────────────
-// Handles expo-notifications setup, permissions, and push token registration
+// Handles expo-notifications setup, permissions, and push token registration.
+//
+// NOTE: expo-notifications requires a custom development build.
+// The hook degrades gracefully when the native module is unavailable
+// (Expo Go, web, or a build that hasn't added expo-notifications yet).
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { AppNotification, NotifType } from '../context/NotificationContext';
 
-// Configure how notifications are handled when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Lazy-load expo-notifications so a missing native module doesn't crash startup.
+let Notifications: any = null;
+try {
+  Notifications = require('expo-notifications');
+  // Configure how notifications are handled when app is in foreground.
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+} catch {
+  // expo-notifications native module not available — push notifications disabled.
+  console.warn('[usePushNotifications] expo-notifications not available. Push notifications disabled.');
+}
 
 // usePushNotifications.ts
 export function usePushNotifications(
@@ -25,10 +36,10 @@ export function usePushNotifications(
   onNotificationReceived?: (n: Omit<AppNotification, 'id' | 'time' | 'read'>) => void,
 ) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
+  const [notification, setNotification] = useState<any | null>(null);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !Notifications) return;
 
     registerForPushNotificationsAsync().then((token) => {
       if (token) {
@@ -37,7 +48,9 @@ export function usePushNotifications(
       }
     });
 
-    const subscription1 = Notifications.addNotificationReceivedListener((notif) => {
+    // Listener for notifications received while app is foregrounded
+    const subscription1 = Notifications.addNotificationReceivedListener((notif: any) => {
+      console.log('[usePushNotifications] Notification received:', notif);
       setNotification(notif);
 
       // 🔑 Bridge into the in-app notification context
@@ -50,7 +63,9 @@ export function usePushNotifications(
       });
     });
 
-    const subscription2 = Notifications.addNotificationResponseReceivedListener((response) => {
+    // Listener for when a notification is tapped/interacted with
+    const subscription2 = Notifications.addNotificationResponseReceivedListener((response: any) => {
+      console.log('[usePushNotifications] Notification response:', response);
       handleNotificationResponse(response);
     });
 
@@ -65,6 +80,7 @@ export function usePushNotifications(
 
 // ── Register for push notifications ──────────────────────────────────────────
 async function registerForPushNotificationsAsync(): Promise<string | null> {
+  if (!Notifications) return null;
   let token: string | null = null;
 
   if (Platform.OS === 'android') {
@@ -76,13 +92,11 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     });
   }
 
-  // Check if we're on a physical device
   if (Platform.OS === 'web') {
     console.log('[usePushNotifications] Push notifications not supported on web');
     return null;
   }
 
-  // Request permissions
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
 
@@ -130,31 +144,16 @@ async function savePushToken(userId: string, token: string) {
 }
 
 // ── Handle notification response (when user taps notification) ────────────────
-function handleNotificationResponse(response: Notifications.NotificationResponse) {
+function handleNotificationResponse(response: any) {
   const data = response.notification.request.content.data;
-  
-  // TODO: Add navigation logic based on notification type
   console.log('[usePushNotifications] Notification data:', data);
-  
-  // Example navigation logic:
-  // if (data.type === 'message') {
-  //   navigation.navigate('Chat', { chatId: data.chatId });
-  // } else if (data.type === 'call') {
-  //   // Handle incoming call
-  // } else if (data.type === 'status') {
-  //   navigation.navigate('Status');
-  // }
 }
 
 // ── Helper: Send local notification (for testing) ─────────────────────────────
 export async function sendLocalNotification(title: string, body: string, data?: any) {
+  if (!Notifications) return;
   await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      data,
-    },
-    trigger: null, // Show immediately
+    content: { title, body, data },
+    trigger: null,
   });
 }
-

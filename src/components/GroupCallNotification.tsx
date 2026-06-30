@@ -18,17 +18,22 @@ const { width } = Dimensions.get('window');
 
 interface GroupCallNotificationProps {
   notification: GroupCallNotificationType;
+  memberCount?: number;
   onJoin: () => void;
   onDismiss: () => void;
 }
 
 export default function GroupCallNotification({
   notification,
+  memberCount = 2,
   onJoin,
   onDismiss,
 }: GroupCallNotificationProps) {
   const callTypeIcon = notification.callType === 'video' ? 'videocam' : 'call';
-  const callTypeText = notification.callType === 'video' ? 'Video Call' : 'Voice Call';
+  const callTypeLabel = notification.callType === 'video' ? 'Video Call' : 'Voice Call';
+  // Only label as "Group" when there are more than 2 participants.
+  const isGroup = memberCount > 2;
+  const callTypeText = isGroup ? `Group ${callTypeLabel}` : callTypeLabel;
 
   return (
     <Modal
@@ -45,9 +50,11 @@ export default function GroupCallNotification({
           </View>
 
           {/* Call Info */}
-          <Text style={styles.title}>Incoming Group {callTypeText}</Text>
+          <Text style={styles.title}>Incoming {callTypeText}</Text>
           <Text style={styles.subtitle}>
-            {notification.initiatorName} started a group call
+            {isGroup
+              ? `${notification.initiatorName} started a group call`
+              : `${notification.initiatorName} is calling you`}
           </Text>
 
           {/* Action Buttons */}
