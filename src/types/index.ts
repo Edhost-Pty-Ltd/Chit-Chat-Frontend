@@ -28,6 +28,60 @@ export interface Message {
   type: MessageType;
 }
 
+// ─── Real-time Chat Message (Firestore) ───────────────────────────────────────
+export interface ChatMessage {
+  messageId: string;
+  senderId: string;
+  text: string | null;
+  type: 'text' | 'image' | 'video' | 'voice' | 'audio' | 'file' | 'location' | 'system';
+  
+  // Media URLs
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  voiceUrl?: string | null;
+  audioUrl?: string | null;
+  fileUrl?: string | null;
+  
+  // Media metadata
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  duration?: number;
+  thumbnailUrl?: string;
+  
+  // Location data
+  location?: LocationData | null;
+  isLiveLocation?: boolean;
+  liveLocationExpiry?: Date | null;
+  
+  timestamp: Date;
+  readBy: string[];
+  editedAt?: Date | null;
+  
+  // Block status
+  blockedMessage?: boolean; // Message sent while recipient was blocked
+}
+
+// ─── Location Data ─────────────────────────────────────────────────────────────
+export interface LocationData {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  altitude?: number | null;
+  altitudeAccuracy?: number | null;
+  heading?: number | null;
+  speed?: number | null;
+  timestamp: number;
+}
+
+// ─── Live Location Update ──────────────────────────────────────────────────────
+export interface LiveLocationUpdate {
+  messageId: string;
+  location: LocationData;
+  timestamp: Date;
+  isActive: boolean;
+}
+
 export interface Call {
   id: number;
   name: string;
@@ -46,11 +100,116 @@ export interface StatusUpdate {
   time: string;
 }
 
+// ─── Firestore Status Update ───────────────────────────────────────────────────
+export interface FireStatus {
+  statusId: string;
+  userId: string;
+  displayName: string;
+  userPhone: string | null; // Poster's E.164 phone, for contact-name resolution
+  photoURL: string | null;
+  
+  // Media content
+  mediaUrl: string | null;
+  mediaType: 'image' | 'video' | 'text';
+  thumbnailUrl?: string | null;
+  durationMs?: number; // Duration for image (default 5000ms) and video playback
+  
+  // Text status
+  caption: string | null;
+  backgroundColor: string | null; // For text-only status
+  textColor: string | null;
+  
+  // Metadata
+  createdAt: Date;
+  expiresAt: Date; // 24 hours from createdAt
+  viewedBy: string[]; // Array of userId who viewed
+  
+  // Privacy
+  visibility: 'everyone' | 'contacts' | 'except' | 'only';
+  excludedUsers?: string[];
+  selectedUsers?: string[];
+}
+
+// ─── Calendar ─────────────────────────────────────────────────────────────
+export interface CalendarEvent {
+  id: number;
+  title: string;
+  date: string;       // "YYYY-MM-DD"
+  startTime: string;
+  endTime: string;
+  color: string;
+}
+
+// ─── Notes ────────────────────────────────────────────────────────────────
+export interface DrawStroke {
+  points: { x: number; y: number }[];
+  color: string;
+  width: number;
+}
+
+export interface NoteAttachment {
+  uri: string;
+  name: string;
+  type: 'image' | 'document';
+}
+
+export interface Note {
+  id: number;
+  title: string;
+  preview: string;
+  date: string;
+  checked?: boolean;
+  strokes?: DrawStroke[];
+  attachments?: NoteAttachment[];
+}
+
 // ─── Navigation param list ─────────────────────────────────────────────────
 export type RootStackParamList = {
+  Splash: undefined;
   SignIn: undefined;
   Chats: undefined;
-  Chat: { contact: Contact };
+  Chat: { chatId: string; displayName: string; isGroup: boolean; otherUserId?: string; otherUserPhoto?: string | null };
   Calls: undefined;
   Status: undefined;
+  Contacts: undefined;
+  Calendar: undefined;
+  Notes: undefined;
+  Settings: undefined;
+  Appearance: undefined;
+  Profile: undefined;
+  CreateAccount: undefined;
+  AccountSettings: undefined;
+  PrivacySettings: undefined;
+  NotificationSettings: undefined;
+  ChangeNumber: undefined;
+  Notifications: undefined;
+  LinkedDevices: undefined;
+  BlockedContacts: undefined;
+  GroupCall: {
+    roomName: string;
+    displayName: string;
+    audioOnly: boolean;
+    groupName: string;
+    memberCount: number;
+    chatId?: string;
+    callId?: string;
+  };
+  AudioCall: { 
+    callId: string;
+    isOutgoing: boolean;
+    otherParty: {
+      userId: string;
+      displayName: string;
+      photoUrl: string | null;
+    };
+  };
+  VideoCall: { 
+    callId: string;
+    isOutgoing: boolean;
+    otherParty: {
+      userId: string;
+      displayName: string;
+      photoUrl: string | null;
+    };
+  };
 };

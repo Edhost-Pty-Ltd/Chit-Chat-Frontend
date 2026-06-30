@@ -1,239 +1,645 @@
-// ─── Screen 1: Sign In ───────────────────────────────────────────────────────
-import React, { useState } from 'react';
+// ─── Screen: Sign In ─────────────────────────────────────────────────────────
+//
+// Design:
+//   • Full glass-effect screen — no hero gradient bar, no orb bubble
+//   • App logo (icon.png) centred at the top, no text taglines
+//   • Country-code picker + local number input → 6-digit OTP
+//
+// Stub behaviour (swap sendOtp / verifyOtp for your real backend):
+//   • Any phone number is accepted
+//   • Code "123456" always passes
+//
+import { useState, useRef, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
+  View, TextInput, TouchableOpacity, Image,
+  StyleSheet, ScrollView, KeyboardAvoidingView,
+  Platform, ActivityIndicator, Modal, FlatList,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList } from '../types';
+import { useAuth as useAuthContext } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
+import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppBg, AppText, AppIcon, useGlass } from '../context/ThemeContext';
 
-type NavProp = NativeStackNavigationProp<RootStackParamList, 'SignIn'>;
+// ─── Stub API helpers ─────────────────────────────────────────────────────────
+// Removed - now using Firebase Phone Authentication via useAuth hook
 
-export default function SignInScreen() {
-  const navigation = useNavigation<NavProp>();
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(false);
+// ─── Country Picker Modal ─────────────────────────────────────────────────────
 
-  const handleSignIn = () => navigation.replace('Chats');
+interface CountryPickerProps {
+  visible: boolean;
+  selected: Country;
+  onSelect: (c: Country) => void;
+  onClose: () => void;
+}
+
+function CountryPicker({ visible, selected, onSelect, onClose }: CountryPickerProps) {
+  const [query, setQuery] = useState('');
+  const { bevel } = useGlass();
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return COUNTRIES;
+    return COUNTRIES.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.dial.includes(q) ||
+        c.code.toLowerCase().includes(q),
+    );
+  }, [query]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
     >
-      {/* ── Sky hero ─────────────────────────────────────────────── */}
-      <LinearGradient colors={GRADIENTS.sky} style={styles.hero}>
-        {/* Decorative cloud blobs */}
-        <View style={[styles.cloud, { width: 120, height: 38, top: 28, left: '50%' }]} />
-        <View style={[styles.cloud, { width: 80,  height: 26, top: 56, left: '15%' }]} />
-        <View style={[styles.cloud, { width: 60,  height: 22, top: 40, right: 20   }]} />
+      <SafeAreaView style={picker.root}>
+        <AppBg />
 
-        {/* Logo */}
-        <View style={styles.logoBox}>
-          <Text style={styles.logoIcon}>💬</Text>
-        </View>
-        <Text style={styles.appName}>SkyConnect</Text>
-        <Text style={styles.tagline}>Connect. Share. Anywhere.</Text>
-        <Text style={styles.subTagline}>
-          Messages, calls and more.{'\n'}Simple. Secure. Powerful.
-        </Text>
-      </LinearGradient>
-
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* ── Sign In card ─────────────────────────────────────────── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign In</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="Email or Phone"
-            placeholderTextColor={COLORS.sub}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={email}
-            onChangeText={setEmail}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={COLORS.sub}
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
-
-          {/* Remember me + forgot */}
-          <View style={styles.row}>
-            <TouchableOpacity
-              style={styles.checkRow}
-              onPress={() => setRemember(!remember)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.checkbox, remember && styles.checkboxActive]}>
-                {remember && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={styles.rememberText}>Remember me</Text>
-            </TouchableOpacity>
-            <TouchableOpacity>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Primary button */}
-          <TouchableOpacity onPress={handleSignIn} activeOpacity={0.85}>
-            <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
-              <Text style={styles.primaryBtnText}>Sign In</Text>
-            </LinearGradient>
+        {/* Header */}
+        <View style={picker.header}>
+          <AppText style={picker.title}>Select Country</AppText>
+          <TouchableOpacity onPress={onClose} style={picker.closeBtn}>
+            <AppIcon name="close" size={22} color={COLORS.text} />
           </TouchableOpacity>
+        </View>
 
-          <Text style={styles.orText}>or continue with</Text>
+        {/* Search */}
+        <View style={[picker.searchWrap, bevel]}>
+          <AppIcon name="search-outline" size={16} color={COLORS.sub} style={picker.searchIcon} />
+          <TextInput
+            style={picker.searchInput}
+            placeholder="Search country or code…"
+            placeholderTextColor={COLORS.textFaint}
+            value={query}
+            onChangeText={setQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
+            clearButtonMode="while-editing"
+          />
+        </View>
 
-          {/* Social buttons */}
-          <View style={styles.socialRow}>
-            {[
-              { label: 'G',  bg: '#fff',  color: '#e11d48' },
-              { label: '🍎', bg: '#000',  color: '#fff'    },
-              { label: '⊞',  bg: '#fff',  color: COLORS.blue },
-            ].map((p, i) => (
-              <TouchableOpacity key={i} style={[styles.socialBtn, { backgroundColor: p.bg }]}>
-                <Text style={[styles.socialIcon, { color: p.color }]}>{p.label}</Text>
+        {/* List */}
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.code}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const isSelected = item.code === selected.code;
+            return (
+              <TouchableOpacity
+                style={[picker.item, isSelected && picker.itemSelected]}
+                onPress={() => { onSelect(item); onClose(); setQuery(''); }}
+                activeOpacity={0.7}
+              >
+                <AppText style={picker.flag}>{item.flag}</AppText>
+                <AppText style={picker.countryName}>{item.name}</AppText>
+                <AppText style={picker.dialCode}>+{item.dial}</AppText>
+                {isSelected && (
+                  <AppIcon name="checkmark" size={16} color={COLORS.blue} fixedColor style={picker.check} />
+                )}
               </TouchableOpacity>
-            ))}
-          </View>
-
-          <View style={styles.signUpRow}>
-            <Text style={styles.signUpText}>Don't have an account? </Text>
-            <TouchableOpacity>
-              <Text style={styles.signUpLink}>Sign Up</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ── Sign Out card (shown below for design reference) ───── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign Out</Text>
-          <Text style={styles.signOutSub}>Are you sure you want to sign out?</Text>
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.cancelBtn}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.signOutBtn}>
-              <Text style={styles.signOutText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            );
+          }}
+          ItemSeparatorComponent={() => <View style={picker.sep} />}
+          ListEmptyComponent={
+            <AppText style={picker.empty}>No countries found.</AppText>
+          }
+        />
+      </SafeAreaView>
+    </Modal>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.sky1 },
+// ─── Main Component ───────────────────────────────────────────────────────────
 
-  // Hero
-  hero: {
-    paddingTop: 60, paddingBottom: 36, paddingHorizontal: 28,
+type Step = 'phone' | 'otp';
+
+export default function SignInScreen() {
+  const { signIn: signInToContext } = useAuthContext();
+  const { sendOTP, verifyOTP, error: authError } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'SignIn'>>();
+
+  const { bevel } = useGlass();
+
+  const [step, setStep] = useState<Step>('phone');
+  const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);
+  const [localNumber, setLocalNumber] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [resendTimer, setResendTimer] = useState(0);
+
+  const otpRefs = useRef<Array<TextInput | null>>([null, null, null, null, null, null]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const rawDigits = localNumber.replace(/\D/g, '');
+  const formatted = formatPhoneNumber(rawDigits, country.groups);
+  const fullNumber = `+${country.dial}${rawDigits}`;
+
+  // ── Resend countdown ──────────────────────────────────────────────────────
+
+  const startResendTimer = () => {
+    setResendTimer(60);
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setResendTimer((t) => {
+        if (t <= 1) { clearInterval(timerRef.current!); return 0; }
+        return t - 1;
+      });
+    }, 1000);
+  };
+
+  // ── Step 1: Send OTP ──────────────────────────────────────────────────────
+
+  const handleSendOtp = async () => {
+    const digits = localNumber.replace(/\D/g, '');
+    if (digits.length < country.digits) {
+      setErrorMsg(`Enter a ${country.digits}-digit number for ${country.name}.`);
+      return;
+    }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      const success = await sendOTP(fullNumber);
+      if (success) {
+        setStep('otp');
+        startResendTimer();
+      } else {
+        setErrorMsg(authError || 'Failed to send code. Please try again.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to send code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Step 2: Verify OTP ────────────────────────────────────────────────────
+
+  const handleVerifyOtp = async () => {
+    const code = otp.join('');
+    if (code.length < 6) { setErrorMsg('Enter all 6 digits.'); return; }
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      console.log('[SignInScreen] Verifying OTP code...');
+      const success = await verifyOTP(code);
+      console.log('[SignInScreen] verifyOTP result:', success);
+      
+      if (success) {
+        console.log('[SignInScreen] OTP verified, signing in to context...');
+        // Update the context with phone number for session management
+        try {
+          await signInToContext(fullNumber);
+          console.log('[SignInScreen] Sign-in to context successful');
+
+          // No manual navigation here: AppNavigator switches to the
+          // authenticated stack reactively once isSignedIn + profileExists are
+          // resolved. Manually resetting to 'Chats' fails here because that
+          // route isn't registered while the unauthenticated stack is active.
+          setLoading(false);
+        } catch (contextError: any) {
+          console.error('[SignInScreen] Error signing in to context:', contextError);
+          setErrorMsg(contextError.message || 'Failed to complete sign-in. Please try again.');
+          setLoading(false);
+        }
+      } else {
+        console.log('[SignInScreen] OTP verification failed:', authError);
+        setErrorMsg(authError || 'Incorrect code. Please try again.');
+        setOtp(['', '', '', '', '', '']);
+        otpRefs.current[0]?.focus();
+        setLoading(false);
+      }
+    } catch (err: any) {
+      console.error('[SignInScreen] Exception during verification:', err);
+      setErrorMsg(err.message || 'Verification failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  // ── OTP input helpers ─────────────────────────────────────────────────────
+
+  const handleOtpChange = (text: string, index: number) => {
+    const digit = text.replace(/\D/g, '').slice(-1);
+    const next = [...otp];
+    next[index] = digit;
+    setOtp(next);
+    if (digit && index < 5) otpRefs.current[index + 1]?.focus();
+    if (!digit && index > 0 && text === '') otpRefs.current[index - 1]?.focus();
+  };
+
+  const handleOtpKeyPress = (key: string, index: number) => {
+    if (key === 'Backspace' && !otp[index] && index > 0) {
+      const next = [...otp];
+      next[index - 1] = '';
+      setOtp(next);
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendTimer > 0) return;
+    setOtp(['', '', '', '', '', '']);
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      const success = await sendOTP(fullNumber);
+      if (success) {
+        startResendTimer();
+      } else {
+        setErrorMsg(authError || 'Failed to resend. Please try again.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to resend. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <>
+      {/* Full-screen wrapper so gradient fills behind status bar */}
+      <View style={styles.rootFull}>
+        <LinearGradient colors={GRADIENTS.bg} style={StyleSheet.absoluteFill} />
+
+        <SafeAreaView style={styles.root} edges={['top', 'left', 'right', 'bottom']}>
+          <KeyboardAvoidingView
+            style={styles.root}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <ScrollView
+              contentContainerStyle={styles.scroll}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+            {/* ── Logo block ── */}
+            <View style={styles.logoSection}>
+              <Image
+                source={require('../../assets/chitchat-logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+
+            {/* ── Sign-in card ── */}
+            <View style={[styles.card, bevel]}>
+
+              {step === 'phone' ? (
+                <>
+                  <AppText style={styles.cardTitle}>Sign In</AppText>
+                  <AppText style={styles.cardSub}>
+                    Enter your phone number to receive a verification code.
+                  </AppText>
+
+                  {/* Phone row */}
+                  <View style={styles.phoneRow}>
+                    {/* Tappable flag — no box, no chevron */}
+                    <TouchableOpacity style={styles.flagBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.65}>
+                      <AppText style={styles.dialFlag}>{country.flag}</AppText>
+                    </TouchableOpacity>
+
+                    {/* Dial code + number input in one bevel container */}
+                    <View style={[styles.inputWrap, styles.inputFlex, bevel]}>
+                      <AppText style={styles.dialCodePrefix}>+{country.dial}</AppText>
+                      <View style={styles.dialDivider} />
+                      <TextInput
+                        style={styles.input}
+                        placeholder={Array(country.digits + 1).join('0').replace(/(\d{3})(\d{3})(\d+)/, '$1 $2 $3')}
+                        placeholderTextColor={COLORS.textFaint}
+                        keyboardType="phone-pad"
+                        autoComplete="tel"
+                        textContentType="telephoneNumber"
+                        value={formatted}
+                        onChangeText={(t) => {
+                          const digits = t.replace(/\D/g, '').slice(0, country.digits);
+                          setLocalNumber(digits);
+                          setErrorMsg('');
+                        }}
+                        returnKeyType="done"
+                        onSubmitEditing={handleSendOtp}
+                      />
+                    </View>
+                  </View>
+
+                  {rawDigits.length > 0 && (
+                    <AppText style={styles.previewText}>Will send to: {fullNumber}</AppText>
+                  )}
+                  {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
+
+                  <TouchableOpacity onPress={handleSendOtp} activeOpacity={0.85} disabled={loading}>
+                    <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                      {loading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Send Code</AppText>}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.backRow} onPress={() => { setStep('phone'); setErrorMsg(''); setOtp(['', '', '', '', '', '']); }}>
+                    <AppIcon name="chevron-back" size={18} color={COLORS.blue} fixedColor />
+                    <AppText style={styles.backText}>Change number</AppText>
+                  </TouchableOpacity>
+
+                  <AppText style={styles.cardTitle}>Verify Code</AppText>
+                  <AppText style={styles.cardSub}>
+                    We sent a 6-digit code to{'\n'}
+                    <AppText style={styles.phoneHighlight}>{fullNumber}</AppText>
+                  </AppText>
+
+                  <View style={styles.otpRow}>
+                    {otp.map((digit, i) => (
+                      <TextInput
+                        key={i}
+                        ref={(el) => { otpRefs.current[i] = el; }}
+                        style={[styles.otpBox, digit ? styles.otpBoxFilled : null]}
+                        value={digit}
+                        onChangeText={(t) => handleOtpChange(t, i)}
+                        onKeyPress={({ nativeEvent }) => handleOtpKeyPress(nativeEvent.key, i)}
+                        keyboardType="number-pad"
+                        maxLength={1}
+                        textAlign="center"
+                        selectTextOnFocus
+                      />
+                    ))}
+                  </View>
+
+                  {errorMsg ? <AppText style={styles.error}>{errorMsg}</AppText> : null}
+
+                  <TouchableOpacity onPress={handleVerifyOtp} activeOpacity={0.85} disabled={loading}>
+                    <LinearGradient colors={GRADIENTS.primary} style={styles.primaryBtn}>
+                      {loading ? <ActivityIndicator color="#fff" /> : <AppText style={styles.primaryBtnText} fixedColor>Verify</AppText>}
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  <View style={styles.resendRow}>
+                    <AppText style={styles.resendLabel}>Didn't receive a code? </AppText>
+                    <TouchableOpacity onPress={handleResend} disabled={resendTimer > 0}>
+                      <AppText style={[styles.resendLink, resendTimer > 0 && styles.resendLinkDisabled]}>
+                        {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend'}
+                      </AppText>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={[styles.hintBox, bevel]}>
+                    <AppIcon name="information-circle-outline" size={15} color={COLORS.sub} />
+                    <AppText style={styles.hintText}>
+                      Enter the 6-digit code sent to your phone
+                    </AppText>
+                  </View>
+                </>
+              )}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+
+          {/* ── Create account link — mobile only, below the card ── */}
+          {step === 'phone' && Platform.OS !== 'web' && (
+            <View style={styles.createAccountRow}>
+              <AppText style={styles.createAccountText}>Don't have an account? </AppText>
+              <TouchableOpacity onPress={() => navigation.navigate('CreateAccount')} activeOpacity={0.8}>
+                <AppText style={styles.createAccountLink}>Create one</AppText>
+              </TouchableOpacity>
+            </View>
+          )}
+
+        </SafeAreaView>
+      </View>
+
+      <CountryPicker
+        visible={pickerOpen}
+        selected={country}
+        onSelect={setCountry}
+        onClose={() => setPickerOpen(false)}
+      />
+    </>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  rootFull: { flex: 1 },  // wraps everything, gradient fills behind status bar
+  root:     { flex: 1 },  // SafeAreaView + KeyboardAvoidingView
+
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 48,
+  },
+
+  // ── Logo ──────────────────────────────────────────────────────────────────
+  logoSection: {
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  logoImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 40,
+    // Clip the dark JPEG corners
     overflow: 'hidden',
   },
-  cloud: {
-    position: 'absolute',
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  logoBox: {
-    width: 60, height: 60, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 14,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
-  },
-  logoIcon:   { fontSize: 28 },
-  appName:    { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  tagline:    { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
-  subTagline: { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 8, lineHeight: 20 },
 
-  // Scroll / cards
-  scroll: { padding: 20, gap: 16, paddingBottom: 40 },
-
+  // ── Card ──────────────────────────────────────────────────────────────────
   card: {
-    backgroundColor: COLORS.cardBg,
     borderRadius: RADIUS.xl,
-    padding: 20,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)',
-    ...SHADOW.card,
+    padding: 22,
   },
-  cardTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text, marginBottom: 16 },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 6,
+  },
+  cardSub: {
+    fontSize: 13,
+    color: COLORS.sub,
+    marginBottom: 20,
+    lineHeight: 19,
+  },
 
-  // Inputs
-  input: {
-    backgroundColor: COLORS.inputBg,
+  // ── Phone input row ───────────────────────────────────────────────────────
+  phoneRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 8,
+    alignItems: 'stretch',
+  },
+
+  // Tappable flag — no box, just the emoji
+  flagBtn: {
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialFlag: { fontSize: 26 },
+
+  // Dial code inside the input container
+  dialCodePrefix: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text,
+    paddingLeft: 12,
+    paddingRight: 6,
+  },
+  dialDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: COLORS.border,
+    marginRight: 2,
+  },
+
+  inputWrap: {
     borderRadius: RADIUS.md,
-    borderWidth: 1.5, borderColor: 'rgba(26,127,232,0.18)',
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 14, color: COLORS.text,
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 12,
   },
+  inputFlex: { flex: 1, marginBottom: 0 },
+  input: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: COLORS.text,
+  },
 
-  // Row helpers
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  previewText: {
+    fontSize: 11,
+    color: COLORS.sub,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
 
-  // Checkbox
-  checkRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  checkbox:      { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: COLORS.blue, alignItems: 'center', justifyContent: 'center' },
-  checkboxActive:{ backgroundColor: COLORS.blue },
-  checkmark:     { color: '#fff', fontSize: 11, fontWeight: '700' },
-  rememberText:  { fontSize: 13, color: COLORS.sub },
-  forgotText:    { fontSize: 13, color: COLORS.blue, fontWeight: '600' },
+  error: {
+    fontSize: 13,
+    color: COLORS.missed,
+    marginBottom: 10,
+    marginTop: 2,
+  },
 
-  // Primary button
   primaryBtn: {
-    borderRadius: RADIUS.md, paddingVertical: 14,
+    borderRadius: RADIUS.md,
+    paddingVertical: 15,
     alignItems: 'center',
     ...SHADOW.button,
+    marginTop: 4,
   },
   primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
-  // OR divider
-  orText: { textAlign: 'center', fontSize: 13, color: COLORS.sub, marginVertical: 14 },
+  // ── OTP step ──────────────────────────────────────────────────────────────
+  backRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  backText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
-  // Social buttons
-  socialRow:  { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  socialBtn:  {
-    flex: 1, paddingVertical: 10,
-    borderRadius: RADIUS.sm,
-    borderWidth: 1.5, borderColor: 'rgba(26,127,232,0.15)',
-    alignItems: 'center', justifyContent: 'center',
+  phoneHighlight: { fontWeight: '700', color: COLORS.text },
+
+  otpRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
-  socialIcon: { fontSize: 16, fontWeight: '700' },
-
-  // Sign up link
-  signUpRow:  { flexDirection: 'row', justifyContent: 'center' },
-  signUpText: { fontSize: 13, color: COLORS.sub },
-  signUpLink: { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
-
-  // Sign out card
-  signOutSub: { fontSize: 13, color: COLORS.sub, marginBottom: 14 },
-  cancelBtn:  {
-    flex: 1, paddingVertical: 11,
-    backgroundColor: COLORS.inputBg,
-    borderRadius: RADIUS.sm,
-    borderWidth: 1.5, borderColor: 'rgba(26,127,232,0.18)',
-    alignItems: 'center', marginRight: 8,
+  otpBox: {
+    width: 48,
+    height: 58,
+    borderRadius: RADIUS.md,
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    lineHeight: 58,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    backgroundColor: 'rgba(30,156,240,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
   },
-  cancelText:  { fontSize: 14, fontWeight: '600', color: COLORS.blue },
-  signOutBtn:  {
-    flex: 1, paddingVertical: 11,
-    backgroundColor: COLORS.missed,
-    borderRadius: RADIUS.sm,
+  otpBoxFilled: {
+    borderColor: COLORS.blue,
+    backgroundColor: 'rgba(30,156,240,0.12)',
+    shadowColor: COLORS.blue,
+    shadowOpacity: 0.30,
+  },
+
+  resendRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
+  resendLabel: { fontSize: 13, color: COLORS.sub },
+  resendLink: { fontSize: 13, color: COLORS.blue, fontWeight: '700' },
+  resendLinkDisabled: { color: COLORS.textFaint },
+
+  hintBox: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+    padding: 10,
+    borderRadius: RADIUS.sm,
   },
-  signOutText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  hintText: { fontSize: 12, color: COLORS.sub },
+
+  createAccountRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  createAccountText: { fontSize: 14, color: COLORS.sub },
+  createAccountLink: { fontSize: 14, color: COLORS.blue, fontWeight: '700' },
+});
+
+// ─── Picker Styles ────────────────────────────────────────────────────────────
+
+const picker = StyleSheet.create({
+  root: { flex: 1, overflow: 'hidden' },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  title: { flex: 1, fontSize: 17, fontWeight: '700', color: COLORS.text },
+  closeBtn: { padding: 4 },
+
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 12,
+    marginBottom: 6,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 10,
+  },
+  searchIcon: { marginRight: 6 },
+  searchInput: { flex: 1, paddingVertical: 11, fontSize: 14, color: COLORS.text },
+
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    gap: 12,
+  },
+  itemSelected: { backgroundColor: 'rgba(30,156,240,0.08)' },
+
+  flag: { fontSize: 24, width: 32, textAlign: 'center' },
+  countryName: { flex: 1, fontSize: 15, color: COLORS.text },
+  dialCode: { fontSize: 14, fontWeight: '600', color: COLORS.sub },
+  check: { marginLeft: 4 },
+
+  sep: { height: 1, backgroundColor: COLORS.border, marginLeft: 64 },
+  empty: { textAlign: 'center', color: COLORS.sub, marginTop: 40, fontSize: 14 },
 });
