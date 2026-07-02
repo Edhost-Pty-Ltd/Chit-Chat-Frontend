@@ -15,6 +15,7 @@ import { db } from '../config/firebase';
 import { Avatar } from './index';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW } from '../types/theme';
+import { getDateLabel } from '../utils/dateUtils';
 
 interface MessageInfo {
   userId: string;
@@ -53,17 +54,15 @@ export function MessageInfoModal({
   };
 
   const formatDate = (date: Date): string => {
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    } else {
+    // Use the shared date utility for consistent date labeling
+    const dateLabel = getDateLabel(date, 'long');
+    
+    // If it's not Today/Yesterday, use shorter format for modal
+    if (dateLabel !== 'Today' && dateLabel !== 'Yesterday') {
       return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
     }
+    
+    return dateLabel;
   };
 
   const getInitials = (name: string): string => {

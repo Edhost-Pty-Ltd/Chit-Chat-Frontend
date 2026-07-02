@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NotificationTestPanel } from '../components/NotificationTestPanel';
 
 // Platform-specific imports for native-only modules
 let CameraView: any = null;
@@ -61,6 +62,7 @@ import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
 import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
 import { parseSystemMessage } from '../utils/systemMessageParser';
+import { getDateLabel, groupMessagesByDate } from '../utils/dateUtils';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
 import { TypingIndicator } from '../components/TypingIndicator';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
@@ -244,6 +246,54 @@ export default function ChatScreen() {
       return true;
     });
   }, [messages, userId, isGroup]);
+
+  // ── Group messages by date with separators ──────────────────────
+  // This creates a flat list of messages with date separator items inserted
+  // whenever messages cross a calendar day boundary
+  type MessageListItem = 
+    | { type: 'message'; data: FireMessage }
+    | { type: 'dateSeparator'; dateLabel: string; date: Date };
+
+  const messagesWithDates = useMemo((): MessageListItem[] => {
+    if (filteredMessages.length === 0) return [];
+
+    const items: MessageListItem[] = [];
+    let currentDateLabel: string | null = null;
+
+    filteredMessages.forEach((message, index) => {
+      if (!message.timestamp) {
+        // Skip messages without timestamps
+        items.push({ type: 'message', data: message });
+        return;
+      }
+
+      const messageDate = message.timestamp instanceof Date 
+        ? message.timestamp 
+        : new Date(message.timestamp);
+
+      if (isNaN(messageDate.getTime())) {
+        // Skip invalid dates
+        items.push({ type: 'message', data: message });
+        return;
+      }
+
+      const dateLabel = getDateLabel(messageDate, 'long');
+
+      // Insert date separator if we're entering a new day
+      if (dateLabel !== currentDateLabel) {
+        items.push({
+          type: 'dateSeparator',
+          dateLabel,
+          date: messageDate,
+        });
+        currentDateLabel = dateLabel;
+      }
+
+      items.push({ type: 'message', data: message });
+    });
+
+    return items;
+  }, [filteredMessages]);
 
   // ── Voice player — single-active-player management ─────────────
   const player = useVoicePlayer();
@@ -1683,6 +1733,23 @@ export default function ChatScreen() {
   // ── Check if recording is active ────────────────────────────────
   const isRecording = recorder.state.status === 'recording';
 
+  // ── Render a single message bubble or date separator ────────────
+  const renderItem = ({ item }: { item: MessageListItem }) => {
+    // Handle date separators
+    if (item.type === 'dateSeparator') {
+      return (
+        <View style={styles.datePillWrap}>
+          <View style={styles.datePill}>
+            <AppText style={styles.datePillText}>{item.dateLabel}</AppText>
+          </View>
+        </View>
+      );
+    }
+
+    // Handle messages
+    return renderMessage({ item: item.data });
+  };
+
   // ── Render a single message bubble ──────────────────────────────
   const renderMessage = ({ item }: { item: FireMessage }) => {
     // ── System messages (block/unblock notifications) ───────────────
@@ -2180,21 +2247,14 @@ export default function ChatScreen() {
           </Modal>
 
           {/* ── Messages list ── */}
-          {loading ? renderLoading() : filteredMessages.length === 0 ? renderEmpty() : (
+          {loading ? renderLoading() : messagesWithDates.length === 0 ? renderEmpty() : (
             <FlatList
               ref={listRef}
-              data={filteredMessages}
-              keyExtractor={(item) => item.messageId}
-              renderItem={renderMessage}
+              data={messagesWithDates}
+              keyExtractor={(item) => item.type === 'message' ? item.data.messageId : `date-${item.date.getTime()}`}
+              renderItem={renderItem}
               contentContainerStyle={styles.messageList}
               showsVerticalScrollIndicator={false}
-              ListHeaderComponent={
-                <View style={styles.datePillWrap}>
-                  <View style={styles.datePill}>
-                    <AppText style={styles.datePillText}>Today</AppText>
-                  </View>
-                </View>
-              }
               ListFooterComponent={
                 typingNames.length > 0
                   ? <TypingIndicator names={typingNames} />
