@@ -1,0 +1,19 @@
+QUICK TEST - Add this to your ChatsScreen.tsx to test if notifications work at all:
+
+1. Open: src/screens/ChatsScreen.tsx
+
+2. Add import at the top:
+   import { NotificationTestPanel } from '../components/NotificationTestPanel';
+
+3. Add the component inside your render, right after <AppBg />:
+   <NotificationTestPanel />
+
+4. Save and reload
+
+5. Tap the "Test Message" button
+
+6. Check console for [NotificationContext] logs
+
+If you see [NotificationContext] logs when tapping the test button, then the issue is specifically with the useNotificationSync hook's reference to pushNotification.
+
+If you DON'T see [NotificationContext] logs even with the test button, then there's a more fundamental issue with the context setup.

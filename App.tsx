@@ -22,6 +22,7 @@ import { CallHost } from './src/components/CallHost';
 import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
 import { BiometricGate } from './src/components/BiometricGate';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
+import { useWritePresence } from './src/hooks/usePresence';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -61,6 +62,13 @@ function PushNotificationManager() {
   // hooks/useAuth exposes the native Firebase user object with uid
   const { user } = useHooksAuth();
   usePushNotifications(user?.uid ?? null);
+  return null;
+}
+
+// Presence management — keeps user online/offline status synced at app level
+function PresenceManager() {
+  const { user } = useHooksAuth();
+  useWritePresence(user?.uid ?? null);
   return null;
 }
 
@@ -122,6 +130,7 @@ export default function App() {
                 <ActiveCallProvider>
                   <ActivityWatcher />
                   <PushNotificationManager />
+                  <PresenceManager />
                   <NavigationContainer>
                     <StatusBar style="auto" />
                     <AppNavigator />

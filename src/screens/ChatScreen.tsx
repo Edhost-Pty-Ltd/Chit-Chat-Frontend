@@ -54,7 +54,7 @@ import { useOutgoingCall } from '../hooks/useOutgoingCall';
 import { useLocationSharing } from '../hooks/useLocationSharing';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { usePhoneBook } from '../hooks/usePhoneBook';
-import { useOtherUserPresence, useWritePresence } from '../hooks/usePresence';
+import { useOtherUserPresence } from '../hooks/usePresence';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
 import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useContacts, AppContact } from '../hooks/useContacts';
@@ -327,8 +327,7 @@ export default function ChatScreen() {
     return member?.displayName ?? displayName;
   };
 
-  // ── Presence: write current user online, watch other user's status ────────
-  useWritePresence(userId);
+  // ── Presence: watch other user's status (write presence moved to App level) ─
   // viewerIsContact: true by default — chats only exist between contacts.
   const { statusText: presenceText, isOnline, photoURL: livePhotoURL } = useOtherUserPresence(
     isGroup ? null : otherUserId ?? null,

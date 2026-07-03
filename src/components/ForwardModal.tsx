@@ -1,7 +1,8 @@
 // ─── ForwardModal Component ──────────────────────────────────────────────────
 // Modal for selecting contacts/chats to forward a message to
+// Combines existing chats and contacts list, deduplicated by userId
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Modal,
@@ -15,13 +16,15 @@ import { db } from '../config/firebase';
 import { Avatar } from './index';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW } from '../types/theme';
+import { useContacts } from '../hooks/useContacts';
 
-interface Chat {
-  chatId: string;
+interface ForwardRecipient {
+  id: string; // Unique identifier: chatId for groups, userId for direct chats/contacts
   displayName: string;
   photoURL: string | null;
-  isGroup: boolean;
-  lastMessageTimestamp: Date | null;
+  type: 'group' | 'direct' | 'contact'; // Type of recipient
+  userId?: string; // For deduplication - user ID if it's a person
+  chatId?: string; // Existing chat ID if there's already a conversation
 }
 
 interface ForwardModalProps {
@@ -36,20 +39,26 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
   const { textColor, fontFamily } = useTypography();
   const { bevel } = useGlass();
 
-  const [chats, setChats] = useState<Chat[]>([]);
+  const [recipients, setRecipients] = useState<ForwardRecipient[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedChatIds, setSelectedChatIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [forwarding, setForwarding] = useState(false);
 
-  // Load user's chats
+  // Get contacts from hook
+  const { contacts } = useContacts(currentUserId);
+
+  // Load chats and merge with contacts (deduplicated)
   useEffect(() => {
     if (!visible || !currentUserId) return;
 
-    const loadChats = async () => {
+    let cancelled = false;
+
+    const loadRecipientsAsync = async () => {
       setLoading(true);
       try {
-        console.log('[ForwardModal] Loading chats for user:', currentUserId);
+        console.log('[ForwardModal] Loading recipients for user:', currentUserId);
 
+        // 1. Fetch existing chats
         const chatsRef = collection(db, 'chats');
         const q = query(
           chatsRef,
@@ -59,76 +68,144 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
         );
 
         const snapshot = await getDocs(q);
-        const chatsList: Chat[] = [];
+        const recipientsMap = new Map<string, ForwardRecipient>();
 
+        // 2. Process chats
         for (const docSnap of snapshot.docs) {
+          if (cancelled) return;
+          
           const data = docSnap.data();
           
-          let displayName = 'Unknown';
-          let photoURL: string | null = null;
-          let isGroup = false;
-
           if (data.isGroup) {
-            // Group chat
-            displayName = data.groupName || 'Unnamed Group';
-            photoURL = data.groupPhoto || null;
-            isGroup = true;
+            // Group chat - add directly (groups don't have duplicate issue)
+            recipientsMap.set(docSnap.id, {
+              id: docSnap.id,
+              displayName: data.groupName || 'Unnamed Group',
+              photoURL: data.groupPhoto || null,
+              type: 'group',
+              chatId: docSnap.id,
+            });
           } else {
-            // Direct chat - get other user's info
+            // Direct chat - use userId as key for deduplication
             const otherUserId = (data.members as string[]).find((id: string) => id !== currentUserId);
             if (otherUserId) {
               try {
                 const userDoc = await getDocs(
                   query(collection(db, 'users'), where('__name__', '==', otherUserId), limit(1))
                 );
-                if (!userDoc.empty) {
+                if (!userDoc.empty && !cancelled) {
                   const userData = userDoc.docs[0].data();
-                  displayName = userData.displayName || userData.phone || 'Unknown';
-                  photoURL = userData.photoURL || null;
+                  // Use userId as key to prevent duplicates
+                  recipientsMap.set(otherUserId, {
+                    id: otherUserId, // Use userId as ID for direct chats
+                    displayName: userData.displayName || userData.phone || 'Unknown',
+                    photoURL: userData.photoURL || null,
+                    type: 'direct',
+                    userId: otherUserId,
+                    chatId: docSnap.id, // Store existing chat ID
+                  });
                 }
               } catch (error) {
                 console.warn('[ForwardModal] Could not fetch user data:', error);
               }
             }
           }
-
-          chatsList.push({
-            chatId: docSnap.id,
-            displayName,
-            photoURL,
-            isGroup,
-            lastMessageTimestamp: data.lastMessage?.timestamp?.toDate() || null,
-          });
         }
 
-        console.log('[ForwardModal] Loaded', chatsList.length, 'chats');
-        setChats(chatsList);
+        // 3. Add contacts that aren't already in chats
+        if (contacts && !cancelled) {
+          for (const contact of contacts) {
+            // Only add if not already in map (deduplicated by userId)
+            if (contact.userId && !recipientsMap.has(contact.userId)) {
+              recipientsMap.set(contact.userId, {
+                id: contact.userId,
+                displayName: contact.displayName || contact.phone,
+                photoURL: contact.photoURL || null,
+                type: 'contact',
+                userId: contact.userId,
+                // No chatId - will need to create chat when forwarding
+              });
+            }
+          }
+        }
+
+        if (!cancelled) {
+          // Convert map to array and sort: groups first, then by display name
+          const recipientsList = Array.from(recipientsMap.values()).sort((a, b) => {
+            // Groups first
+            if (a.type === 'group' && b.type !== 'group') return -1;
+            if (a.type !== 'group' && b.type === 'group') return 1;
+            // Then alphabetically
+            return a.displayName.localeCompare(b.displayName);
+          });
+
+          console.log('[ForwardModal] Loaded', recipientsList.length, 'unique recipients');
+          console.log('[ForwardModal] Breakdown:', {
+            groups: recipientsList.filter(r => r.type === 'group').length,
+            directChats: recipientsList.filter(r => r.type === 'direct').length,
+            contactsOnly: recipientsList.filter(r => r.type === 'contact').length,
+          });
+          
+          setRecipients(recipientsList);
+        }
       } catch (error) {
-        console.error('[ForwardModal] Error loading chats:', error);
+        console.error('[ForwardModal] Error loading recipients:', error);
+        if (!cancelled) {
+          setRecipients([]); // Reset on error
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
-    loadChats();
-    setSelectedChatIds([]); // Reset selection when modal opens
-  }, [visible, currentUserId]);
+    loadRecipientsAsync();
+    setSelectedIds([]); // Reset selection when modal opens
 
-  const toggleChatSelection = (chatId: string) => {
-    setSelectedChatIds((prev) =>
-      prev.includes(chatId)
-        ? prev.filter((id) => id !== chatId)
-        : [...prev, chatId]
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, currentUserId, contacts]);
+
+  const toggleRecipientSelection = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((selectedId) => selectedId !== id)
+        : [...prev, id]
     );
   };
 
   const handleForward = async () => {
-    if (selectedChatIds.length === 0) return;
+    if (selectedIds.length === 0) return;
 
     setForwarding(true);
     try {
-      await onForward(selectedChatIds);
+      // Map selected IDs to chat IDs
+      // For groups and existing direct chats, use the chatId
+      // For contacts without chats, we'll need to create or find the chat
+      const chatIds: string[] = [];
+      
+      for (const id of selectedIds) {
+        const recipient = recipients.find(r => r.id === id);
+        if (!recipient) continue;
+
+        if (recipient.chatId) {
+          // Existing chat
+          chatIds.push(recipient.chatId);
+        } else if (recipient.userId) {
+          // Contact without existing chat - need to find or create chat
+          // For now, we'll generate a deterministic chat ID
+          // The forward function will need to handle chat creation
+          const members = [currentUserId, recipient.userId].sort();
+          const chatId = members.join('_');
+          chatIds.push(chatId);
+        }
+      }
+
+      await onForward(chatIds);
       onClose();
+      setSelectedIds([]); // Reset after successful forward
     } catch (error) {
       console.error('[ForwardModal] Forward failed:', error);
     } finally {
@@ -142,13 +219,22 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
     return name.slice(0, 2).toUpperCase();
   };
 
-  const renderChatItem = ({ item }: { item: Chat }) => {
-    const isSelected = selectedChatIds.includes(item.chatId);
+  const renderRecipientItem = ({ item }: { item: ForwardRecipient }) => {
+    const isSelected = selectedIds.includes(item.id);
+
+    let subtitle = '';
+    if (item.type === 'group') {
+      subtitle = 'Group';
+    } else if (item.type === 'direct') {
+      subtitle = 'Direct chat';
+    } else {
+      subtitle = 'Contact';
+    }
 
     return (
       <TouchableOpacity
         style={[styles.chatItem, bevel, isSelected && styles.chatItemSelected]}
-        onPress={() => toggleChatSelection(item.chatId)}
+        onPress={() => toggleRecipientSelection(item.id)}
         activeOpacity={0.7}
       >
         <Avatar
@@ -162,7 +248,7 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
             {item.displayName}
           </AppText>
           <AppText style={[styles.chatItemType, { color: FG.secondary }]}>
-            {item.isGroup ? 'Group' : 'Direct'}
+            {subtitle}
           </AppText>
         </View>
         <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
@@ -202,34 +288,34 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
           </View>
 
           {/* Selected count */}
-          {selectedChatIds.length > 0 && (
+          {selectedIds.length > 0 && (
             <View style={styles.selectedBanner}>
               <AppText style={[styles.selectedText, { color: COLORS.blue }]}>
-                {selectedChatIds.length} {selectedChatIds.length === 1 ? 'chat' : 'chats'} selected
+                {selectedIds.length} selected
               </AppText>
             </View>
           )}
 
-          {/* Chat list */}
+          {/* Recipients list */}
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={COLORS.blue} />
               <AppText style={[styles.loadingText, { color: FG.secondary }]}>
-                Loading chats...
+                Loading...
               </AppText>
             </View>
-          ) : chats.length === 0 ? (
+          ) : recipients.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <AppIcon name="chatbubbles-outline" size={48} color={FG.secondary} />
+              <AppIcon name="people-outline" size={48} color={FG.secondary} />
               <AppText style={[styles.emptyText, { color: FG.secondary }]}>
-                No chats available
+                No contacts or chats available
               </AppText>
             </View>
           ) : (
             <FlatList
-              data={chats}
-              keyExtractor={(item) => item.chatId}
-              renderItem={renderChatItem}
+              data={recipients}
+              keyExtractor={(item) => item.id}
+              renderItem={renderRecipientItem}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
             />
@@ -239,10 +325,10 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
           <TouchableOpacity
             style={[
               styles.forwardBtn,
-              (selectedChatIds.length === 0 || forwarding) && styles.forwardBtnDisabled,
+              (selectedIds.length === 0 || forwarding) && styles.forwardBtnDisabled,
             ]}
             onPress={handleForward}
-            disabled={selectedChatIds.length === 0 || forwarding}
+            disabled={selectedIds.length === 0 || forwarding}
             activeOpacity={0.8}
           >
             {forwarding ? (
@@ -251,7 +337,7 @@ export function ForwardModal({ visible, onClose, onForward, currentUserId }: For
               <>
                 <AppIcon name="arrow-forward" size={20} color="#fff" fixedColor />
                 <AppText fixedColor style={styles.forwardBtnText}>
-                  Forward to {selectedChatIds.length} {selectedChatIds.length === 1 ? 'chat' : 'chats'}
+                  Forward to {selectedIds.length}
                 </AppText>
               </>
             )}

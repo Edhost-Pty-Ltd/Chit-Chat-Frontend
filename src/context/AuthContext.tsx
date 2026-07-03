@@ -20,7 +20,6 @@ import { getAuth, onAuthStateChanged, signOut as fbSignOut } from '@react-native
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { startStatusCleanupService, stopStatusCleanupService } from '../services/statusCleanupService';
-import { writePresence } from '../hooks/usePresence';
 
 // 4 hours in milliseconds
 const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -83,11 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const doSignOut = async () => {
     clearWebTimer();
-    // Mark the user offline before clearing auth
-    try {
-      const currentUser = getAuth().currentUser;
-      if (currentUser) await writePresence(currentUser.uid, false);
-    } catch {}
+    // Presence is managed by PresenceManager in App.tsx (app lifecycle)
+    // No need to manually set offline here - it happens automatically
+    
     // Stop status cleanup service
     stopStatusCleanupService();
     // Sign out from Firebase Auth
@@ -279,9 +276,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('[AuthContext] Sign-in completed successfully - isSignedIn state updated to true');
       console.log('[AuthContext] Current state - phone:', phoneNumber, 'isSignedIn:', true);
       
-      // Mark the user online
-      const currentUser = getAuth().currentUser;
-      if (currentUser) writePresence(currentUser.uid, true).catch(() => {});
+      // Presence is managed by PresenceManager in App.tsx (app lifecycle)
+      // No need to manually set online here - it happens automatically
 
       // Start status cleanup service
       startStatusCleanupService();

@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getDatabase } from 'firebase/database';
 
 // Initialize React Native Firebase (native module)
 // This ensures the native auth module is loaded before we use it
@@ -21,6 +22,7 @@ import './firebaseNative';
 const firebaseConfig = {
   apiKey:            'AIzaSyBzstwF1NgQWASsqVa4R5IiZpFLoKZnSJQ',
   authDomain:        'chit-chat-67a7f.firebaseapp.com',
+  databaseURL:       'https://chit-chat-67a7f-default-rtdb.firebaseio.com',
   projectId:         'chit-chat-67a7f',
   storageBucket:     'chit-chat-67a7f.firebasestorage.app',
   messagingSenderId: '825582316169',
@@ -38,6 +40,11 @@ console.log('[Firebase] Firebase app initialized:', app.name);
 export const db = getFirestore(app);
 
 console.log('[Firebase] Firestore initialized');
+
+// Firebase Realtime Database — for presence system with better disconnect detection
+export const rtdb = getDatabase(app);
+
+console.log('[Firebase] Realtime Database initialized');
 
 // Firebase Storage — voice note audio file hosting
 export const storage = getStorage(app);

@@ -1,0 +1,245 @@
+// ─── Auth Context (Web Implementation) ───────────────────────────────────────
+// Web-specific auth context using Firebase Web SDK
+
+import React, {
+  createContext, useContext, useEffect, useState, useCallback, useRef,
+} from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuth, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db, auth as firebaseAuth } from '../config/firebase';
+
+// 4 hours in milliseconds
+const WEB_SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+const KEYS = {
+  phone:       'auth_phone',
+  signedIn:    'auth_signed_in',
+  lastActive:  'auth_last_active',
+  displayName: 'auth_display_name',
+  avatarUri:   'auth_avatar_uri',
+} as const;
+
+interface AuthContextValue {
+  isSignedIn: boolean;
+  phone: string;
+  displayName: string;
+  setDisplayName: (name: string) => Promise<void>;
+  avatarUri: string | null;
+  setAvatarUri: (uri: string) => Promise<void>;
+  signIn: (phoneNumber: string, userName: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  refreshActivity: () => void;
+  checkSessionTimeout: () => Promise<boolean>;
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [displayName, setDisplayNameState] = useState('');
+  const [avatarUri, setAvatarUriState] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const lastActivityRef = useRef(Date.now());
+
+  // Load persisted data from AsyncStorage
+  const loadPersistedData = useCallback(async () => {
+    try {
+      const [signedIn, savedPhone, savedName, savedAvatar, lastActive] = await Promise.all([
+        AsyncStorage.getItem(KEYS.signedIn),
+        AsyncStorage.getItem(KEYS.phone),
+        AsyncStorage.getItem(KEYS.displayName),
+        AsyncStorage.getItem(KEYS.avatarUri),
+        AsyncStorage.getItem(KEYS.lastActive),
+      ]);
+
+      console.log('[AuthContext-Web] Loaded persisted data:', { signedIn, savedPhone, savedName });
+
+      if (signedIn === 'true' && savedPhone) {
+        // Check session timeout
+        const lastActiveTime = lastActive ? parseInt(lastActive, 10) : Date.now();
+        const elapsed = Date.now() - lastActiveTime;
+
+        if (elapsed > WEB_SESSION_TIMEOUT_MS) {
+          console.log('[AuthContext-Web] Session expired, signing out');
+          await performSignOut();
+          return;
+        }
+
+        setIsSignedIn(true);
+        setPhone(savedPhone);
+        setDisplayNameState(savedName || 'User');
+        setAvatarUriState(savedAvatar);
+        lastActivityRef.current = lastActiveTime;
+      }
+    } catch (error) {
+      console.error('[AuthContext-Web] Failed to load persisted data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Listen to Firebase auth state changes
+  useEffect(() => {
+    if (!firebaseAuth) {
+      console.warn('[AuthContext-Web] Firebase auth not initialized');
+      setLoading(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+      console.log('[AuthContext-Web] Firebase auth state changed:', user?.uid);
+
+      if (user) {
+        // User is signed in
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const userData = userDoc.data();
+
+        const phoneNumber = userData?.phoneNumber || user.email?.replace('@chitchat.test', '') || '';
+        const userName = userData?.displayName || `User ${phoneNumber.slice(-4)}`;
+
+        await signIn(phoneNumber, userName);
+      } else {
+        // User is signed out
+        if (isSignedIn) {
+          await performSignOut();
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Load persisted data on mount
+  useEffect(() => {
+    loadPersistedData();
+  }, [loadPersistedData]);
+
+  // Check session timeout on visibility change
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkSessionTimeout();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isSignedIn]);
+
+  const signIn = useCallback(async (phoneNumber: string, userName: string) => {
+    try {
+      console.log('[AuthContext-Web] Signing in:', phoneNumber);
+      
+      const now = Date.now();
+      await Promise.all([
+        AsyncStorage.setItem(KEYS.signedIn, 'true'),
+        AsyncStorage.setItem(KEYS.phone, phoneNumber),
+        AsyncStorage.setItem(KEYS.displayName, userName),
+        AsyncStorage.setItem(KEYS.lastActive, now.toString()),
+      ]);
+
+      setIsSignedIn(true);
+      setPhone(phoneNumber);
+      setDisplayNameState(userName);
+      lastActivityRef.current = now;
+    } catch (error) {
+      console.error('[AuthContext-Web] signIn error:', error);
+    }
+  }, []);
+
+  const performSignOut = useCallback(async () => {
+    try {
+      console.log('[AuthContext-Web] Signing out');
+      
+      // Sign out from Firebase
+      if (firebaseAuth) {
+        await firebaseSignOut(firebaseAuth);
+      }
+
+      // Clear persisted data
+      await Promise.all([
+        AsyncStorage.removeItem(KEYS.signedIn),
+        AsyncStorage.removeItem(KEYS.phone),
+        AsyncStorage.removeItem(KEYS.displayName),
+        AsyncStorage.removeItem(KEYS.avatarUri),
+        AsyncStorage.removeItem(KEYS.lastActive),
+      ]);
+
+      setIsSignedIn(false);
+      setPhone('');
+      setDisplayNameState('');
+      setAvatarUriState(null);
+    } catch (error) {
+      console.error('[AuthContext-Web] signOut error:', error);
+    }
+  }, []);
+
+  const setDisplayName = useCallback(async (name: string) => {
+    try {
+      await AsyncStorage.setItem(KEYS.displayName, name);
+      setDisplayNameState(name);
+    } catch (error) {
+      console.error('[AuthContext-Web] setDisplayName error:', error);
+    }
+  }, []);
+
+  const setAvatarUri = useCallback(async (uri: string) => {
+    try {
+      await AsyncStorage.setItem(KEYS.avatarUri, uri);
+      setAvatarUriState(uri);
+    } catch (error) {
+      console.error('[AuthContext-Web] setAvatarUri error:', error);
+    }
+  }, []);
+
+  const refreshActivity = useCallback(() => {
+    const now = Date.now();
+    lastActivityRef.current = now;
+    AsyncStorage.setItem(KEYS.lastActive, now.toString()).catch(console.error);
+  }, []);
+
+  const checkSessionTimeout = useCallback(async (): Promise<boolean> => {
+    if (!isSignedIn) return false;
+
+    const elapsed = Date.now() - lastActivityRef.current;
+    if (elapsed > WEB_SESSION_TIMEOUT_MS) {
+      console.log('[AuthContext-Web] Session timeout detected');
+      await performSignOut();
+      return true;
+    }
+
+    return false;
+  }, [isSignedIn, performSignOut]);
+
+  const value: AuthContextValue = {
+    isSignedIn,
+    phone,
+    displayName,
+    setDisplayName,
+    avatarUri,
+    setAvatarUri,
+    signIn,
+    signOut: performSignOut,
+    refreshActivity,
+    checkSessionTimeout,
+  };
+
+  if (loading) {
+    return null; // or loading spinner
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
