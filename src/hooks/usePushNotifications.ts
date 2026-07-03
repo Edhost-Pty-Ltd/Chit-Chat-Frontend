@@ -56,19 +56,27 @@ export function usePushNotifications(
       // 🔑 Bridge into the in-app notification context
       // Pass skipNative=true to prevent scheduling a duplicate native notification
       // (the native notification was already shown by the push system)
-      const data = notif.request.content.data as { type?: string; contactId?: number } | undefined;
+      const data = notif.request.content.data as { 
+        type?: string; 
+        contactId?: string;
+        chatId?: string;
+      } | undefined;
+      
       onNotificationReceived?.({
         type: (data?.type as NotifType) ?? 'system',
         title: notif.request.content.title ?? '',
         body: notif.request.content.body ?? '',
-        contactId: data?.contactId?.toString(),
+        contactId: data?.contactId,
+        chatId: data?.chatId,
       }, true);
     });
 
     // Listener for when a notification is tapped/interacted with
+    // Note: This is now handled by NotificationTapHandler in App.tsx
+    // We keep this subscription here for logging purposes
     const subscription2 = Notifications.addNotificationResponseReceivedListener((response: any) => {
-      console.log('[usePushNotifications] Notification response:', response);
-      handleNotificationResponse(response);
+      console.log('[usePushNotifications] Notification tapped (logged here, handled in App.tsx):', response);
+      // Navigation is handled in NotificationTapHandler component
     });
 
     return () => {
@@ -143,12 +151,6 @@ async function savePushToken(userId: string, token: string) {
   } catch (error) {
     console.error('[usePushNotifications] Error saving push token:', error);
   }
-}
-
-// ── Handle notification response (when user taps notification) ────────────────
-function handleNotificationResponse(response: any) {
-  const data = response.notification.request.content.data;
-  console.log('[usePushNotifications] Notification data:', data);
 }
 
 // ── Helper: Send local notification (for testing) ─────────────────────────────

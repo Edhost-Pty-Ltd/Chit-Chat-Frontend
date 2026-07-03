@@ -39,6 +39,8 @@ export interface AppNotification {
   read:      boolean;
   /** Optional — user ID to navigate to chat with when tapped */
   contactId?: string;
+  /** Optional — chat ID to navigate to when tapped (takes precedence over contactId) */
+  chatId?: string;
 }
 
 interface NotificationContextValue {
@@ -133,6 +135,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               sound: true,
               data: { 
                 contactId: notif.contactId,
+                chatId: notif.chatId,
                 type: notif.type,
               },
             },

@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Notifications from 'expo-notifications';
 
 // Import Firebase config FIRST to ensure it's initialized before any contexts
 import './src/config/firebase';
@@ -23,6 +24,7 @@ import GroupCallNotificationManager from './src/components/GroupCallNotification
 import { BiometricGate } from './src/components/BiometricGate';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { useWritePresence } from './src/hooks/usePresence';
+import { navigationRef, navigationQueue, navigateToChatWhenReady } from './src/services/navigationService';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -70,6 +72,59 @@ function PushNotificationManager() {
 function PresenceManager() {
   const { user } = useHooksAuth();
   useWritePresence(user?.uid ?? null);
+  return null;
+}
+
+// Notification tap handler — handles taps in all app states
+function NotificationTapHandler() {
+  useEffect(() => {
+    // Handle notification tap when app is in FOREGROUND or BACKGROUND
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      console.log('[NotificationTapHandler] Notification tapped (foreground/background):', data);
+      
+      const chatId = data.chatId as string | undefined;
+      const contactId = data.contactId as string | undefined;
+      
+      if (chatId) {
+        // chatId takes precedence - navigate directly to chat
+        console.log('[NotificationTapHandler] Navigating to chat:', chatId);
+        navigateToChatWhenReady(chatId);
+      } else if (contactId) {
+        // Fallback to contactId - for now, log it
+        // In the future, you might want to find/create a chat with this contact
+        console.log('[NotificationTapHandler] Contact ID provided but no chatId:', contactId);
+        // Could implement: look up chat by contactId or create new chat
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    // Handle notification tap when app was KILLED/TERMINATED
+    // This runs once on app launch to check if app was opened by tapping a notification
+    (async () => {
+      const response = await Notifications.getLastNotificationResponseAsync();
+      
+      if (response) {
+        const data = response.notification.request.content.data;
+        console.log('[NotificationTapHandler] App opened from notification (killed state):', data);
+        
+        const chatId = data.chatId as string | undefined;
+        const contactId = data.contactId as string | undefined;
+        
+        if (chatId) {
+          console.log('[NotificationTapHandler] Navigating to chat from killed state:', chatId);
+          // Queue this navigation - it will execute once navigator is ready
+          navigateToChatWhenReady(chatId);
+        } else if (contactId) {
+          console.log('[NotificationTapHandler] Contact ID provided but no chatId (killed state):', contactId);
+        }
+      }
+    })();
+  }, []);
+
   return null;
 }
 
@@ -132,7 +187,14 @@ export default function App() {
                   <ActivityWatcher />
                   <PushNotificationManager />
                   <PresenceManager />
-                  <NavigationContainer>
+                  <NotificationTapHandler />
+                  <NavigationContainer 
+                    ref={navigationRef}
+                    onReady={() => {
+                      console.log('[App] Navigation container ready');
+                      navigationQueue.setReady();
+                    }}
+                  >
                     <StatusBar style="auto" />
                     <AppNavigator />
                     <ToastOverlay />

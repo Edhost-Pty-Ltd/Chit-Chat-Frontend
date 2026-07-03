@@ -132,6 +132,7 @@ export function useNotificationSync(userId: string | null, pushNotification: Pus
                     ? `${senderName}: ${lastMsg.text || 'Sent a media file'}`
                     : (lastMsg.text || 'Sent a media file'),
                   contactId: chatData.type === 'direct' ? lastMsg.senderId : undefined,
+                  chatId: chatId, // Include chatId for direct navigation
                 };
 
                 console.log('[useNotificationSync] Pushing notification:', notificationData);
