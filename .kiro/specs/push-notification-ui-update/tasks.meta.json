@@ -1,0 +1,120 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration test": {
+      "status": "passed",
+      "failingExample": "**Test FAILED as expected** - This confirms the bug exists!\n\n**Counterexamples found:**\n\n1. **Property 1: Message Notification**\n   - Push notification received with type=\"message\", title=\"New Message\"\n   - `pushNotification` call count: 0 (never called)\n   - Expected: call count > 0\n   - Actual: call count = 0\n   - **Root Cause Confirmed**: `onNotificationReceived` callback is undefined\n\n2. **Property-Based Test Counterexample:**\n   - Input: [\"message\", \" \", \" \", undefined]\n   - Test returned `false` - `pushNotification` was NOT invoked\n   - Demonstrates bug across multiple notification types\n\n3. **Property 3: Badge Counter Scenario**\n   - Message notification arrives → pushNotification called 0 times\n   - Expected: badge count increments\n   - Actual: badge count remains 0\n\n4. **Property 4: Call Notification Scenario**\n   - Call notification arrives → pushNotification called 0 times\n   - Expected: in-app alert shown\n   - Actual: no UI update\n\n**Bug Confirmed**: The test failures prove that when `usePushNotifications` is called WITHOUT the `onNotificationReceived` callback parameter (as it is in App.tsx line 63), the `pushNotification` function in NotificationContext is NEVER called, causing the in-app UI to remain unchanged despite push notifications arriving.",
+      "lastRunTimestamp": 1782982500654
+    }
+  },
+  "executionHistory": {
+    "1. Write bug condition exploration test": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981830589
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981850803
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782982524278
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981830746
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782982531355
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782982990873
+      }
+    ],
+    "3.1 Implement the fix": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981830921
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782982999016
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983089756
+      }
+    ],
+    "3.2 Verify bug condition exploration test now passes": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981831045
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983098950
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983458224
+      }
+    ],
+    "3.3 Verify preservation tests still pass": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981831183
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983464192
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983546809
+      }
+    ],
+    "4. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782981831345
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983553116
+      },
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983840064
+      }
+    ],
+    "3. Fix for push notification UI update": [
+      {
+        "executionId": "772fc8f3-b8e8-4760-9533-263f55da3bd2",
+        "chatSessionId": "sess_eb3f08f3-2e2f-48ba-8091-d7c159bc9ab8",
+        "timestamp": 1782983546939
+      }
+    ]
+  }
+}

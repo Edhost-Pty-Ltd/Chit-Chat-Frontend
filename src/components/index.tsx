@@ -103,6 +103,7 @@ export function BottomNav({ active }: BottomNavProps) {
   const { hasUnviewedStatus } = useUnviewedStatus(userId);
   const { missedCount } = useMissedCalls(userId);
 
+  console.log('[BottomNav] userId:', userId, 'totalUnread:', totalUnread);
   // Sit the pill just above the device's system navigation bar / gesture area.
   // insets.bottom adapts per device (0 on devices w/o a system bar, larger for
   // gesture/3-button bars). Falls back to a sensible minimum.

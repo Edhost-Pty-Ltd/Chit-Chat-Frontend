@@ -60,7 +60,7 @@ import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
-import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing } from '../hooks/useChatActions';
+import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead } from '../hooks/useChatActions';
 import { parseSystemMessage } from '../utils/systemMessageParser';
 import { getDateLabel, groupMessagesByDate } from '../utils/dateUtils';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
@@ -224,6 +224,20 @@ export default function ChatScreen() {
   // ── Auth — get current user ID ──────────────────────────────────
   const { user } = useAuth();
   const userId = user?.uid ?? null;
+
+  // Mark chat as read when screen comes into focus
+ useFocusEffect(
+  useCallback(() => {
+    console.log('🟢 [ChatScreen] useFocusEffect triggered - chatId:', chatId, 'userId:', user?.uid);
+    if (chatId && user?.uid) {
+      markChatAsRead(chatId, user.uid).catch((err) => {
+        console.warn('[ChatScreen] Failed to mark chat as read:', err);
+      });
+    } else {
+      console.warn('⚠️ [ChatScreen] Missing chatId or userId:', { chatId, userId: user?.uid });
+    }
+  }, [chatId, user?.uid])
+);
 
   // ── Messages — real-time Firestore stream ───────────────────────
   const { messages, loading, sendMessage } = useMessages(chatId, userId);

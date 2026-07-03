@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import {
   collection, query, orderBy, onSnapshot,
   addDoc, doc, updateDoc, serverTimestamp,
-  Timestamp, increment, getDocs, getDoc,
+  Timestamp, increment, getDocs, getDoc, limit,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { fetchUserPrivacySettings } from './usePrivacySettings';
@@ -152,38 +152,10 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
   // ── Send a text message ───────────────────────────────────────
   async function sendMessage(text: string): Promise<boolean> {
     if (!chatId || !currentUserId || !text.trim()) return false;
-
-    try {
-      const trimmed = text.trim();
-
-      // 1. Add message to subcollection
-      await addDoc(collection(db, 'chats', chatId, 'messages'), {
-        senderId:  currentUserId,
-        text:      trimmed,
-        imageUrl:  null,
-        voiceUrl:  null,
-        type:      'text',
-        timestamp: serverTimestamp(),
-        readBy:    [currentUserId],
-        deliveredTo: [], // Will be populated when recipients come online
-      });
-
-      // 2. Update chat's lastMessage + unread counts for other members
-      const chatRef = doc(db, 'chats', chatId);
-      await updateDoc(chatRef, {
-        'lastMessage.text':      trimmed,
-        'lastMessage.senderId':  currentUserId,
-        'lastMessage.timestamp': serverTimestamp(),
-        // Firestore doesn't support dynamic keys in updateDoc directly,
-        // so we use a helper below
-        ...buildUnreadIncrement(currentUserId),
-      });
-
-      return true;
-    } catch (err: any) {
-      setError(err.message);
-      return false;
-    }
+    
+    // Delegate to the correct implementation in useChatActions
+    const { sendMessage: sendMessageAction } = await import('./useChatActions');
+    return await sendMessageAction(chatId, currentUserId, text);
   }
 
   return { messages, loading, error, sendMessage };
@@ -195,16 +167,14 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
 // If readReceipts is false, only reset the unread counter — do NOT add to readBy.
 async function markAsRead(chatId: string, userId: string, readReceipts = true) {
   try {
-    const chatRef = doc(db, 'chats', chatId);
-    await updateDoc(chatRef, {
-      [`unreadCounts.${userId}`]: 0,
-    });
+    // Note: unreadCounts reset is now handled by useChatActions.markChatAsRead
+    // This function only handles the readBy/deliveredTo updates
 
     if (!readReceipts) return; // User opted out — skip updating readBy / deliveredTo
 
-    // Also mark undelivered messages as delivered
+    // Also mark undelivered messages as delivered (limit to 20 most recent)
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const q = query(messagesRef, orderBy('timestamp', 'desc'));
+    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(20));
     const snapshot = await getDocs(q);
 
     const batch: any[] = [];
@@ -241,13 +211,4 @@ async function markAsRead(chatId: string, userId: string, readReceipts = true) {
     console.warn('[useMessages] Error marking messages:', error);
     // Non-critical — ignore silently
   }
-}
-
-// Build an increment object for all members except the sender
-// Called after sending — increments unread count for every other member
-function buildUnreadIncrement(senderId: string): Record<string, any> {
-  // We can't know other member IDs here without fetching the chat doc,
-  // so we use a Firestore transaction in the ChatsScreen instead.
-  // This is a placeholder — see createChat() for full implementation.
-  return {};
 }
