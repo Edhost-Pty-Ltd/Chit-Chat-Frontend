@@ -171,15 +171,18 @@ export async function markChatAsRead(
   chatId: string,
   userId: string,
 ): Promise<void> {
+  console.log('🔵 [markChatAsRead] Called - chatId:', chatId, 'userId:', userId);
   try {
     const chatRef = doc(db, 'chats', chatId);
     await updateDoc(chatRef, {
       [`unreadCounts.${userId}`]: 0,
     });
-  } catch (_) {
-    // Non-critical
+    console.log('✅ [markChatAsRead] Successfully reset count to 0');
+  } catch (err) {
+    console.error('❌ [markChatAsRead] Error:', err);
   }
 }
+
 
 // ── Send a voice message with unread increments ───────────────────────────────
 export async function sendVoiceMessage(
