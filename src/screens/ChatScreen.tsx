@@ -106,9 +106,12 @@ interface PastMember {
 
 /** Extract up to 2-char initials from a display name */
 function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
+  if (!name || typeof name !== 'string') return '??';
+  const trimmed = name.trim();
+  if (!trimmed) return '??';
+  const parts = trimmed.split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
 /** Format a Date to a short time string like "14:32" */
@@ -213,7 +216,21 @@ export default function ChatScreen() {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const insets = useSafeAreaInsets();
-  const { chatId, displayName, isGroup, otherUserId, otherUserPhoto } = route.params;
+  
+  const params = route.params || {};
+  const { 
+    chatId, 
+    displayName, 
+    isGroup = false, 
+    otherUserId, 
+    otherUserPhoto 
+  } = params;
+  
+  // Safety: Ensure displayName is always a valid string
+  const safeName = displayName && typeof displayName === 'string' && displayName.trim() 
+    ? displayName 
+    : 'Chat';
+  
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
@@ -2155,13 +2172,13 @@ export default function ChatScreen() {
               activeOpacity={0.75}
             >
               <Avatar 
-                initials={getInitials(displayName)} 
+                initials={getInitials(safeName)} 
                 color={COLORS.blue} 
                 size={40}
                 imageUrl={headerPhoto}
               />
               <View style={styles.contactInfo}>
-                <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{displayName}</AppText>
+                <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{safeName}</AppText>
                 <AppText style={[styles.onlineText, { color: isOnline ? COLORS.blue : FG.secondary }]}>
                   {isGroup
                     ? 'Group chat'
@@ -2878,14 +2895,14 @@ export default function ChatScreen() {
               {/* Avatar + name */}
               <View style={styles.profileAvatarWrap}>
                   <Avatar 
-                    initials={getInitials(displayName)} 
+                    initials={getInitials(safeName)} 
                     color={COLORS.blue} 
                     size={80}
                     imageUrl={headerPhoto}
                   />
                 </View>
                 <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>
-                  {displayName}
+                  {safeName}
                 </AppText>
                 <AppText style={[styles.profileStatus, { color: isOnline ? COLORS.blue : FG.secondary }]}>
                   {isGroup ? `Group · ${messages.length} messages` : (presenceText || 'Tap here for info')}
