@@ -5,10 +5,11 @@
 // The hook degrades gracefully when the native module is unavailable
 // (Expo Go, web, or a build that hasn't added expo-notifications yet).
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Platform } from 'react-native';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { AppNotification, NotifType } from '../context/NotificationContext';
 
 // Lazy-load expo-notifications so a missing native module doesn't crash startup.
 let Notifications: any = null;
@@ -17,7 +18,7 @@ try {
   // Configure how notifications are handled when app is in foreground.
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: true,
+      shouldShowAlert: false,
       shouldPlaySound: true,
       shouldSetBadge: true,
       shouldShowBanner: true,
@@ -29,16 +30,17 @@ try {
   console.warn('[usePushNotifications] expo-notifications not available. Push notifications disabled.');
 }
 
-export function usePushNotifications(userId: string | null) {
+// usePushNotifications.ts
+export function usePushNotifications(
+  userId: string | null,
+  onNotificationReceived?: (n: Omit<AppNotification, 'id' | 'time' | 'read'>, skipNative?: boolean) => void,
+) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<any | null>(null);
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
 
   useEffect(() => {
     if (!userId || !Notifications) return;
 
-    // Register for push notifications
     registerForPushNotificationsAsync().then((token) => {
       if (token) {
         setExpoPushToken(token);
@@ -47,26 +49,33 @@ export function usePushNotifications(userId: string | null) {
     });
 
     // Listener for notifications received while app is foregrounded
-    notificationListener.current = Notifications.addNotificationReceivedListener((notif: any) => {
+    const subscription1 = Notifications.addNotificationReceivedListener((notif: any) => {
       console.log('[usePushNotifications] Notification received:', notif);
       setNotification(notif);
+
+      // 🔑 Bridge into the in-app notification context
+      // Pass skipNative=true to prevent scheduling a duplicate native notification
+      // (the native notification was already shown by the push system)
+      const data = notif.request.content.data as { type?: string; contactId?: number } | undefined;
+      onNotificationReceived?.({
+        type: (data?.type as NotifType) ?? 'system',
+        title: notif.request.content.title ?? '',
+        body: notif.request.content.body ?? '',
+        contactId: data?.contactId?.toString(),
+      }, true);
     });
 
     // Listener for when a notification is tapped/interacted with
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response: any) => {
+    const subscription2 = Notifications.addNotificationResponseReceivedListener((response: any) => {
       console.log('[usePushNotifications] Notification response:', response);
       handleNotificationResponse(response);
     });
 
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      subscription1.remove();
+      subscription2.remove();
     };
-  }, [userId]);
+  }, [userId, onNotificationReceived]);
 
   return { expoPushToken, notification };
 }
@@ -104,9 +113,11 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   try {
-    token = (await Notifications.getExpoPushTokenAsync({
+    // Get push token (expo-notifications v56 API requires projectId)
+    const tokenData = await Notifications.getExpoPushTokenAsync({
       projectId: 'e68eeca5-8ee9-4c30-b23f-8cd3616b7c21',
-    })).data;
+    });
+    token = tokenData.data;
     console.log('[usePushNotifications] Push token:', token);
   } catch (error) {
     console.error('[usePushNotifications] Error getting push token:', error);
@@ -148,4 +159,3 @@ export async function sendLocalNotification(title: string, body: string, data?: 
     trigger: null,
   });
 }
-

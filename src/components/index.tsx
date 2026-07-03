@@ -86,7 +86,17 @@ export function BottomNav({ active }: BottomNavProps) {
   const { fontFamily } = useTypography();
   const { bevel } = useGlass();
   const insets = useSafeAreaInsets();
-  const { userId } = useAuth();
+  const auth = useAuth();
+  
+  // Get userId from Firebase Auth (via user hook)
+  const [userId, setUserId] = React.useState<string | null>(null);
+  
+  React.useEffect(() => {
+    const { getAuth } = require('@react-native-firebase/auth');
+    const authInstance = getAuth();
+    const currentUser = authInstance.currentUser;
+    setUserId(currentUser?.uid || null);
+  }, [auth.isSignedIn]);
   
   // Use the hooks directly (now properly imported at the top)
   const { totalUnread } = useUnreadCount(userId);
@@ -272,17 +282,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '700',
-  },
-  statusDot: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#10b981',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.9)',
   },
 
   header:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 52, paddingBottom: 12, ...GLASS.header },
