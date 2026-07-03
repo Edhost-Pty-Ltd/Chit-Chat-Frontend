@@ -47,7 +47,7 @@ interface NotificationContextValue {
   messageCount:   number;
   callCount:      number;
   toast:          AppNotification | null;
-  pushNotification: (n: Omit<AppNotification, 'id' | 'time' | 'read'>) => void;
+  pushNotification: (n: Omit<AppNotification, 'id' | 'time' | 'read'>, skipNative?: boolean) => void;
   dismissToast:   () => void;
   markAllRead:    () => void;
   markRead:       (id: string) => void;
@@ -103,9 +103,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }
 
   const pushNotification = useCallback(
-    async (n: Omit<AppNotification, 'id' | 'time' | 'read'>) => {
+    async (n: Omit<AppNotification, 'id' | 'time' | 'read'>, skipNative?: boolean) => {
       const callId = Math.random().toString(36).substring(7);
-      console.log(`[NotificationContext-${callId}] pushNotification called with:`, n);
+      console.log(`[NotificationContext-${callId}] pushNotification called with:`, n, `skipNative=${skipNative}`);
       
       const now = new Date();
       const notif: AppNotification = {
@@ -123,22 +123,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setToast(null), 4000);
 
-      // Send native device notification
-      try {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: notif.title,
-            body: notif.body,
-            sound: true,
-            data: { 
-              contactId: notif.contactId,
-              type: notif.type,
+      // Send native device notification (skip if already shown by push)
+      if (!skipNative) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: notif.title,
+              body: notif.body,
+              sound: true,
+              data: { 
+                contactId: notif.contactId,
+                type: notif.type,
+              },
             },
-          },
-          trigger: null,
-        });
-      } catch (error) {
-        console.log(`[NotificationContext-${callId}] Failed to send native notification:`, error);
+            trigger: null,
+          });
+        } catch (error) {
+          console.log(`[NotificationContext-${callId}] Failed to send native notification:`, error);
+        }
       }
     },
     [],

@@ -18,7 +18,7 @@ try {
   // Configure how notifications are handled when app is in foreground.
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: true,
+      shouldShowAlert: false,
       shouldPlaySound: true,
       shouldSetBadge: true,
       shouldShowBanner: true,
@@ -33,7 +33,7 @@ try {
 // usePushNotifications.ts
 export function usePushNotifications(
   userId: string | null,
-  onNotificationReceived?: (n: Omit<AppNotification, 'id' | 'time' | 'read'>) => void,
+  onNotificationReceived?: (n: Omit<AppNotification, 'id' | 'time' | 'read'>, skipNative?: boolean) => void,
 ) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<any | null>(null);
@@ -54,13 +54,15 @@ export function usePushNotifications(
       setNotification(notif);
 
       // 🔑 Bridge into the in-app notification context
+      // Pass skipNative=true to prevent scheduling a duplicate native notification
+      // (the native notification was already shown by the push system)
       const data = notif.request.content.data as { type?: string; contactId?: number } | undefined;
       onNotificationReceived?.({
         type: (data?.type as NotifType) ?? 'system',
         title: notif.request.content.title ?? '',
         body: notif.request.content.body ?? '',
-        contactId: data?.contactId,
-      });
+        contactId: data?.contactId?.toString(),
+      }, true);
     });
 
     // Listener for when a notification is tapped/interacted with

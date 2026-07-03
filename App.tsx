@@ -12,7 +12,7 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { useAuth as useHooksAuth } from './src/hooks/useAuth';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { CallProvider } from './src/context/CallContext';
-import { NotificationProvider } from './src/context/NotificationContext';
+import { NotificationProvider, useNotifications } from './src/context/NotificationContext';
 import { FloatingCallProvider } from './src/context/FloatingCallContext';
 import { ActiveCallProvider } from './src/context/ActiveCallContext';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -60,7 +60,8 @@ function ActivityWatcher() {
 function PushNotificationManager() {
   // hooks/useAuth exposes the native Firebase user object with uid
   const { user } = useHooksAuth();
-  usePushNotifications(user?.uid ?? null);
+  const { pushNotification } = useNotifications();
+  usePushNotifications(user?.uid ?? null, pushNotification);
   return null;
 }
 
