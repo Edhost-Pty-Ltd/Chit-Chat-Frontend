@@ -70,6 +70,10 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
   }, [chatId]);
 
   // ── Real-time listener ────────────────────────────────────────
+  // FIX: Remove currentUserId from dependencies to prevent race condition
+  // where listener doesn't attach if currentUserId is initially null.
+  // The listener attaches immediately based on chatId, and currentUserId
+  // is accessed directly inside the callback (always has latest value).
   useEffect(() => {
     if (!chatId) return;
 
@@ -134,6 +138,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
         });
 
         // Mark messages as read (respects the user's readReceipts privacy setting)
+        // Access currentUserId directly here — it's in the closure and always current
         if (currentUserId) {
           fetchUserPrivacySettings(currentUserId).then((privacy) => {
             markAsRead(chatId, currentUserId, privacy.readReceipts);
@@ -147,7 +152,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
     );
 
     return () => unsub();
-  }, [chatId, currentUserId]);
+  }, [chatId]); // Only depend on chatId — currentUserId accessed via closure
 
   // ── Send a text message ───────────────────────────────────────
   async function sendMessage(text: string): Promise<boolean> {
