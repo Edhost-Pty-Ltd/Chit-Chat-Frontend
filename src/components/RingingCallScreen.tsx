@@ -5,7 +5,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, AppIcon } from '../context/ThemeContext';
-import { Avatar } from './Avatar';
+import { Avatar } from './index';
 import { COLORS, GRADIENTS } from '../types/theme';
 import type { CallParticipant } from '../types/call';
 
@@ -94,16 +94,18 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
         <View style={styles.avatarContainer}>
           {otherParty.photoUrl ? (
             <Avatar
-              source={{ uri: otherParty.photoUrl }}
+              imageUrl={otherParty.photoUrl}
+              initials={getInitials(otherParty.displayName)}
+              color={COLORS.blue}
               size={120}
-              name={otherParty.displayName}
             />
           ) : (
-            <View style={[styles.avatarFallback, { backgroundColor: COLORS.blue }]}>
-              <AppText fixedColor style={styles.avatarText}>
-                {getInitials(otherParty.displayName)}
-              </AppText>
-            </View>
+            <Avatar
+              imageUrl={null}
+              initials={getInitials(otherParty.displayName)}
+              color={COLORS.blue}
+              size={120}
+            />
           )}
         </View>
       </View>
@@ -160,19 +162,6 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     overflow: 'hidden',
-    backgroundColor: COLORS.blue,
-  },
-  avatarFallback: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 40,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
   info: {
     alignItems: 'center',
