@@ -21,6 +21,8 @@ import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
+import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -371,15 +373,81 @@ export default function CallsScreen() {
     );
 
     if (result) {
-      startActiveCall({
-        roomName: result.roomName,
-        displayName: callerName,
-        audioOnly: callType === 'audio',
-        groupName: displayName,   // other person's name for 1-on-1
-        memberCount: 2,
-        chatId,
+      // Navigate to outgoing call screen (ringing UI)
+      navigation.navigate('OutgoingCall', {
         callId: result.callId,
+        displayName: displayName,
+        callType: callType,
+        photoUrl: null,  // TODO: Fetch from user profile if needed
       });
+
+      // Set up listener for call status changes
+      const callRef = doc(db, 'groupCalls', result.callId);
+      
+      const unsubscribe = onSnapshot(callRef, (snapshot) => {
+        if (!snapshot.exists()) {
+          // Call was cancelled/deleted
+          console.log('[CallsScreen] Call document deleted');
+          unsubscribe();
+          return;
+        }
+
+        const callData = snapshot.data();
+        console.log('[CallsScreen] Call status update:', callData.status);
+        
+        if (callData.status === 'active') {
+          // Receiver accepted! Now join the room
+          console.log('[CallsScreen] Call accepted, joining room');
+          unsubscribe();
+          
+          // Navigate away from OutgoingCall screen if still there
+          if (navigation.getState().routes[navigation.getState().routes.length - 1]?.name === 'OutgoingCall') {
+            navigation.goBack();
+          }
+          
+          startActiveCall({
+            roomName: result.roomName,
+            displayName: callerName,
+            audioOnly: callType === 'audio',
+            groupName: displayName,
+            memberCount: 2,
+            chatId,
+            callId: result.callId,
+          });
+        } else if (callData.status === 'declined' || callData.status === 'cancelled') {
+          // Call was rejected/cancelled
+          console.log('[CallsScreen] Call', callData.status);
+          unsubscribe();
+          
+          // Navigate away from OutgoingCall screen if still there
+          if (navigation.getState().routes[navigation.getState().routes.length - 1]?.name === 'OutgoingCall') {
+            navigation.goBack();
+          }
+          
+          Alert.alert('Call ended', `The call was ${callData.status}.`);
+        }
+      });
+      
+      // Add 30-second timeout to mark call as missed
+      setTimeout(async () => {
+        try {
+          const snap = await getDoc(callRef);
+          if (snap.exists() && snap.data().status === 'ringing') {
+            console.log('[CallsScreen] Call timeout - no answer after 30 seconds');
+            await updateDoc(callRef, { status: 'missed' });
+            unsubscribe();
+            
+            // Navigate away from OutgoingCall screen if still there
+            if (navigation.getState().routes[navigation.getState().routes.length - 1]?.name === 'OutgoingCall') {
+              navigation.goBack();
+            }
+            
+            Alert.alert('No answer', 'The call was not answered.');
+          }
+        } catch (err) {
+          console.error('[CallsScreen] Timeout check failed:', err);
+        }
+      }, 30000);
     } else {
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
     }

@@ -21,7 +21,8 @@ export interface GroupCallData {
   initiatorId: string;
   initiatorName: string;
   callType: 'audio' | 'video';
-  status: 'active' | 'ended';
+  status: 'ringing' | 'active' | 'ended' | 'declined' | 'cancelled' | 'missed';
+  isGroup: boolean;  // true if 3+ participants, false if 2 (1-on-1)
   startedAt: Timestamp;
   participants: string[]; // Array of user IDs in the group
   activeParticipants?: string[]; // Users currently in the call
@@ -62,10 +63,11 @@ export function useGroupCall() {
           initiatorId,
           initiatorName,
           callType,
-          status: 'active',
+          status: 'ringing',  // Start as 'ringing', not 'active'
+          isGroup: groupMemberIds.length > 2,  // true if 3+, false if 2
           startedAt: serverTimestamp() as Timestamp,
           participants: groupMemberIds,
-          activeParticipants: [initiatorId],
+          activeParticipants: [],  // Empty until someone joins
         };
 
         await setDoc(groupCallRef, groupCallData);

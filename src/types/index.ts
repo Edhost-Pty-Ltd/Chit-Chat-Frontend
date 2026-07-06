@@ -194,6 +194,12 @@ export type RootStackParamList = {
     chatId?: string;
     callId?: string;
   };
+  OutgoingCall: {
+    callId: string;
+    displayName: string;
+    callType: 'audio' | 'video';
+    photoUrl: string | null;
+  };
   AudioCall: { 
     callId: string;
     isOutgoing: boolean;

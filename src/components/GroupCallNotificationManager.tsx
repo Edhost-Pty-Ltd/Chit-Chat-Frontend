@@ -5,7 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useGroupCallNotifications } from '../hooks/useGroupCallNotifications';
@@ -57,6 +57,10 @@ export default function GroupCallNotificationManager() {
     const joined = await joinGroupCall(currentNotification.callId, user.uid);
 
     if (joined) {
+      // Update call status to 'active' so caller knows to join
+      const callRef = doc(db, 'groupCalls', currentNotification.callId);
+      await updateDoc(callRef, { status: 'active' });
+      
       // Fetch group info from chat document
       try {
         const chatRef = doc(db, 'chats', currentNotification.chatId);

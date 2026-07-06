@@ -92,21 +92,12 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
 
         {/* Avatar */}
         <View style={styles.avatarContainer}>
-          {otherParty.photoUrl ? (
-            <Avatar
-              imageUrl={otherParty.photoUrl}
-              initials={getInitials(otherParty.displayName)}
-              color={COLORS.blue}
-              size={120}
-            />
-          ) : (
-            <Avatar
-              imageUrl={null}
-              initials={getInitials(otherParty.displayName)}
-              color={COLORS.blue}
-              size={120}
-            />
-          )}
+          <Avatar
+            imageUrl={otherParty.photoUrl}
+            initials={getInitials(otherParty.displayName)}
+            color={COLORS.blue}
+            size={120}
+          />
         </View>
       </View>
 
