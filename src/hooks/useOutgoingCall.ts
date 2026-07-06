@@ -18,6 +18,7 @@ export function useOutgoingCall() {
   const [error, setError] = useState<string | null>(null);
   const callIdRef = useRef<string | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Timeout for no answer
   const answerProcessedRef = useRef<boolean>(false); // Track if answer has been processed
   const iceCandidatesProcessedRef = useRef<Set<string>>(new Set()); // Track processed ICE candidates
 
@@ -32,6 +33,10 @@ export function useOutgoingCall() {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
     };
   }, []);
@@ -68,21 +73,22 @@ export function useOutgoingCall() {
         setActiveCallId(callId);
         setCallStatus('ringing');
 
-        // Step 2: Initialize WebRTC peer connection
-        const isVideo = callType === 'video';
-        console.log('[useOutgoingCall] Initializing peer connection... Video:', isVideo);
-        await initializePeerConnection(isVideo);
-
-        // Step 3: Create WebRTC offer
-        console.log('[useOutgoingCall] Creating offer... Video:', isVideo);
-        const offer = await createOffer(isVideo);
-
-        // Step 4: Save offer to Firestore
-        console.log('[useOutgoingCall] Saving offer to Firestore...');
-        await SignalingService.saveOffer(callId, offer);
-
-        // Step 5: Listen for answer from callee and status changes
+        // Step 2: Listen for answer from callee and status changes
         console.log('[useOutgoingCall] Listening for answer and status changes...');
+        
+        // Set 30-second timeout for no answer
+        timeoutRef.current = setTimeout(async () => {
+          console.log('[useOutgoingCall] 30-second timeout reached - no answer');
+          await SignalingService.updateCallStatus(callId, 'missed');
+          setCallStatus('missed');
+          setError('No answer');
+          cleanup();
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+          }
+        }, 30000);
+        
         unsubscribeRef.current = SignalingService.onCallUpdated(callId, async (call) => {
           if (!call) return;
 
@@ -91,6 +97,10 @@ export function useOutgoingCall() {
           // Handle call rejected/missed/ended FIRST before processing answer - IMMEDIATE cleanup
           if (call.status === 'rejected') {
             console.log('[useOutgoingCall] Call rejected - immediate cleanup');
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
             cleanup(); // Cleanup FIRST
             setCallStatus('rejected');
             setError('Call rejected');
@@ -101,6 +111,10 @@ export function useOutgoingCall() {
             return; // Stop processing
           } else if (call.status === 'missed') {
             console.log('[useOutgoingCall] Call missed - immediate cleanup');
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
             cleanup(); // Cleanup FIRST
             setCallStatus('missed');
             setError('Call not answered');
@@ -111,6 +125,11 @@ export function useOutgoingCall() {
             return; // Stop processing
           } else if (call.status === 'ended') {
             console.log('[useOutgoingCall] Call ended by remote party - immediate cleanup');
+            
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
             
             // Cleanup WebRTC FIRST to stop audio immediately
             cleanup();
@@ -126,23 +145,37 @@ export function useOutgoingCall() {
             return; // Stop processing
           }
 
-          // When callee answers (only process if not already processed)
+          // When callee answers - NOW connect to media room
           if (call.answer && call.status === 'accepted') {
             if (answerProcessedRef.current) {
               console.log('[useOutgoingCall] Answer already processed, skipping...');
               // Don't process answer again, but continue to ICE candidates
             } else {
-              console.log('[useOutgoingCall] Answer received, setting remote description...');
+              console.log('[useOutgoingCall] Answer received! Now connecting to media room...');
               
               // Mark as processed immediately to prevent duplicate processing
               answerProcessedRef.current = true;
               
               try {
+                // Clear timeout since call was answered
+                if (timeoutRef.current) {
+                  clearTimeout(timeoutRef.current);
+                  timeoutRef.current = null;
+                }
+                
+                // NOW initialize peer connection (after receiver accepted)
+                const isVideo = callType === 'video';
+                console.log('[useOutgoingCall] Initializing peer connection... Video:', isVideo);
+                await initializePeerConnection(isVideo);
+
+                // Set remote answer
+                console.log('[useOutgoingCall] Setting remote answer...');
                 await setRemoteAnswer(call.answer);
+                
                 setCallStatus('connected');
                 console.log('[useOutgoingCall] Call connected!');
               } catch (err) {
-                console.error('[useOutgoingCall] Failed to set remote answer:', err);
+                console.error('[useOutgoingCall] Failed to establish connection:', err);
                 setError('Failed to establish connection');
                 setCallStatus('failed');
                 // Reset flag on error so it can be retried
@@ -197,6 +230,11 @@ export function useOutgoingCall() {
       console.log('[useOutgoingCall] Ending call...');
 
       try {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
+        
         // Update call status in Firestore
         console.log('[useOutgoingCall] Step 1: Updating Firestore status to ended...');
         await SignalingService.updateCallStatus(callId, 'ended', duration);
@@ -274,6 +312,11 @@ export function useOutgoingCall() {
     console.log('[useOutgoingCall] Cancelling call...');
 
     try {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      
       await SignalingService.updateCallStatus(callId, 'ended');
       cleanup();
 

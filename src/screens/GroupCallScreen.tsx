@@ -326,6 +326,39 @@ function RoomView({
     return () => clearInterval(t);
   }, []);
 
+  // Listen for call status changes in Firestore (server-side call ending)
+  useEffect(() => {
+    if (!callId) return;
+
+    console.log('[GroupCallScreen] Setting up Firestore listener for call:', callId);
+
+    const unsubscribe = import('firebase/firestore').then(async ({ doc, onSnapshot }) => {
+      const { db } = await import('../config/firebase');
+      const callRef = doc(db, 'groupCalls', callId);
+      
+      return onSnapshot(callRef, (snapshot) => {
+        if (!snapshot.exists()) {
+          console.log('[GroupCallScreen] Call document no longer exists - ending call');
+          onEnded();
+          return;
+        }
+
+        const data = snapshot.data();
+        console.log('[GroupCallScreen] Call status update:', data?.status);
+
+        // If server ended the call (e.g., because only 1 participant remained)
+        if (data?.status === 'ended') {
+          console.log('[GroupCallScreen] Call ended by server - disconnecting');
+          onEnded();
+        }
+      });
+    });
+
+    return () => {
+      unsubscribe.then((unsub) => unsub?.()).catch((e) => console.warn('[GroupCallScreen] Listener cleanup failed:', e));
+    };
+  }, [callId, onEnded]);
+
   // Ensure mic and camera are publishing once the local participant connects.
   // `LiveKitRoom audio/video` props handle the initial intent, but this safety
   // net ensures the tracks are actually published even if the room connects
