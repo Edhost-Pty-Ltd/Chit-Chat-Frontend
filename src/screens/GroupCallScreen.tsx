@@ -589,10 +589,32 @@ function RoomView({
         style: 'destructive',
         onPress: async () => {
           historyWrittenRef.current = true;
+          
+          console.log('[GroupCallScreen] Hang up - removing from activeParticipants');
+          
+          // Step 1: Leave the call in Firestore (updates activeParticipants)
           try {
-            if (callId && userId) await groupCall.leaveGroupCall(callId, userId);
-          } catch {}
-          try { await room.disconnect(); } catch {}
+            if (callId && userId) {
+              await groupCall.leaveGroupCall(callId, userId);
+              console.log('[GroupCallScreen] Successfully left call in Firestore');
+            }
+          } catch (e) {
+            console.error('[GroupCallScreen] Failed to leave call:', e);
+          }
+          
+          // Step 2: Small delay to let Cloud Function trigger and update status
+          // This ensures other participants see the status change before we disconnect
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Step 3: Disconnect from LiveKit room
+          try {
+            await room.disconnect();
+            console.log('[GroupCallScreen] Disconnected from LiveKit room');
+          } catch (e) {
+            console.error('[GroupCallScreen] Room disconnect failed:', e);
+          }
+          
+          // Step 4: End call locally and navigate away
           await handleCallEnd(callDuration);
         },
       },

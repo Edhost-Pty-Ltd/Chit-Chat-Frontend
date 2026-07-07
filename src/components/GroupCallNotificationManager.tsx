@@ -53,14 +53,33 @@ export default function GroupCallNotificationManager() {
 
     console.log('[GroupCallNotificationManager] Joining group call:', currentNotification.callId);
 
-    // Join the call in Firestore
+    // Mark the call active FIRST. joinGroupCall() only adds a participant when
+    // the call is already 'active', so the status update must happen before it,
+    // otherwise the receiver is never added to activeParticipants and the call
+    // appears to end immediately.
+    const callRef = doc(db, 'groupCalls', currentNotification.callId);
+    try {
+      const snap = await getDoc(callRef);
+      if (!snap.exists() || ['ended', 'declined', 'cancelled', 'missed'].includes(snap.data()?.status)) {
+        // Call is gone or already terminated — treat as a stale notification.
+        console.warn('[GroupCallNotificationManager] Call no longer available; dismissing notification');
+        await dismissNotification(currentNotification.callId);
+        Alert.alert('Call ended', 'This call has already ended.');
+        setCurrentNotification(null);
+        return;
+      }
+      await updateDoc(callRef, { status: 'active' });
+    } catch (err) {
+      console.error('[GroupCallNotificationManager] Failed to mark call active:', err);
+      await dismissNotification(currentNotification.callId);
+      setCurrentNotification(null);
+      return;
+    }
+
+    // Now add the receiver to activeParticipants (status is 'active' at this point).
     const joined = await joinGroupCall(currentNotification.callId, user.uid);
 
     if (joined) {
-      // Update call status to 'active' so caller knows to join
-      const callRef = doc(db, 'groupCalls', currentNotification.callId);
-      await updateDoc(callRef, { status: 'active' });
-      
       // Fetch group info from chat document
       try {
         const chatRef = doc(db, 'chats', currentNotification.chatId);
@@ -123,7 +142,24 @@ export default function GroupCallNotificationManager() {
   const handleDismiss = async () => {
     if (!currentNotification) return;
 
-    console.log('[GroupCallNotificationManager] Dismissing notification:', currentNotification.callId);
+    console.log('[GroupCallNotificationManager] Declining call:', currentNotification.callId);
+
+    // For 1-on-1 calls, mark the call 'declined' so the caller's ringing screen
+    // dismisses immediately. For group calls, only dismiss THIS receiver's
+    // notification — the call continues for the remaining participants.
+    if (callMemberCount <= 2) {
+      try {
+        const callRef = doc(db, 'groupCalls', currentNotification.callId);
+        const snap = await getDoc(callRef);
+        // Only decline while still ringing — don't clobber an active/ended call.
+        if (snap.exists() && snap.data()?.status === 'ringing') {
+          await updateDoc(callRef, { status: 'declined' });
+        }
+      } catch (err) {
+        console.error('[GroupCallNotificationManager] Failed to mark call declined:', err);
+      }
+    }
+
     await dismissNotification(currentNotification.callId);
     setCurrentNotification(null);
   };

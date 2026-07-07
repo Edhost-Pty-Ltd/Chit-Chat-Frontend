@@ -190,24 +190,26 @@ export function useGroupCall() {
         }
 
         const callData = callSnap.data() as GroupCallData;
+        
+        // Guard: If call already ended, skip the leave operation
+        if (callData.status !== 'active') {
+          console.log('[useGroupCall] Call already ended, skipping leave:', callData.status);
+          return;
+        }
+
         const activeParticipants = callData.activeParticipants || [];
 
         // Remove user from active participants
         const updatedParticipants = activeParticipants.filter(id => id !== userId);
 
-        // If no participants left, end the call
-        if (updatedParticipants.length === 0) {
-          await updateDoc(groupCallRef, {
-            status: 'ended',
-            activeParticipants: [],
-          });
-          console.log('[useGroupCall] Last participant left - call ended');
-        } else {
-          await updateDoc(groupCallRef, {
-            activeParticipants: updatedParticipants,
-          });
-          console.log('[useGroupCall] User left call, remaining:', updatedParticipants.length);
-        }
+        // Always update activeParticipants, let Cloud Function handle ending the call
+        await updateDoc(groupCallRef, {
+          activeParticipants: updatedParticipants,
+        });
+        console.log('[useGroupCall] User left call, remaining participants:', updatedParticipants.length);
+        
+        // Cloud Function 'checkGroupCallParticipants' will detect ≤1 participants
+        // and automatically set status: 'ended' for everyone
       } catch (err) {
         console.error('[useGroupCall] Failed to leave group call:', err);
       }

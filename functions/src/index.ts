@@ -111,16 +111,23 @@ export const checkGroupCallParticipants = functionsV1.firestore
     const before = change.before.data();
     const after = change.after.data();
     
-    // Only proceed if activeParticipants changed and call is still active
+    // Only proceed if the call is still active
     if (!after || after.status !== 'active') {
       return null;
     }
     
+    const beforeParticipants = before?.activeParticipants || [];
     const activeParticipants = after.activeParticipants || [];
-    
-    // If 1 or fewer participants remain, end the call for everyone
-    if (activeParticipants.length <= 1) {
-      console.log(`[checkGroupCallParticipants] Only ${activeParticipants.length} participant(s) left in call ${context.params.callId} - ending call`);
+
+    // Only end the call when participants DROP to <= 1 from a previously-joined
+    // state of >= 2. This is critical: during connect, participants are added
+    // one at a time (callee: 1, then caller: 2). Ending at <= 1 unconditionally
+    // would kill every call the moment the first participant is added.
+    const droppedToOneOrFewer =
+      beforeParticipants.length >= 2 && activeParticipants.length <= 1;
+
+    if (droppedToOneOrFewer) {
+      console.log(`[checkGroupCallParticipants] Participants dropped from ${beforeParticipants.length} to ${activeParticipants.length} in call ${context.params.callId} - ending call`);
       
       await change.after.ref.update({
         status: 'ended',

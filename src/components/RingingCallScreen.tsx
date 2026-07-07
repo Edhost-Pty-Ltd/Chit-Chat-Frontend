@@ -6,7 +6,7 @@ import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppText, AppIcon } from '../context/ThemeContext';
 import { Avatar } from './index';
-import { COLORS, GRADIENTS } from '../types/theme';
+import { COLORS } from '../types/theme';
 import type { CallParticipant } from '../types/call';
 
 interface RingingCallScreenProps {
@@ -64,7 +64,10 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
   };
 
   return (
-    <LinearGradient colors={GRADIENTS.dark} style={styles.container}>
+    <LinearGradient
+      colors={['rgba(10,22,40,0.98)', 'rgba(13,34,68,0.98)', 'rgba(26,74,138,0.98)']}
+      style={styles.container}
+    >
       {/* Pulsing rings */}
       <View style={styles.ringContainer}>
         {[pulse1, pulse2, pulse3].map((pulse, index) => (
@@ -115,7 +118,7 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
       <View style={styles.actions}>
         <View style={styles.endCallButton} onTouchEnd={onEndCall}>
           <LinearGradient colors={['#E74C3C', '#C0392B']} style={styles.endCallGradient}>
-            <AppIcon name="phone" size={28} color="#FFFFFF" />
+            <AppIcon name="call" size={28} color="#FFFFFF" fixedColor />
           </LinearGradient>
           <AppText fixedColor style={styles.actionLabel}>
             End Call
@@ -146,7 +149,7 @@ const styles = StyleSheet.create({
     height: 240,
     borderRadius: 120,
     borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderColor: COLORS.blue,
   },
   avatarContainer: {
     width: 120,
