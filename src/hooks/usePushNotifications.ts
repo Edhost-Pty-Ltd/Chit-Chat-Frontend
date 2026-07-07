@@ -72,11 +72,20 @@ export function usePushNotifications(
     });
 
     // Listener for when a notification is tapped/interacted with
-    // Note: This is now handled by NotificationTapHandler in App.tsx
-    // We keep this subscription here for logging purposes
     const subscription2 = Notifications.addNotificationResponseReceivedListener((response: any) => {
-      console.log('[usePushNotifications] Notification tapped (logged here, handled in App.tsx):', response);
-      // Navigation is handled in NotificationTapHandler component
+      console.log('[usePushNotifications] Notification tapped:', response);
+
+      const data = response.notification.request.content.data as { type?: string } | undefined;
+
+      // Calendar notifications navigate to the Calendar screen.
+      if (data?.type === 'calendar-event') {
+        const { navigateTo } = require('../navigation/navigationRef');
+        navigateTo('Calendar');
+        return;
+      }
+
+      // Chat and other notifications are handled by NotificationTapHandler in
+      // App.tsx, which navigates to the relevant chat using the chatId payload.
     });
 
     return () => {

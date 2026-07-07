@@ -9,7 +9,6 @@ import {
   Timestamp, increment, getDocs, getDoc, limit,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { fetchUserPrivacySettings } from './usePrivacySettings';
 import { loadLocalMessages, mergeLocalMessages } from './useLocalMessages';
 
 export interface FireMessage {
@@ -20,7 +19,10 @@ export interface FireMessage {
   voiceUrl:   string | null;
   videoUrl:   string | null;
   fileUrl:    string | null;
-  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system';
+  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call';
+  callType?: 'audio' | 'video';
+  callDuration?: number | null;  // in seconds
+  callStatus?: 'completed' | 'missed' | 'rejected' | 'busy' | 'failed';
   timestamp:  Date | null;
   expiresAt:  Date | null;
   readBy:     string[];
@@ -47,7 +49,8 @@ export interface FireMessage {
     messageId: string;
     senderId: string;
     text: string | null;
-    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system';
+   type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call';
+
   } | null;
 }
 
@@ -70,10 +73,6 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
   }, [chatId]);
 
   // ── Real-time listener ────────────────────────────────────────
-  // FIX: Remove currentUserId from dependencies to prevent race condition
-  // where listener doesn't attach if currentUserId is initially null.
-  // The listener attaches immediately based on chatId, and currentUserId
-  // is accessed directly inside the callback (always has latest value).
   useEffect(() => {
     if (!chatId) return;
 
@@ -100,6 +99,9 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
               videoUrl:  d.videoUrl  ?? null,
               fileUrl:   d.fileUrl   ?? null,
               type:      d.type      ?? 'text',
+              callType: d.callType ?? null,
+              callDuration: d.callDuration ?? null,
+              callStatus: d.callStatus ?? null,
               timestamp: d.timestamp
                 ? (d.timestamp as Timestamp).toDate()
                 : null,
@@ -137,12 +139,10 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
           setLoading(false);
         });
 
-        // Mark messages as read (respects the user's readReceipts privacy setting)
-        // Access currentUserId directly here — it's in the closure and always current
+        // Mark incoming messages as DELIVERED (not read) when they arrive
+        // Read receipts are handled separately when user opens the chat
         if (currentUserId) {
-          fetchUserPrivacySettings(currentUserId).then((privacy) => {
-            markAsRead(chatId, currentUserId, privacy.readReceipts);
-          });
+          markAsDelivered(chatId, currentUserId);
         }
       },
       (err) => {
@@ -152,7 +152,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
     );
 
     return () => unsub();
-  }, [chatId]); // Only depend on chatId — currentUserId accessed via closure
+  }, [chatId, currentUserId]);
 
   // ── Send a text message ───────────────────────────────────────
   async function sendMessage(text: string): Promise<boolean> {
@@ -163,7 +163,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
     return await sendMessageAction(chatId, currentUserId, text);
   }
 
-  return { messages, loading, error, sendMessage };
+  return { messages, loading, error, sendMessage, markAsRead };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -172,48 +172,51 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
 // If readReceipts is false, only reset the unread counter — do NOT add to readBy.
 async function markAsRead(chatId: string, userId: string, readReceipts = true) {
   try {
-    // Note: unreadCounts reset is now handled by useChatActions.markChatAsRead
-    // This function only handles the readBy/deliveredTo updates
+    if (!readReceipts) return;
 
-    if (!readReceipts) return; // User opted out — skip updating readBy / deliveredTo
-
-    // Also mark undelivered messages as delivered (limit to 20 most recent)
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(20));
+    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(30));
     const snapshot = await getDocs(q);
 
-    const batch: any[] = [];
-    snapshot.docs.forEach((docSnap) => {
+    for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
+      if (data.senderId === userId) continue;
+
       const deliveredTo = data.deliveredTo || [];
       const readBy = data.readBy || [];
 
-      // If not delivered yet, mark as delivered
-      if (!deliveredTo.includes(userId) && data.senderId !== userId) {
-        batch.push({
-          ref: docSnap.ref,
-          updates: {
-            deliveredTo: [...deliveredTo, userId],
-            readBy: readBy.includes(userId) ? readBy : [...readBy, userId],
-          },
-        });
-      } else if (!readBy.includes(userId) && data.senderId !== userId) {
-        // If delivered but not read, mark as read
-        batch.push({
-          ref: docSnap.ref,
-          updates: {
-            readBy: [...readBy, userId],
-          },
-        });
-      }
-    });
+      if (readBy.includes(userId)) continue;
 
-    // Execute batch updates
-    for (const item of batch) {
-      await updateDoc(item.ref, item.updates);
+      const updates: any = { readBy: [...readBy, userId] };
+      if (!deliveredTo.includes(userId)) {
+        updates.deliveredTo = [...deliveredTo, userId];
+      }
+      await updateDoc(docSnap.ref, updates);
     }
   } catch (error) {
-    console.warn('[useMessages] Error marking messages:', error);
-    // Non-critical — ignore silently
+    console.warn('[useMessages] Error marking as read:', error);
+  }
+}
+
+// Mark incoming messages as DELIVERED when they arrive on device
+// WhatsApp-style: double grey tick means delivered to recipient's device
+async function markAsDelivered(chatId: string, userId: string) {
+  try {
+    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(30));
+    const snapshot = await getDocs(q);
+
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data();
+      if (data.senderId === userId) continue;
+      const deliveredTo = data.deliveredTo || [];
+      if (deliveredTo.includes(userId)) continue;
+
+      await updateDoc(docSnap.ref, {
+        deliveredTo: [...deliveredTo, userId],
+      });
+    }
+  } catch (error) {
+    console.warn('[useMessages] Error marking as delivered:', error);
   }
 }

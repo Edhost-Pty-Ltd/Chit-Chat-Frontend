@@ -696,3 +696,84 @@ export async function stopLiveLocationSharing(
     return { success: false };
   }
 }
+
+// ── Send a call message to chat ──────────────────────────────────────────────
+export async function sendCallMessage(
+  chatId: string,
+  senderId: string,
+  callType: 'audio' | 'video',
+  callDuration: number | null, // in seconds
+  callStatus: 'completed' | 'missed' | 'rejected' | 'busy' | 'failed'
+): Promise<{ success: boolean; messageId: string }> {
+  try {
+    console.log('[sendCallMessage] Sending call message to chat:', { chatId, callType, callDuration, callStatus });
+
+    // Get chat members
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) return { success: false, messageId: '' };
+
+    const members: string[] = chatSnap.data().members ?? [];
+    const otherMembers = members.filter((id) => id !== senderId);
+
+    // Calculate expiry time (72 hours from now)
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+
+    // Format call text for lastMessage
+    const callEmoji = callType === 'video' ? '📹' : '📞';
+    const callTypeText = callType === 'video' ? 'Video call' : 'Voice call';
+
+    let callText = `${callEmoji} ${callTypeText}`;
+    if (callStatus === 'completed' && callDuration) {
+      const mins = Math.floor(callDuration / 60);
+      const secs = callDuration % 60;
+      callText += ` • ${mins}:${String(secs).padStart(2, '0')}`;
+    } else if (callStatus === 'missed') {
+      callText += ' • Missed';
+    } else if (callStatus === 'rejected') {
+      callText += ' • Declined';
+    } else if (callStatus === 'busy') {
+      callText += ' • Busy';
+    } else if (callStatus === 'failed') {
+      callText += ' • Failed';
+    }
+
+    // Create message
+    const batch = writeBatch(db);
+    const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+
+    batch.set(msgRef, {
+      messageId: msgRef.id,
+      senderId,
+      text: callText,
+      type: 'call',
+      callType,
+      callDuration,
+      callStatus,
+      timestamp: serverTimestamp(),
+      expiresAt: expiresAt,
+      readBy: [senderId],
+      deliveredTo: [],
+    });
+
+    // Update chat lastMessage + increment unread for other members
+    const unreadUpdates = Object.fromEntries(
+      otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
+    );
+
+    batch.update(chatRef, {
+      'lastMessage.text': callText,
+      'lastMessage.senderId': senderId,
+      'lastMessage.timestamp': serverTimestamp(),
+      ...unreadUpdates,
+    });
+
+    await batch.commit();
+    console.log('[sendCallMessage] Call message sent successfully');
+    return { success: true, messageId: msgRef.id };
+  } catch (err) {
+    console.error('[sendCallMessage] Error:', err);
+    return { success: false, messageId: '' };
+  }
+}
+

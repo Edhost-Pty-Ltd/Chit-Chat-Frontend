@@ -175,7 +175,7 @@ export class SignalingService {
   }
   
   // ── Save call to history ────────────────────────────────────────────────────
-  static async saveToCallHistory(
+    static async saveToCallHistory(
     userId: string,
     callId: string,
     otherParty: CallParticipant,
@@ -183,7 +183,9 @@ export class SignalingService {
     direction: 'incoming' | 'outgoing',
     status: 'completed' | 'missed' | 'rejected' | 'busy' | 'failed',
     duration: number | null,
+    chatId?: string,  // ADD THIS LINE
   ): Promise<void> {
+
     const historyRef = doc(db, 'users', userId, 'callHistory', callId);
     
     await setDoc(historyRef, {
@@ -196,6 +198,33 @@ export class SignalingService {
       timestamp: serverTimestamp(),
     });
     
-    console.log('[SignalingService] Call saved to history:', { userId, callId });
+        console.log('[SignalingService] Call saved to history:', { userId, callId });
+
+    // Also send call message to chat if chatId is provided
+        console.log('[SignalingService] Call saved to history:', { userId, callId, duration, chatId, direction });
+
+    // Also send call message to chat if chatId is provided
+    console.log('[SignalingService] Checking if should send chat message:', {
+      hasChatId: !!chatId,
+      direction,
+      willSend: !!(chatId && direction === 'outgoing')
+    });
+
+    if (chatId && direction === 'outgoing') {
+      try {
+        console.log('[SignalingService] Sending call message to chat:', { chatId, userId, type, duration, status });
+        const { sendCallMessage } = await import('../hooks/useChatActions');
+        await sendCallMessage(chatId, userId, type, duration, status);
+        console.log('[SignalingService] ✅ Call message sent successfully to chat:', chatId);
+      } catch (error) {
+        console.error('[SignalingService] ❌ Failed to send call message:', error);
+      }
+    } else {
+      console.log('[SignalingService] ⚠️ Skipping chat message - chatId:', chatId, 'direction:', direction);
+    }
+
   }
 }
+
+  
+

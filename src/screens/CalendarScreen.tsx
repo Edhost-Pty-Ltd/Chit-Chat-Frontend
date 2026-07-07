@@ -1,19 +1,23 @@
 // --- Screen: Calendar --------------------------------------------------------
-// Uses expo-calendar to read from and write to the device's native calendar.
+// Uses AsyncStorage for local event persistence + expo-notifications for reminders.
 // 5 view modes: Year | Month | Week | Day | Schedule
+import { scheduleEventNotification, cancelEventNotification } from '../services/calendarNotifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, ScrollView, SectionList,
   Modal, TextInput, Alert, Platform, PanResponder, KeyboardAvoidingView,
 } from 'react-native';
-// expo-calendar requires a native build � lazy load so Expo Go doesn't crash
-let Calendar: any = null;
-try { Calendar = require('expo-calendar'); } catch { /* Expo Go / web */ }
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
+
+const EVENTS_STORAGE_KEY = '@chit_chat_calendar_events';
+
+
+
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type ViewMode = 'year' | 'month' | 'week' | 'day' | 'schedule';
@@ -675,10 +679,8 @@ export default function CalendarScreen() {
   const [selDay,    setSelDay]    = useState(today.getDate());
   const [selDate,   setSelDate]   = useState<Date>(today);  // used by week/day
   const [events,    setEvents]    = useState<SimpleEvent[]>([]);
-  const [calendars, setCalendars] = useState<any[]>([]);
   const [formOpen,  setFormOpen]  = useState(false);
   const [editing,   setEditing]   = useState<Partial<SimpleEvent & { startStr: string; endStr: string }> | undefined>();
-  const [hasPermission, setHasPermission] = useState(false);
   const [menuOpen,  setMenuOpen]  = useState(false);
 
   // Swipe left/right to navigate months (also week�7 and day�1)
@@ -700,122 +702,98 @@ export default function CalendarScreen() {
   // Store navigate in a ref so PanResponder can call it without stale closure
   const navigateRef = useRef<(dir: 1 | -1) => void>(() => {});
 
-  // -- Request permissions & load ------------------------------------------
+  // -- Load events from AsyncStorage on mount & focus -------------------------
   useEffect(() => {
-    (async () => {
-      if (Platform.OS === 'web' || !Calendar) { setHasPermission(false); return; }
-      const { status } = await Calendar.requestPermissionsAsync();
-      if (status === 'granted') {
-        setHasPermission(true);
-        loadCalendars();
-      } else {
-        Alert.alert('Calendar access needed', 'Allow calendar access to read and create events on your device.');
-      }
-    })();
+    loadEventsFromStorage();
   }, []);
 
-  const loadCalendars = async () => {
-    if (!Calendar) return;
-    const cals = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-    setCalendars(cals);
+  // Reload events when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadEventsFromStorage();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  const loadEventsFromStorage = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(EVENTS_STORAGE_KEY);
+      if (stored) {
+        const parsed: any[] = JSON.parse(stored);
+        const hydrated = parsed.map((e) => ({
+          ...e,
+          start: new Date(e.start),
+          end:   new Date(e.end),
+        }));
+        setEvents(hydrated);
+        console.log('[CalendarScreen] Loaded', hydrated.length, 'events from storage');
+      }
+    } catch (error) {
+      console.error('[CalendarScreen] Error loading events:', error);
+    }
   };
 
-  // Reload events whenever month/year changes
-  useEffect(() => {
-    if (!hasPermission) return;
-    loadEvents();
-  }, [year, month, hasPermission]);
-
-  const loadEvents = async () => {
-    if (!Calendar) return;
-    // Load a wider range to cover week/day views that may cross month boundaries
-    const start = new Date(year, month - 1, 1, 0, 0, 0);
-    const end   = new Date(year, month + 2, 0, 23, 59, 59);
+  const persistEvents = async (updatedEvents: SimpleEvent[]) => {
     try {
-      const raw = await Calendar.getEventsAsync(
-        calendars.map((c) => c.id),
-        start, end,
-      );
-      setEvents(raw.map((e) => ({
-        id:         e.id,
-        title:      e.title,
-        start:      new Date(e.startDate),
-        end:        new Date(e.endDate),
-        color:      e.color ?? EVENT_COLORS[0],
-        calendarId: e.calendarId,
-        notes:      e.notes ?? '',
-      })));
-    } catch {}
+      const serialized = updatedEvents.map((e) => ({
+        ...e,
+        start: e.start.toISOString(),
+        end:   e.end.toISOString(),
+      }));
+      await AsyncStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(serialized));
+      console.log('[CalendarScreen] Persisted', updatedEvents.length, 'events to storage');
+    } catch (error) {
+      console.error('[CalendarScreen] Error persisting events:', error);
+    }
   };
 
   const saveEvent = async (ev: SimpleEvent) => {
-    // Always update local state immediately so the event appears on the correct
-    // date in every view (month grid, day list, week, schedule) right away.
-    if (ev.id) {
-      // Editing an existing event
-      setEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...ev } : e)));
-    } else {
-      // New event — generate a local id so it can be edited/deleted later
-      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const newEv   = { ...ev, id: localId };
-      setEvents((prev) => [...prev, newEv]);
+    let updatedEvents: SimpleEvent[];
 
-      // Also write to the native calendar when permission is available
-      if (hasPermission && Calendar) {
-        try {
-          const details: any = {
-            title:      newEv.title,
-            startDate:  newEv.start,
-            endDate:    newEv.end,
-            notes:      newEv.notes,
-            calendarId: newEv.calendarId ?? calendars.find((c: any) => c.allowsModifications)?.id,
-            color:      newEv.color as any,
-            allDay:     false,
-            timeZone:   Intl.DateTimeFormat().resolvedOptions().timeZone,
-          };
-          const nativeId = await Calendar.createEventAsync(details.calendarId!, details);
-          // Replace the local placeholder id with the real native id
-          setEvents((prev) => prev.map((e) => (e.id === localId ? { ...e, id: nativeId } : e)));
-        } catch {
-          // Native write failed — event is still visible in local state
-        }
-      }
-      return;
+    if (ev.id) {
+      // Editing existing event
+      updatedEvents = events.map((e) => (e.id === ev.id ? { ...ev } : e));
+    } else {
+      // New event
+      const newId = `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newEv = { ...ev, id: newId };
+      updatedEvents = [...events, newEv];
+      ev = newEv; // use the version with the id for notification scheduling
     }
 
-    // For edits: also sync with native calendar
-    if (hasPermission && Calendar) {
-      try {
-        const details: any = {
-          title:      ev.title,
-          startDate:  ev.start,
-          endDate:    ev.end,
-          notes:      ev.notes,
-          calendarId: ev.calendarId ?? calendars.find((c: any) => c.allowsModifications)?.id,
-          color:      ev.color as any,
-          allDay:     false,
-          timeZone:   Intl.DateTimeFormat().resolvedOptions().timeZone,
-        };
-        await Calendar.updateEventAsync(ev.id, details);
-      } catch {
-        // Native sync failed — local state is already updated
+    setEvents(updatedEvents);
+    await persistEvents(updatedEvents);
+
+    // Schedule notification for the event
+    try {
+      const notifId = await scheduleEventNotification({
+        id: ev.id,
+        title: ev.title,
+        start: ev.start,
+        notes: ev.notes,
+      });
+      if (notifId) {
+        console.log('[CalendarScreen] Notification scheduled:', notifId);
       }
+    } catch (error) {
+      console.error('[CalendarScreen] Error scheduling notification:', error);
     }
   };
 
   const deleteEvent = async (id: string) => {
-    // Remove from local state immediately
-    setEvents((prev) => prev.filter((e) => e.id !== id));
+    const updatedEvents = events.filter((e) => e.id !== id);
+    setEvents(updatedEvents);
+    await persistEvents(updatedEvents);
 
-    // Also remove from native calendar if it has a non-local id
-    if (hasPermission && Calendar && !id.startsWith('local-')) {
-      try {
-        await Calendar.deleteEventAsync(id);
-      } catch {
-        // Native delete failed — event is already gone from local state
-      }
+    // Cancel notification
+    try {
+      await cancelEventNotification(id);
+    } catch (error) {
+      console.error('[CalendarScreen] Error cancelling notification:', error);
     }
   };
+
+
 
   // -- Navigation helpers ----------------------------------------------------
   const prevMonth = () => {
@@ -1106,7 +1084,7 @@ export default function CalendarScreen() {
       {viewMode === 'schedule' && (
         <ScheduleView
           events={events}
-          calendars={calendars}
+          calendars={[]}
           onEditEvent={openEdit}
         />
       )}
@@ -1115,7 +1093,7 @@ export default function CalendarScreen() {
         visible={formOpen}
         initial={editing}
         dateStr={selDateStr}
-        calendars={calendars}
+        calendars={[]}
         onSave={saveEvent}
         onDelete={deleteEvent}
         onClose={() => setFormOpen(false)}
@@ -1180,7 +1158,7 @@ const styles = StyleSheet.create({
 // Side menu styles
 const side = StyleSheet.create({
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   drawer: {
@@ -1193,7 +1171,7 @@ const side = StyleSheet.create({
     borderBottomLeftRadius: 0,
     ...SHADOW.glow,
   },
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(135,206,235,0.15)' },
+  scrim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(135,206,235,0.15)' },
 
   topRow: {
     flexDirection: 'row', justifyContent: 'flex-end',
@@ -1293,7 +1271,7 @@ const schedStyles = StyleSheet.create({
 const form = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.50)', justifyContent: 'flex-end' },
   sheet:   { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%', overflow: 'hidden', ...SHADOW.glow },
-  scrim:   { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(135,206,235,0.15)' },
+  scrim:   { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(135,206,235,0.15)' },
 
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
