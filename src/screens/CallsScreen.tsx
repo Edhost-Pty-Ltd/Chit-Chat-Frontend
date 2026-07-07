@@ -59,9 +59,12 @@ function formatTimestamp(date: Date): string {
 
 // Get initials from display name
 function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  // Single-word name → first letter only (initial, not first two letters).
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  // Multi-word name → first letter of the first and last words.
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'outgoing'; status: string }) {
@@ -75,6 +78,7 @@ function CallInfoSheet({
   call,
   resolvedName,
   resolvedPhone,
+  resolvedPhoto,
   visible,
   onClose,
   onAudioCall,
@@ -84,6 +88,7 @@ function CallInfoSheet({
   call: CallHistoryItem | null;
   resolvedName: string;
   resolvedPhone: string;
+  resolvedPhoto: string | null;
   visible: boolean;
   onClose: () => void;
   onAudioCall: () => void;
@@ -113,7 +118,7 @@ function CallInfoSheet({
             initials={getInitials(resolvedName)} 
             color={COLORS.blue} 
             size={64} 
-            imageUrl={call.otherParty.photoUrl}
+            imageUrl={resolvedPhoto}
           />
           <View style={styles.infoMeta}>
             <AppText style={styles.infoName}>{resolvedName}</AppText>
@@ -310,6 +315,26 @@ export default function CallsScreen() {
     return map;
   }, [contacts]);
 
+  // Build a userId → profile photo map from saved device contacts. Prefer the
+  // device contact photo, falling back to the (privacy-filtered) Firebase photo.
+  const userIdToPhoto = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const c of contacts) {
+      if (c.userId) map.set(c.userId, c.photoUri || c.firebasePhotoURL || null);
+    }
+    return map;
+  }, [contacts]);
+
+  /** Resolve a profile photo for a call participant: saved contact photo → the
+   *  photo stored on the call record → null (fall back to initials). */
+  const resolveCallerPhoto = useCallback(
+    (userId: string, fallbackPhoto: string | null): string | null => {
+      const savedPhoto = userIdToPhoto.get(userId);
+      return savedPhoto ?? fallbackPhoto ?? null;
+    },
+    [userIdToPhoto]
+  );
+
   /** Resolve a display name for a call participant: phone-book name → phone number. */
   const resolveCallerName = useCallback(
     (userId: string, fallbackName: string): string => {
@@ -334,6 +359,10 @@ export default function CallsScreen() {
   const selectedCallPhone = selectedCall
     ? (userIdToPhone.get(selectedCall.otherParty.userId) ?? '')
     : '';
+  // Resolved profile photo for the selected call (saved contact photo → record photo).
+  const selectedCallPhoto = selectedCall
+    ? resolveCallerPhoto(selectedCall.otherParty.userId, selectedCall.otherParty.photoUrl)
+    : null;
 
   // Filter based on tab
   const filtered = tab === 'Missed' 
@@ -472,6 +501,7 @@ export default function CallsScreen() {
   const renderCall = ({ item }: { item: CallHistoryItem }) => {
     const isMissed = item.status === 'missed';
     const resolvedName = resolveCallerName(item.otherParty.userId, item.otherParty.displayName);
+    const resolvedPhoto = resolveCallerPhoto(item.otherParty.userId, item.otherParty.photoUrl);
     const statusLabel = item.status === 'completed' && item.duration
       ? formatDuration(item.duration)
       : item.status === 'missed' ? 'Missed'
@@ -489,7 +519,7 @@ export default function CallsScreen() {
           initials={getInitials(resolvedName)} 
           color={COLORS.blue} 
           size={48} 
-          imageUrl={item.otherParty.photoUrl}
+          imageUrl={resolvedPhoto}
         />
         <View style={styles.callMeta}>
           <AppText style={styles.callName}>{resolvedName}</AppText>
@@ -544,6 +574,7 @@ export default function CallsScreen() {
         call={selectedCall}
         resolvedName={selectedCallName}
         resolvedPhone={selectedCallPhone}
+        resolvedPhoto={selectedCallPhoto}
         visible={infoOpen}
         onClose={() => setInfoOpen(false)}
         onAudioCall={handleInfoAudioCall}
