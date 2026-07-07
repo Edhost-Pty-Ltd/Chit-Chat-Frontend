@@ -4,11 +4,16 @@
 
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import { AppText } from '../context/ThemeContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import { AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useNotifications } from '../context/NotificationContext';
+import { COLORS, RADIUS, GRADIENTS } from '../types/theme';
 
 export function NotificationTestPanel() {
   const { pushNotification, notifications, unreadCount } = useNotifications();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
+  const { bevel } = useGlass();
 
   const testMessage = () => {
     console.log('[TEST] Triggering test message notification');
@@ -40,58 +45,64 @@ export function NotificationTestPanel() {
   };
 
   return (
-    <View style={styles.container}>
-      <AppText style={styles.title}>
-        Notification Test Panel (Dev Only)
-      </AppText>
-      
-      <AppText style={styles.info}>
-        Current notifications: {notifications.length} (Unread: {unreadCount})
+    <View style={[styles.container, bevel]}>
+      <View style={styles.header}>
+        <AppIcon name="notifications-outline" size={20} color={COLORS.blue} fixedColor />
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>
+          Notification Test
+        </AppText>
+      </View>
+
+      <AppText style={[styles.info, { color: FG.secondary }]}>
+        {notifications.length} notifications ({unreadCount} unread)
       </AppText>
 
       <View style={styles.buttons}>
-        <TouchableOpacity style={[styles.button, styles.messageBtn]} onPress={testMessage}>
-          <AppText style={styles.buttonText}>Test Message</AppText>
+        <TouchableOpacity style={styles.button} onPress={testMessage} activeOpacity={0.8}>
+          <LinearGradient colors={GRADIENTS.primary} style={styles.buttonGrad}>
+            <AppIcon name="chatbubble-outline" size={16} color="#fff" fixedColor />
+            <AppText fixedColor style={styles.buttonText}>Message</AppText>
+          </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.button, styles.callBtn]} onPress={testCall}>
-          <AppText style={styles.buttonText}>Test Call</AppText>
+        <TouchableOpacity style={styles.button} onPress={testCall} activeOpacity={0.8}>
+          <LinearGradient colors={['#10b981', '#059669']} style={styles.buttonGrad}>
+            <AppIcon name="call-outline" size={16} color="#fff" fixedColor />
+            <AppText fixedColor style={styles.buttonText}>Call</AppText>
+          </LinearGradient>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.button, styles.systemBtn]} onPress={testSystem}>
-          <AppText style={styles.buttonText}>Test System</AppText>
+        <TouchableOpacity style={styles.button} onPress={testSystem} activeOpacity={0.8}>
+          <LinearGradient colors={['#8b5cf6', '#6366f1']} style={styles.buttonGrad}>
+            <AppIcon name="information-circle-outline" size={16} color="#fff" fixedColor />
+            <AppText fixedColor style={styles.buttonText}>System</AppText>
+          </LinearGradient>
         </TouchableOpacity>
       </View>
-
-      <AppText style={styles.hint}>
-        Check console logs for detailed output
-      </AppText>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    marginHorizontal: 0,
+    marginVertical: 8,
+    borderRadius: RADIUS.lg,
     padding: 16,
-    backgroundColor: '#fff3cd',
-    borderRadius: 8,
-    marginHorizontal: 16,
-    marginTop: 8,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 8,
-    borderWidth: 2,
-    borderColor: '#ffc107',
-    zIndex: 1000,
   },
   title: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    marginBottom: 8,
-    color: '#856404',
   },
   info: {
     fontSize: 12,
-    marginBottom: 12,
-    color: '#856404',
+    marginBottom: 14,
   },
   buttons: {
     flexDirection: 'row',
@@ -99,28 +110,20 @@ const styles = StyleSheet.create({
   },
   button: {
     flex: 1,
-    padding: 12,
-    borderRadius: 6,
+    borderRadius: RADIUS.md,
+    overflow: 'hidden',
+  },
+  buttonGrad: {
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  messageBtn: {
-    backgroundColor: '#1E9CF0',
-  },
-  callBtn: {
-    backgroundColor: '#10b981',
-  },
-  systemBtn: {
-    backgroundColor: '#6b7280',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-  },
-  hint: {
-    fontSize: 10,
-    marginTop: 8,
-    fontStyle: 'italic',
-    color: '#856404',
   },
 });

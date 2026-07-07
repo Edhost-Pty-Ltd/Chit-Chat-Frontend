@@ -139,6 +139,18 @@ function formatLeftDate(date: Date): string {
     return `Left ${date.toLocaleDateString([], { year: 'numeric', month: 'short' })}`;
   }
 }
+/** Format call duration in seconds to display format */
+function formatCallDuration(durationInSeconds: number | null): string {
+  if (!durationInSeconds) return '';
+
+  if (durationInSeconds < 60) {
+    return `${durationInSeconds} sec${durationInSeconds !== 1 ? 's' : ''}`;
+  }
+
+  const mins = Math.floor(durationInSeconds / 60);
+  const secs = durationInSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
 
 /** Determine message tick status */
 type TickStatus = 'sent' | 'delivered' | 'read';
@@ -233,6 +245,13 @@ export default function ChatScreen() {
       markChatAsRead(chatId, user.uid).catch((err) => {
         console.warn('[ChatScreen] Failed to mark chat as read:', err);
       });
+      // Also mark individual messages as read (updates ticks for the sender)
+      // Respects the current user's read receipts privacy setting
+      fetchUserPrivacySettings(user.uid).then((privacy) => {
+        markAsRead(chatId, user.uid, privacy.readReceipts);
+      }).catch((err) => {
+        console.warn('[ChatScreen] Failed to mark messages as read:', err);
+      });
     } else {
       console.warn('⚠️ [ChatScreen] Missing chatId or userId:', { chatId, userId: user?.uid });
     }
@@ -240,7 +259,7 @@ export default function ChatScreen() {
 );
 
   // ── Messages — real-time Firestore stream ───────────────────────
-  const { messages, loading, sendMessage } = useMessages(chatId, userId);
+  const { messages, loading, sendMessage, markAsRead } = useMessages(chatId, userId);
 
   // ── Filter out blocked messages for recipient ───────────────────
   // If I receive a message that was sent while I was blocked, don't show it
@@ -1786,24 +1805,29 @@ export default function ChatScreen() {
       item.text?.toLowerCase().includes(searchQuery.toLowerCase());
     const isActiveMatch = searchMatchIds[searchCurrentIndex] === item.messageId;
     
+    
     // Get tick status for outgoing messages
     const tickStatus = getTickStatus(item, userId, isGroup);
     const tickIcon = getTickIcon(tickStatus);
-    
-    // Debug logging for file messages
-    if (item.type === 'file') {
-      console.log('[ChatScreen] Rendering file message:', {
-        type: item.type,
-        fileName: item.fileName,
-        fileUrl: item.fileUrl,
-        fileSize: item.fileSize,
-        mimeType: item.mimeType,
+
+    // Debug logging for outgoing text messages
+    if (item.senderId === userId && item.type === 'text' && Math.random() < 0.1) {
+      console.log('[ChatScreen] Tick status:', {
+        messageId: item.messageId,
+        text: item.text?.substring(0, 20),
+        tickStatus,
+        readBy: item.readBy,
+        deliveredTo: item.deliveredTo,
+        senderId: item.senderId,
+        currentUserId: userId
       });
     }
+
     
     const messageContent = (
       <View style={[styles.msgRow, isOut ? styles.msgRowOut : styles.msgRowIn]}>
         {!isOut && (
+          
           item.type === 'voice' && item.voiceUrl && item.duration ? (
             <VoiceMessageBubble
               messageId={item.messageId}
@@ -1822,6 +1846,40 @@ export default function ChatScreen() {
               onSeek={(positionMs) => player.seek(positionMs)}
               timestamp={item.timestamp}
             />
+           ) : item.type === 'call' ? (
+  <View style={[styles.callBubble, styles.callBubbleIn]}>
+    <View style={styles.callIconCircle}>
+      <AppIcon
+        name={item.callType === 'video' ? 'videocam' : 'call'}
+        size={20}
+        color={COLORS.sub}
+      />
+    </View>
+    <View style={styles.callContent}>
+            <AppText style={styles.callTitle}>
+        {item.callType === 'video' ? 'Video call' : 'Voice call'}
+      </AppText>
+      {/* Debug: Show duration or status */}
+      <AppText style={styles.callDuration}>
+        {item.callDuration !== null && item.callDuration !== undefined
+          ? `Duration: ${formatCallDuration(item.callDuration)} (${item.callDuration}s)`
+          : item.callStatus === 'missed'
+          ? 'Missed'
+          : item.callStatus === 'rejected'
+          ? 'Declined'
+          : item.callStatus === 'busy'
+          ? 'Busy'
+          : item.callStatus === 'failed'
+          ? 'Failed'
+          : `No duration (status: ${item.callStatus})`}
+      </AppText>
+
+    </View>
+    <AppText style={styles.callTime}>{formatTime(item.timestamp)}</AppText>
+  </View>
+
+
+            
           ) : item.type === 'file' && item.fileUrl && item.fileName ? (
             <FileMessageBubble
               fileName={item.fileName!}
@@ -1889,8 +1947,11 @@ export default function ChatScreen() {
                             : item.replyTo.type === 'file'
                               ? '📎 File'
                               : item.replyTo.type === 'location'
-                                ? '📍 Location'
-                                : 'Message'}
+                                                               ? '📍 Location'
+                                : item.replyTo.type === 'call'
+                                  ? (item.replyTo.text || '📞 Call')
+                                  : 'Message'}
+
                     </AppText>
                   </View>
                 </TouchableOpacity>
@@ -1920,6 +1981,46 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
               tickIcon={tickIcon}
             />
+              ) : item.type === 'call' ? (
+  <View style={[styles.callBubble, styles.callBubbleOut]}>
+    <View style={styles.callIconCircle}>
+      <AppIcon
+        name={item.callType === 'video' ? 'videocam' : 'call'}
+        size={20}
+        color={COLORS.blue}
+      />
+    </View>
+    <View style={styles.callContent}>
+      <AppText style={[styles.callTitle, { color: textColor }]}>
+        {item.callType === 'video' ? 'Video call' : 'Voice call'}
+      </AppText>
+      {item.callDuration && item.callDuration > 0 ? (
+        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>
+          {formatCallDuration(item.callDuration)}
+        </AppText>
+      ) : item.callStatus === 'missed' ? (
+        <AppText style={[styles.callDuration, { color: COLORS.missed }]}>Missed</AppText>
+
+      ) : item.callStatus === 'rejected' ? (
+        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>Declined</AppText>
+      ) : item.callStatus === 'busy' ? (
+        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>Busy</AppText>
+      ) : item.callStatus === 'failed' ? (
+        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>Failed</AppText>
+      ) : null}
+    </View>
+    <View style={styles.callTimeWithTick}>
+      <AppText style={styles.callTime}>{formatTime(item.timestamp)}</AppText>
+      <AppIcon
+        name={tickIcon.icon}
+        size={13}
+        color={tickIcon.color}
+        fixedColor
+      />
+    </View>
+  </View>
+
+
           ) : item.type === 'file' && item.fileUrl && item.fileName ? (
             <FileMessageBubble
               fileName={item.fileName!}
@@ -1994,8 +2095,11 @@ export default function ChatScreen() {
                             : item.replyTo.type === 'file'
                               ? '📎 File'
                               : item.replyTo.type === 'location'
-                                ? '📍 Location'
-                                : 'Message'}
+                                  ? '📍 Location'
+                              : item.replyTo.type === 'call'
+                              ? (item.replyTo.text || '📞 Call')
+                              : 'Message'}
+
                     </AppText>
                   </View>
                 </TouchableOpacity>
@@ -3337,6 +3441,61 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   timeOut: { fontSize: 10, color: COLORS.sub },
+
+    // ── Call messages ──────────────────────────────────────────────────────────
+  callBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: '75%',
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  callBubbleIn: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderBottomLeftRadius: 4,
+    ...SHADOW.card,
+  },
+  callBubbleOut: {
+    backgroundColor: 'rgba(180,225,245,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(30,156,240,0.18)',
+    borderBottomRightRadius: 4,
+    ...SHADOW.card,
+  },
+  callIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callContent: {
+    flex: 1,
+    gap: 2,
+  },
+  callTitle: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  callDuration: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  callTime: {
+    fontSize: 10,
+    color: COLORS.sub,
+    marginLeft: 4,
+  },
+  callTimeWithTick: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+
 
   // Voice / image
   imagePlaceholder: {

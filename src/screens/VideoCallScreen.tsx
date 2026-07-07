@@ -48,7 +48,7 @@ function useCameraPerms(): [any, () => Promise<any>] {
   return [null, async () => ({ granted: false })];
 }
 
-import { AppText, AppIcon, AppBg, useGlass } from '../context/ThemeContext';
+import { AppText, AppIcon, AppBg, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { Avatar } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList, Contact } from '../types';
@@ -185,6 +185,8 @@ export default function VideoCallScreen() {
   const { user } = useAuth();
   const { minimizeCall, updateDuration } = useFloatingCall();
   const { bevel } = useGlass();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
 
   const [permission, requestPermission] = useCameraPerms();
   const [muted,      setMuted]          = useState(false);

@@ -11,7 +11,7 @@ import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import type { CallHistoryItem } from '../types/call';
 import type { RootStackParamList } from '../types';
-import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
@@ -21,6 +21,9 @@ import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
+import { useFocusEffect } from '@react-navigation/native';
+import { markMissedCallsAsViewed } from '../hooks/useMissedCalls';
+
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -93,6 +96,7 @@ function CallInfoSheet({
 }) {
   const { FG } = useForeground();
   const { bevel } = useGlass();
+  const { fontFamily, textColor } = useTypography();
 
   if (!call) return null;
 
@@ -117,7 +121,7 @@ function CallInfoSheet({
             imageUrl={call.otherParty.photoUrl}
           />
           <View style={styles.infoMeta}>
-            <AppText style={styles.infoName}>{resolvedName}</AppText>
+            <AppText style={[styles.infoName, { color: textColor, fontFamily }]}>{resolvedName}</AppText>
             <AppText style={styles.infoNum}>
               {resolvedPhone || 'No number saved'}
             </AppText>
@@ -128,11 +132,11 @@ function CallInfoSheet({
         <View style={[styles.detailCard, bevel]}>
           <View style={styles.detailRow}>
             <CallDirectionIcon direction={call.direction} status={call.status} />
-            <AppText style={[styles.detailType, { color: statusColor }]} fixedColor={isMissed}>
+            <AppText style={[styles.detailType, { color: statusColor, fontFamily }]} fixedColor={isMissed}>
               {statusText}
             </AppText>
           </View>
-          <AppText style={styles.detailTime}>
+          <AppText style={[styles.detailTime, { color: FG.secondary }]}>
             {formatTimestamp(call.timestamp)}
           </AppText>
         </View>
@@ -150,7 +154,7 @@ function CallInfoSheet({
                   <AppIcon name={btn.icon} size={24} color="#fff" fixedColor />
                 </LinearGradient>
               </TouchableOpacity>
-              <AppText style={styles.actionLabel}>{btn.label}</AppText>
+              <AppText style={[styles.actionLabel, { color: textColor }]}>{btn.label}</AppText>
             </View>
           ))}
         </View>
@@ -161,7 +165,7 @@ function CallInfoSheet({
           activeOpacity={0.85}
           style={[styles.closeBtn, bevel]}
         >
-          <AppText style={styles.closeBtnText}>Close</AppText>
+          <AppText style={[styles.closeBtnText, { color: textColor }]}>Close</AppText>
         </TouchableOpacity>
       </View>
     </Modal>
@@ -186,6 +190,7 @@ function ContactPickerSheet({
 }) {
   const { bevel } = useGlass();
   const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
   const [query, setQuery] = useState('');
   const searchRef = useRef<TextInput>(null);
 
@@ -219,7 +224,7 @@ function ContactPickerSheet({
             <AppIcon name="close" size={22} color={COLORS.sub} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <AppText style={styles.sheetTitle}>Call a contact</AppText>
+            <AppText style={[styles.sheetTitle, { color: textColor, fontFamily }]}>Call a contact</AppText>
             <AppText style={styles.sheetSub}>{filtered.length} contacts</AppText>
           </View>
         </View>
@@ -229,7 +234,7 @@ function ContactPickerSheet({
           <AppIcon name="search-outline" size={18} color={COLORS.sub} />
           <TextInput
             ref={searchRef}
-            style={[styles.searchInput, { color: COLORS.text }]}
+            style={[styles.searchInput, { color: textColor }]}
             placeholder="Search contacts…"
             placeholderTextColor={COLORS.sub}
             value={query}
@@ -270,7 +275,7 @@ function ContactPickerSheet({
                   imageUrl={c.photoUri || c.firebasePhotoURL || null}
                 />
                 <View style={styles.contactMeta}>
-                  <AppText style={styles.contactName}>{c.displayName}</AppText>
+                  <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{c.displayName}</AppText>
                   <AppText style={styles.contactNum}>Tap to call</AppText>
                 </View>
                 {/* Audio call button */}
@@ -300,6 +305,7 @@ export default function CallsScreen() {
   const groupCall = useGroupCall();
   const { startCall: startActiveCall } = useActiveCall();
   const { bevel } = useGlass();
+  const { fontFamily, textColor } = useTypography();
   const insets = useSafeAreaInsets();
 
   // Build a userId → phone map from device contacts so we can resolve names
@@ -311,6 +317,19 @@ export default function CallsScreen() {
     }
     return map;
   }, [contacts]);
+
+    // Mark missed calls as viewed when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (user?.uid) {
+        markMissedCallsAsViewed(user.uid).catch((err) => {
+          console.warn('[CallsScreen] Failed to mark missed calls as viewed:', err);
+        });
+      }
+    }, [user?.uid])
+  );
+
+  
 
   /** Resolve a display name for a call participant: phone-book name → phone number. */
   const resolveCallerName = useCallback(
@@ -490,7 +509,7 @@ export default function CallsScreen() {
           imageUrl={item.otherParty.photoUrl}
         />
         <View style={styles.callMeta}>
-          <AppText style={styles.callName}>{resolvedName}</AppText>
+          <AppText style={[styles.callName, { color: textColor, fontFamily }]}>{resolvedName}</AppText>
           <View style={styles.callSubRow}>
             <CallDirectionIcon direction={item.direction} status={item.status} />
             <AppText 
@@ -559,7 +578,7 @@ export default function CallsScreen() {
       />
 
       <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-        <AppText style={styles.title}>Calls</AppText>
+        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Calls</AppText>
         {/* New call button */}
         <TouchableOpacity 
           activeOpacity={0.85} 
@@ -791,7 +810,9 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.lg,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    ...SHADOW.card,
+    borderWidth: 1.5,
+    borderColor: 'rgba(30,156,240,0.25)',
+    backgroundColor: 'rgba(135,206,235,0.12)',
   },
   detailRow: {
     flexDirection: 'row',

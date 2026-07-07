@@ -39,7 +39,7 @@ import { RootStackParamList } from '../types';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { validateUsername, validatePhone, validateImage } from '../utils/validationUtils';
 import { AvatarPreview } from '../components/AvatarPreview';
-import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'CreateAccount'>;
 type Step = 'details' | 'otp' | 'biometric';
@@ -139,6 +139,7 @@ export default function CreateAccountScreen() {
 
   const { bevel } = useGlass();
   const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
 
   const [step,        setStep]        = useState<Step>('details');
   const [name,        setName]        = useState('');

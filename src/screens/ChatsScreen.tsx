@@ -530,7 +530,7 @@ function SelectContactSheet({
                 <AppIcon name={a.icon} size={20} color="#fff" fixedColor />
               </LinearGradient>
             </View>
-            <AppText style={styles.actionLabel}>{a.label}</AppText>
+            <AppText style={[styles.actionLabel, { color: textColor }]}>{a.label}</AppText>
             <AppIcon name="chevron-forward" size={16} color={COLORS.sub} />
           </TouchableOpacity>
         ))}
@@ -1141,17 +1141,18 @@ const styles = StyleSheet.create({
   },
   handle: {
     alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
-    backgroundColor: 'rgba(30,156,240,0.30)', marginTop: 10, marginBottom: 4,
+    backgroundColor: 'rgba(30,156,240,0.30)', marginTop: 10, marginBottom: 10,
   },
 
   // ── Sheet shared ──────────────────────────────────────────────────────────
   sheetSubHeader: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12, gap: 10,
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, gap: 10,
+    minHeight: 56,
   },
   iconPad:    { padding: 4 },
-  sheetTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: COLORS.text },
-  sheetSub:   { fontSize: 12, color: COLORS.sub, marginTop: 1 },
+  sheetTitle: { fontSize: 17, fontWeight: '700', color: COLORS.text, lineHeight: 22 },
+  sheetSub:   { fontSize: 12, color: COLORS.sub, marginTop: 2 },
 
   // Action rows
   actionBlock: { paddingHorizontal: 14, gap: 8, marginBottom: 4 },

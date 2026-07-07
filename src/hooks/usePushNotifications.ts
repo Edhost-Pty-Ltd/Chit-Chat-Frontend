@@ -17,13 +17,16 @@ try {
   Notifications = require('expo-notifications');
   // Configure how notifications are handled when app is in foreground.
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: false,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    handleNotification: async () => {
+      // Show native system notification banner for all notifications in foreground
+      return {
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      };
+    },
   });
 } catch {
   // expo-notifications native module not available — push notifications disabled.
@@ -148,7 +151,13 @@ async function savePushToken(userId: string, token: string) {
 // ── Handle notification response (when user taps notification) ────────────────
 function handleNotificationResponse(response: any) {
   const data = response.notification.request.content.data;
-  console.log('[usePushNotifications] Notification data:', data);
+  console.log('[usePushNotifications] Notification tapped, data:', data);
+
+  // Navigate to Calendar screen when a calendar notification is tapped
+  if (data?.type === 'calendar-event') {
+    const { navigateTo } = require('../navigation/navigationRef');
+    navigateTo('Calendar');
+  }
 }
 
 // ── Helper: Send local notification (for testing) ─────────────────────────────

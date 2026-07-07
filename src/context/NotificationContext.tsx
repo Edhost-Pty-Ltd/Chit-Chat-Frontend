@@ -118,10 +118,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       // Add to inbox
       setNotifications((prev) => [notif, ...prev]);
 
-      // Show toast — auto-dismiss after 4 s
-      setToast(notif);
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 4000);
+      // Native system notification handles the banner display now
+      // No in-app toast — the dark system banner is used instead
 
       // Send native device notification (skip if already shown by push)
       if (!skipNative) {

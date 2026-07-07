@@ -1,6 +1,6 @@
 {
   "name": "chit-chat",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "index.ts",
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.1",

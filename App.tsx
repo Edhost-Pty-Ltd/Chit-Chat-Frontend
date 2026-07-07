@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
+import { navigationRef } from './src/navigation/navigationRef';
 import { enableScreens } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -132,7 +133,7 @@ export default function App() {
                   <ActivityWatcher />
                   <PushNotificationManager />
                   <PresenceManager />
-                  <NavigationContainer>
+                  <NavigationContainer ref={navigationRef}>
                     <StatusBar style="auto" />
                     <AppNavigator />
                     <ToastOverlay />

@@ -24,7 +24,7 @@ import { useAuth as useAuthContext } from '../context/AuthContext';
 import { useAuth } from '../hooks/useAuth';
 import { COUNTRIES, DEFAULT_COUNTRY, Country, formatPhoneNumber } from '../data/countryCodes';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AppBg, AppText, AppIcon, useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 
 // ─── Stub API helpers ─────────────────────────────────────────────────────────
 // Removed - now using Firebase Phone Authentication via useAuth hook
@@ -128,6 +128,8 @@ export default function SignInScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'SignIn'>>();
 
   const { bevel } = useGlass();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
 
   const [step, setStep] = useState<Step>('phone');
   const [country, setCountry] = useState<Country>(DEFAULT_COUNTRY);

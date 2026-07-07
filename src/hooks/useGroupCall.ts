@@ -2,6 +2,8 @@
 // Manages group video/audio calls using Jitsi Meet with Firestore notifications
 
 import { useState, useCallback } from 'react';
+import { SignalingService } from '../services/signalingService';
+import type { CallParticipant } from '../types/call';
 import { 
   collection, 
   doc, 
@@ -174,6 +176,9 @@ export function useGroupCall() {
   /**
    * Leave a group call - removes user from active participants
    */
+    /**
+   * Leave a group call - removes user from active participants
+   */
   const leaveGroupCall = useCallback(
     async (callId: string, userId: string): Promise<void> => {
       try {
@@ -190,6 +195,14 @@ export function useGroupCall() {
         const callData = callSnap.data() as GroupCallData;
         const activeParticipants = callData.activeParticipants || [];
 
+        // Calculate call duration if this is the last participant
+        let duration: number | null = null;
+        if (callData.startedAt) {
+          const startTime = callData.startedAt.toDate();
+          const endTime = new Date();
+          duration = Math.floor((endTime.getTime() - startTime.getTime()) / 1000); // seconds
+        }
+
         // Remove user from active participants
         const updatedParticipants = activeParticipants.filter(id => id !== userId);
 
@@ -200,6 +213,51 @@ export function useGroupCall() {
             activeParticipants: [],
           });
           console.log('[useGroupCall] Last participant left - call ended');
+
+          // Save call history for all participants and send chat message
+          if (duration && duration > 5) { // Only save if call was longer than 5 seconds
+            const { sendCallMessage } = await import('./useChatActions');
+
+            // Save to each participant's call history
+            for (const participantId of callData.participants) {
+              try {
+                // Determine if outgoing or incoming for this participant
+                const direction = participantId === callData.initiatorId ? 'outgoing' : 'incoming';
+
+                // Get other party info (for 1-on-1 calls within group structure)
+                const otherPartyId = participantId === callData.initiatorId
+                  ? callData.participants.find(id => id !== callData.initiatorId)
+                  : callData.initiatorId;
+
+                if (otherPartyId) {
+                  // Fetch other party's info (you may need to adjust this based on your user data structure)
+                  const otherPartyDoc = await getDoc(doc(db, 'users', otherPartyId));
+                  const otherPartyData = otherPartyDoc.exists() ? otherPartyDoc.data() : {};
+
+                  const otherParty: CallParticipant = {
+                    userId: otherPartyId,
+                    displayName: otherPartyData.displayName || otherPartyData.phone || 'Unknown',
+                    photoUrl: otherPartyData.photoURL || null,
+                  };
+
+                  await SignalingService.saveToCallHistory(
+                    participantId,
+                    callId,
+                    otherParty,
+                    callData.callType,
+                    direction,
+                    'completed',
+                    duration,
+                    callData.chatId  // Pass chatId here!
+                  );
+                }
+              } catch (error) {
+                console.error('[useGroupCall] Failed to save history for participant:', participantId, error);
+              }
+            }
+
+            console.log('[useGroupCall] Call history saved for all participants');
+          }
         } else {
           await updateDoc(groupCallRef, {
             activeParticipants: updatedParticipants,
@@ -212,6 +270,7 @@ export function useGroupCall() {
     },
     []
   );
+
 
   /**
    * End a group call - marks call as ended (initiator only)

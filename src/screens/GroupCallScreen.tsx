@@ -23,7 +23,7 @@ import {
   useRoomContext,
 } from '@livekit/react-native';
 import { Track } from 'livekit-client';
-import { AppText, AppIcon, AppBg } from '../context/ThemeContext';
+import { AppText, AppIcon, AppBg, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { Avatar } from '../components';
 import { COLORS, RADIUS, SHADOW } from '../types/theme';
 import { RootStackParamList } from '../types';
@@ -75,6 +75,9 @@ export function GroupCallContent({
 }) {
   const { user } = useAuth();
   const { roomName, displayName, audioOnly, groupName, memberCount, callId, chatId } = params;
+  const { bevel } = useGlass();
+  const { FG } = useForeground();
+  const { fontFamily, textColor } = useTypography();
 
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
