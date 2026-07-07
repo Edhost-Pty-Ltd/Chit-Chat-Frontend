@@ -1,8 +1,8 @@
 ﻿// ─── Screen: Calls ───────────────────────────────────────────────────────────
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet,
-  Modal, Pressable, ScrollView, Alert, ActivityIndicator, TextInput,
+  Modal, Pressable, ScrollView, Alert, ActivityIndicator, TextInput, BackHandler,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -330,6 +330,11 @@ export default function CallsScreen() {
   const [selectedCall, setSelectedCall] = useState<CallHistoryItem | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
 
+  // Refs for managing active call listener during ringing window
+  const callListenerRef = useRef<(() => void) | null>(null);
+  const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeCallIdRef = useRef<string | null>(null);
+
   // Resolved display name for the currently-selected call in the info sheet.
   const selectedCallName = selectedCall
     ? resolveCallerName(selectedCall.otherParty.userId, selectedCall.otherParty.displayName)
@@ -343,6 +348,69 @@ export default function CallsScreen() {
   const filtered = tab === 'Missed' 
     ? callHistory.filter((c) => c.status === 'missed') 
     : callHistory;
+
+  // ── Cancel active call and clean up resources ─────────────────────────────
+  const cancelActiveCall = useCallback(async () => {
+    const callId = activeCallIdRef.current;
+    if (!callId) return;
+
+    console.log('[CallsScreen] Cancelling active call:', callId);
+
+    // Clean up listener
+    if (callListenerRef.current) {
+      callListenerRef.current();
+      callListenerRef.current = null;
+    }
+
+    // Clean up timeout
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+
+    // Update call status to cancelled in Firestore
+    try {
+      const callRef = doc(db, 'groupCalls', callId);
+      await updateDoc(callRef, { status: 'cancelled' });
+      console.log('[CallsScreen] Call marked as cancelled');
+    } catch (err) {
+      console.error('[CallsScreen] Failed to cancel call:', err);
+    }
+
+    // Clear active call ref
+    activeCallIdRef.current = null;
+  }, []);
+
+  // ── Intercept back button and navigation during ringing window ────────────
+  useEffect(() => {
+    // Android hardware back button
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (activeCallIdRef.current) {
+        console.log('[CallsScreen] Back button pressed during call - cancelling');
+        cancelActiveCall();
+        return false; // Allow default back behavior after cancelling
+      }
+      return false; // Allow default back behavior
+    });
+
+    // iOS swipe back, header back button, and bottom tab navigation
+    const unsubscribeNav = navigation.addListener('beforeRemove', (e) => {
+      if (activeCallIdRef.current) {
+        // Fire cancel in background — don't block navigation on network
+        console.log('[CallsScreen] Navigation detected - cancelling call in background');
+        cancelActiveCall().catch(err =>
+          console.error('[CallsScreen] Background cancel failed:', err)
+        );
+        // Allow navigation immediately (30-second timeout will catch orphaned calls)
+      }
+      // Do NOT call e.preventDefault() — let navigation proceed
+    });
+
+    return () => {
+      backHandler.remove();
+      unsubscribeNav();
+    };
+  }, [navigation, cancelActiveCall]);
 
   // ── Shared LiveKit call initiator ─────────────────────────────────────────
   const startLiveKitCall = async (
@@ -373,6 +441,9 @@ export default function CallsScreen() {
     );
 
     if (result) {
+      // Store active call ID in ref
+      activeCallIdRef.current = result.callId;
+
       // Navigate to outgoing call screen (ringing UI)
       navigation.navigate('OutgoingCall', {
         callId: result.callId,
@@ -388,6 +459,15 @@ export default function CallsScreen() {
         if (!snapshot.exists()) {
           // Call was cancelled/deleted
           console.log('[CallsScreen] Call document deleted');
+          
+          // Clear refs
+          activeCallIdRef.current = null;
+          callListenerRef.current = null;
+          if (callTimeoutRef.current) {
+            clearTimeout(callTimeoutRef.current);
+            callTimeoutRef.current = null;
+          }
+          
           unsubscribe();
           return;
         }
@@ -398,13 +478,18 @@ export default function CallsScreen() {
         if (callData.status === 'active') {
           // Receiver accepted! Now join the room
           console.log('[CallsScreen] Call accepted, joining room');
-          unsubscribe();
           
-          // Navigate away from OutgoingCall screen if still there
-          if (navigation.getState().routes[navigation.getState().routes.length - 1]?.name === 'OutgoingCall') {
-            navigation.goBack();
+          // Clear refs since call is no longer in ringing state
+          activeCallIdRef.current = null;
+          callListenerRef.current = null;
+          if (callTimeoutRef.current) {
+            clearTimeout(callTimeoutRef.current);
+            callTimeoutRef.current = null;
           }
           
+          unsubscribe();
+          
+          // Start the active call - OutgoingCallScreen will dismiss itself after 150ms
           startActiveCall({
             roomName: result.roomName,
             displayName: callerName,
@@ -417,23 +502,38 @@ export default function CallsScreen() {
         } else if (callData.status === 'declined' || callData.status === 'cancelled') {
           // Call was rejected/cancelled
           console.log('[CallsScreen] Call', callData.status);
+          
+          // Clear refs
+          activeCallIdRef.current = null;
+          callListenerRef.current = null;
+          if (callTimeoutRef.current) {
+            clearTimeout(callTimeoutRef.current);
+            callTimeoutRef.current = null;
+          }
+          
           unsubscribe();
           
-          // Navigate away from OutgoingCall screen if still there
-          if (navigation.getState().routes[navigation.getState().routes.length - 1]?.name === 'OutgoingCall') {
-            navigation.goBack();
-          }
+          // OutgoingCallScreen will dismiss itself - do not navigate here
           
           Alert.alert('Call ended', `The call was ${callData.status}.`);
         }
       });
       
+      // Store listener ref
+      callListenerRef.current = unsubscribe;
+      
       // Add 30-second timeout to mark call as missed
-      setTimeout(async () => {
+      const timeoutId = setTimeout(async () => {
         try {
           const snap = await getDoc(callRef);
           if (snap.exists() && snap.data().status === 'ringing') {
             console.log('[CallsScreen] Call timeout - no answer after 30 seconds');
+            
+            // Clear refs
+            activeCallIdRef.current = null;
+            callListenerRef.current = null;
+            callTimeoutRef.current = null;
+            
             await updateDoc(callRef, { status: 'missed' });
             unsubscribe();
             
@@ -448,6 +548,9 @@ export default function CallsScreen() {
           console.error('[CallsScreen] Timeout check failed:', err);
         }
       }, 30000);
+      
+      // Store timeout ref
+      callTimeoutRef.current = timeoutId;
     } else {
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
     }
