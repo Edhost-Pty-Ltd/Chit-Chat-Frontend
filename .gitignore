@@ -99,3 +99,9 @@ CALLER_INFO_FIX.md
 # All markdown docs (internal/generated). Untracked from the repo — collaborators
 # do not need them to run the app.
 *.md
+
+# Exceptions: keep these markdown files tracked.
+#  - AGENTS.md: shared agent/workspace rules
+#  - .kiro/specs/**: Kiro spec docs (requirements/design/tasks) used by collaborators
+!AGENTS.md
+!.kiro/specs/**/*.md
