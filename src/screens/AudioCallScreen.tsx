@@ -18,7 +18,7 @@ import { db } from '../config/firebase';
 import { doc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 
-import { AppText, AppIcon, AppBg, useGlass } from '../context/ThemeContext';
+import { AppText, AppIcon, AppBg, useGlass, useTypography } from '../context/ThemeContext';
 import { Avatar, RingingCallScreen, CallEndedScreen } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList, Contact } from '../types';
@@ -36,6 +36,7 @@ export default function AudioCallScreen() {
   const { user } = useAuth();
   const { minimizeCall, updateDuration } = useFloatingCall();
   const { bevel } = useGlass();
+  const { fontFamily } = useTypography();
 
   const [muted,        setMuted]        = useState(false);
   const [speakerOn,    setSpeakerOn]    = useState(false);

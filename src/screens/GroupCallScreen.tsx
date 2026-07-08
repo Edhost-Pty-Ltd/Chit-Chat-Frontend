@@ -35,6 +35,8 @@ import { useContacts, AppContact } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { ActiveCallParams } from '../context/ActiveCallContext';
 import { SignalingService } from '../services/signalingService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'GroupCall'>;
 type RouteP = RouteProp<RootStackParamList, 'GroupCall'>;
@@ -468,21 +470,32 @@ function RoomView({
         const otherParticipant = participants.find((p) => !p.isLocal);
         const otherPartyId = otherParticipant?.identity ?? '';
         const otherPartyName = otherParticipant ? nameFor(otherParticipant) : groupName;
+
+        // Determine direction: check if we initiated this call
+        let direction: 'incoming' | 'outgoing' = 'incoming';
+        try {
+          const callDoc = await getDoc(doc(db, 'groupCalls', callId));
+          if (callDoc.exists() && callDoc.data().initiatorId === userId) {
+            direction = 'outgoing';
+          }
+        } catch { /* fallback to incoming */ }
+
         await SignalingService.saveToCallHistory(
           userId,
           callId,
           { userId: otherPartyId, displayName: otherPartyName, photoUrl: null },
           audioOnly ? 'audio' : 'video',
-          'outgoing',
+          direction,
           durationSec > 0 ? 'completed' : 'missed',
           durationSec > 0 ? durationSec : null,
+          chatId,
         );
       } catch (e) {
         console.warn('[GroupCallScreen] Failed to save call history:', e);
       }
     }
     onEnded();
-  }, [callId, userId, participants, nameFor, groupName, audioOnly, onEnded]);
+  }, [callId, userId, participants, nameFor, groupName, audioOnly, chatId, onEnded]);
 
   const handleCameraToggle = useCallback(async () => {
     const enabling = !isCameraEnabled;

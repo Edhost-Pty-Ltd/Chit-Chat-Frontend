@@ -261,6 +261,63 @@ export default function ChatScreen() {
   // ── Messages — real-time Firestore stream ───────────────────────
   const { messages, loading, sendMessage, markAsRead } = useMessages(chatId, userId);
 
+  // ── Backfill existing call history as chat bubbles (one-time migration) ──
+  useEffect(() => {
+    if (!chatId || !userId || !otherUserId || isGroup) return;
+    
+    const backfillCallMessages = async () => {
+      try {
+        const { collection: fbCollection, query: fbQuery, orderBy: fbOrderBy, getDocs, where } = await import('firebase/firestore');
+        
+        // Check if there are already call messages in this chat
+        const messagesRef = fbCollection(db, 'chats', chatId, 'messages');
+        const callMsgsQuery = fbQuery(messagesRef, where('type', '==', 'call'));
+        const callMsgsSnap = await getDocs(callMsgsQuery);
+        
+        // If we already have call messages, skip backfill
+        if (!callMsgsSnap.empty) return;
+        
+        // Get call history for this user
+        const historyRef = fbCollection(db, 'users', userId, 'callHistory');
+        const historyQuery = fbQuery(historyRef, fbOrderBy('timestamp', 'desc'));
+        const historySnap = await getDocs(historyQuery);
+        
+        if (historySnap.empty) return;
+        
+        // Filter calls with this otherUserId
+        const callsWithContact = historySnap.docs
+          .map(d => d.data())
+          .filter(call => call.otherParty?.userId === otherUserId);
+        
+        if (callsWithContact.length === 0) return;
+        
+        console.log('[ChatScreen] Backfilling', callsWithContact.length, 'call messages');
+        
+        // Import sendCallMessage to write them
+        const { sendCallMessage: writeCallMsg } = await import('../hooks/useChatActions');
+        
+        // Write each call as a message (only from outgoing to avoid duplicates)
+        for (const call of callsWithContact) {
+          if (call.direction === 'outgoing') {
+            await writeCallMsg(
+              chatId,
+              userId,
+              call.type || 'audio',
+              call.duration || null,
+              call.status || 'completed',
+            );
+          }
+        }
+        
+        console.log('[ChatScreen] Backfill complete');
+      } catch (err) {
+        console.warn('[ChatScreen] Call backfill error:', err);
+      }
+    };
+    
+    backfillCallMessages();
+  }, [chatId, userId, otherUserId, isGroup]);
+
   // ── Filter out blocked messages for recipient ───────────────────
   // If I receive a message that was sent while I was blocked, don't show it
   // Exception: In group chats, show all messages regardless of block status

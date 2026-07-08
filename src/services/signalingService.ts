@@ -7,6 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { Call, CallStatus, CallParticipant, CallType } from '../types/call';
+import { sendCallMessage } from '../hooks/useChatActions';
 
 export class SignalingService {
   // ── Create a new call document ─────────────────────────────────────────────
@@ -183,7 +184,7 @@ export class SignalingService {
     direction: 'incoming' | 'outgoing',
     status: 'completed' | 'missed' | 'rejected' | 'busy' | 'failed',
     duration: number | null,
-    chatId?: string,  // ADD THIS LINE
+    chatId?: string,
   ): Promise<void> {
 
     const historyRef = doc(db, 'users', userId, 'callHistory', callId);
@@ -198,12 +199,9 @@ export class SignalingService {
       timestamp: serverTimestamp(),
     });
     
-        console.log('[SignalingService] Call saved to history:', { userId, callId });
+    console.log('[SignalingService] Call saved to history:', { userId, callId, duration, chatId, direction });
 
-    // Also send call message to chat if chatId is provided
-        console.log('[SignalingService] Call saved to history:', { userId, callId, duration, chatId, direction });
-
-    // Also send call message to chat if chatId is provided
+    // Send call message to chat if chatId is provided (only from outgoing side to avoid duplicates)
     console.log('[SignalingService] Checking if should send chat message:', {
       hasChatId: !!chatId,
       direction,
@@ -213,7 +211,6 @@ export class SignalingService {
     if (chatId && direction === 'outgoing') {
       try {
         console.log('[SignalingService] Sending call message to chat:', { chatId, userId, type, duration, status });
-        const { sendCallMessage } = await import('../hooks/useChatActions');
         await sendCallMessage(chatId, userId, type, duration, status);
         console.log('[SignalingService] ✅ Call message sent successfully to chat:', chatId);
       } catch (error) {

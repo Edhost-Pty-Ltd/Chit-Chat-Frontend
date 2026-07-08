@@ -16,9 +16,10 @@ let Notifications: any = null;
 try {
   Notifications = require('expo-notifications');
   // Configure how notifications are handled when app is in foreground.
+  // Show native system notification banner for all notifications in foreground
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: false,
+      shouldShowAlert: true,
       shouldPlaySound: true,
       shouldSetBadge: true,
       shouldShowBanner: true,
