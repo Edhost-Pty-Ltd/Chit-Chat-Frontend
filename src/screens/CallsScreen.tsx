@@ -59,22 +59,28 @@ function formatTimestamp(date: Date): string {
   }
 }
 
-// Get initials from display name. For phone numbers, returns last 2 digits.
+// Get initials from display name. Never returns '?' for non-empty alphabetical names.
 function getInitials(name: string): string {
-  // Strip emoji and non-letter characters, keep only letters (including accented)
+  if (!name || !name.trim()) return '?';
+  
+  // First try: extract letters and get initials from word boundaries
   const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
   const parts = cleaned.split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    // No letters found — likely a phone number. Use last 2 digits as initials.
-    const digits = name.replace(/\D/g, '');
-    if (digits.length >= 2) return digits.slice(-2);
-    if (digits.length === 1) return digits;
-    return '?';
+  
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
-  // Single-word name → first letter only.
-  if (parts.length === 1) return parts[0][0].toUpperCase();
-  // Multi-word name → first letter of the first and last words.
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (parts.length === 1) {
+    return parts[0][0].toUpperCase();
+  }
+  
+  // No letters at all — try digits (phone number)
+  const digits = name.replace(/\D/g, '');
+  if (digits.length >= 2) return digits.slice(-2);
+  if (digits.length === 1) return digits;
+  
+  // Truly nothing useful
+  return '?';
 }
 
 // Format E.164 phone number for display (e.g. +27 82 123 4567)
@@ -421,16 +427,16 @@ export default function CallsScreen() {
   );
 
   /** Resolve the DISPLAY NAME shown in the call row/info sheet:
-   *  1. Saved contact → phone-book name
+   *  1. Saved contact → contact displayName (from useContacts)
    *  2. Unsaved contact → formatted phone number
    *  3. Fallback → whatever was stored in the call record
    */
   const resolveCallerName = useCallback(
     (userId: string, fallbackName: string): string => {
-      const phone = userIdToPhone.get(userId);
-      if (phone) {
-        // Saved contact — use phone-book resolved name
-        return resolveName(phone, phone);
+      // Check if this is a saved contact — use their displayName directly
+      const savedContact = contacts.find((c) => c.userId === userId);
+      if (savedContact) {
+        return savedContact.displayName;
       }
       // Not a saved contact — show their phone number
       const firebaseProfile = userIdToFirebaseProfile.get(userId);
@@ -440,21 +446,20 @@ export default function CallsScreen() {
       // Fallback to whatever was stored in the call record
       return fallbackName;
     },
-    [userIdToPhone, userIdToFirebaseProfile, resolveName]
+    [contacts, userIdToFirebaseProfile]
   );
 
   /** Resolve INITIALS for the avatar:
-   *  1. Saved contact → initials from phone-book name
-   *  2. Unsaved contact → initials from their signup username
+   *  1. Saved contact → initials from contact's displayName (from useContacts)
+   *  2. Unsaved contact → initials from their signup username (Firebase)
    *  3. Fallback → initials from whatever was stored in the call record
    */
   const resolveCallerInitials = useCallback(
     (userId: string, fallbackName: string): string => {
-      const phone = userIdToPhone.get(userId);
-      if (phone) {
-        // Saved contact — use phone-book resolved name for initials
-        const contactName = resolveName(phone, phone);
-        return getInitials(contactName);
+      // Check if this is a saved contact — use their displayName from useContacts directly
+      const savedContact = contacts.find((c) => c.userId === userId);
+      if (savedContact) {
+        return getInitials(savedContact.displayName);
       }
       // Not a saved contact — use their Firebase signup username for initials
       const firebaseProfile = userIdToFirebaseProfile.get(userId);
@@ -462,9 +467,14 @@ export default function CallsScreen() {
         return getInitials(firebaseProfile.displayName);
       }
       // Fallback to initials from whatever was stored in the call record
-      return getInitials(fallbackName);
+      if (fallbackName && fallbackName.trim()) {
+        const initials = getInitials(fallbackName);
+        if (initials !== '?') return initials;
+      }
+      // Absolute last resort
+      return getInitials(userId || 'U');
     },
-    [userIdToPhone, userIdToFirebaseProfile, resolveName]
+    [contacts, userIdToFirebaseProfile]
   );
   
   const [tab, setTab] = useState<CallTab>('All');

@@ -58,24 +58,29 @@ export function RingingCallScreen({ otherParty, callType, initials, onEndCall }:
   }, []);
 
   const getInitials = (name: string) => {
-    // Strip emoji and non-letter characters, keep only letters
+    if (!name || !name.trim()) return '?';
+    
+    // Extract letters and get initials from word boundaries
     const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
     const parts = cleaned.split(/\s+/).filter(Boolean);
-    if (parts.length === 0) {
-      // No letters found — likely a phone number. Use last 2 digits as initials.
-      const digits = name.replace(/\D/g, '');
-      if (digits.length >= 2) return digits.slice(-2);
-      if (digits.length === 1) return digits;
-      return '?';
-    }
+    
     if (parts.length >= 2) {
       return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     }
-    return parts[0][0].toUpperCase();
+    if (parts.length === 1) {
+      return parts[0][0].toUpperCase();
+    }
+    
+    // No letters — try digits (phone number)
+    const digits = name.replace(/\D/g, '');
+    if (digits.length >= 2) return digits.slice(-2);
+    if (digits.length === 1) return digits;
+    
+    return '?';
   };
 
-  // Use the explicit initials prop if provided, otherwise derive from displayName
-  const avatarInitials = initials || getInitials(otherParty.displayName);
+  // Use the explicit initials prop if provided (and not '?'), otherwise derive from displayName
+  const avatarInitials = (initials && initials !== '?') ? initials : getInitials(otherParty.displayName);
 
   return (
     <LinearGradient
