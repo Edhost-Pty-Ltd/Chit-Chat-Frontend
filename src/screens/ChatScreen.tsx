@@ -106,9 +106,15 @@ interface PastMember {
 
 /** Extract up to 2-char initials from a display name */
 function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  // Strip emoji and non-letter characters, keep only letters
+  const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    const firstAlpha = name.match(/\p{L}/u);
+    return firstAlpha ? firstAlpha[0].toUpperCase() : '?';
+  }
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 /** Format a Date to a short time string like "14:32" */
@@ -375,6 +381,30 @@ export default function ChatScreen() {
 
   // ── Contacts (for share contact feature) ──────────────────────────────────
   const { contacts: phoneContacts, loading: contactsLoading, hasPermission: contactsPermission } = useContacts();
+
+  // ── Firebase signup name for unsaved contacts (used for avatar initials on calls) ──
+  const [otherUserSignupName, setOtherUserSignupName] = useState<string | null>(null);
+  useEffect(() => {
+    if (isGroup || !otherUserId) return;
+    // Check if the contact is saved in the phone book
+    const isSaved = phoneContacts.some((c) => c.userId === otherUserId);
+    if (isSaved) {
+      // Saved contact — initials come from the phone-book name, no fetch needed
+      setOtherUserSignupName(null);
+      return;
+    }
+    // Unsaved contact — fetch their Firebase profile for the signup username
+    getDoc(doc(db, 'users', otherUserId)).then((snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.displayName) {
+          setOtherUserSignupName(data.displayName);
+        }
+      }
+    }).catch((err) => {
+      console.warn('[ChatScreen] Failed to fetch other user profile:', err);
+    });
+  }, [isGroup, otherUserId, phoneContacts]);
 
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
@@ -1188,6 +1218,8 @@ export default function ChatScreen() {
             callerName: userDisplayName,
             chatId,
             memberCount: memberIds.length,
+            // For unsaved contacts, derive initials from their signup username
+            initials: otherUserSignupName ? getInitials(otherUserSignupName) : undefined,
           });
         }
       } else {

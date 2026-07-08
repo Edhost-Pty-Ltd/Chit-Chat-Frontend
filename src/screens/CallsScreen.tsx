@@ -528,6 +528,9 @@ export default function CallsScreen() {
     );
 
     if (result) {
+      // Compute avatar initials for the callee (signup username for unsaved contacts)
+      const calleeInitials = resolveCallerInitials(calleeUserId, displayName);
+
       // OutgoingCallScreen owns everything from here.
       navigation.navigate('OutgoingCall', {
         callId: result.callId,
@@ -538,6 +541,7 @@ export default function CallsScreen() {
         callerName,
         chatId,
         memberCount: 2,
+        initials: calleeInitials,
       });
     } else {
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');

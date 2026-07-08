@@ -204,6 +204,8 @@ export type RootStackParamList = {
     callerName: string;   // local participant's LiveKit display name
     chatId: string;
     memberCount: number;
+    /** Avatar initials override (e.g. from signup username when contact is unsaved) */
+    initials?: string;
   };
   AudioCall: { 
     callId: string;

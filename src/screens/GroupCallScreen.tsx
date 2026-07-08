@@ -46,9 +46,15 @@ const FLOAT_W = 110;
 const FLOAT_H = 150;
 
 function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  // Strip emoji and non-letter characters, keep only letters
+  const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    const firstAlpha = name.match(/\p{L}/u);
+    return firstAlpha ? firstAlpha[0].toUpperCase() : '?';
+  }
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function formatDuration(s: number): string {

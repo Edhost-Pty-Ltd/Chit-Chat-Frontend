@@ -12,10 +12,12 @@ import type { CallParticipant } from '../types/call';
 interface RingingCallScreenProps {
   otherParty: CallParticipant;
   callType: 'audio' | 'video';
+  /** Optional override for avatar initials (e.g. from signup username when contact is unsaved) */
+  initials?: string;
   onEndCall: () => void;
 }
 
-export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCallScreenProps) {
+export function RingingCallScreen({ otherParty, callType, initials, onEndCall }: RingingCallScreenProps) {
   // Animated values for pulsing rings
   const pulse1 = useRef(new Animated.Value(0)).current;
   const pulse2 = useRef(new Animated.Value(0)).current;
@@ -56,12 +58,21 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
   }, []);
 
   const getInitials = (name: string) => {
-    const parts = name.trim().split(/\s+/);
+    // Strip emoji and non-letter characters, keep only letters
+    const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) {
+      const firstAlpha = name.match(/\p{L}/u);
+      return firstAlpha ? firstAlpha[0].toUpperCase() : '?';
+    }
     if (parts.length >= 2) {
       return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     }
-    return name.slice(0, 2).toUpperCase();
+    return parts[0][0].toUpperCase();
   };
+
+  // Use the explicit initials prop if provided, otherwise derive from displayName
+  const avatarInitials = initials || getInitials(otherParty.displayName);
 
   return (
     <LinearGradient
@@ -97,7 +108,7 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
         <View style={styles.avatarContainer}>
           <Avatar
             imageUrl={otherParty.photoUrl}
-            initials={getInitials(otherParty.displayName)}
+            initials={avatarInitials}
             color={COLORS.blue}
             size={120}
           />

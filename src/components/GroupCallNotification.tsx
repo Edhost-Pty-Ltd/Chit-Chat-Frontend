@@ -19,6 +19,10 @@ const { width } = Dimensions.get('window');
 interface GroupCallNotificationProps {
   notification: GroupCallNotificationType;
   memberCount?: number;
+  /** Resolved display name for the caller (contact name for saved, phone number for unsaved) */
+  resolvedCallerName?: string;
+  /** Avatar initials override (from signup username for unsaved contacts) */
+  callerInitials?: string;
   onJoin: () => void;
   onDismiss: () => void;
 }
@@ -26,6 +30,8 @@ interface GroupCallNotificationProps {
 export default function GroupCallNotification({
   notification,
   memberCount = 2,
+  resolvedCallerName,
+  callerInitials,
   onJoin,
   onDismiss,
 }: GroupCallNotificationProps) {
@@ -34,6 +40,9 @@ export default function GroupCallNotification({
   // Only label as "Group" when there are more than 2 participants.
   const isGroup = memberCount > 2;
   const callTypeText = isGroup ? `Group ${callTypeLabel}` : callTypeLabel;
+
+  // Use resolvedCallerName if provided, otherwise fall back to initiatorName
+  const callerName = resolvedCallerName || notification.initiatorName;
 
   return (
     <Modal
@@ -53,8 +62,8 @@ export default function GroupCallNotification({
           <Text style={styles.title}>Incoming {callTypeText}</Text>
           <Text style={styles.subtitle}>
             {isGroup
-              ? `${notification.initiatorName} started a group call`
-              : `${notification.initiatorName} is calling you`}
+              ? `${callerName} started a group call`
+              : `${callerName} is calling you`}
           </Text>
 
           {/* Action Buttons */}
