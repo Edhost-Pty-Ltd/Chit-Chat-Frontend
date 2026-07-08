@@ -18,6 +18,8 @@ export interface ChatPreview {
   lastSenderId: string;
   timestamp:    Date | null;
   unreadCount:  number;
+  lastMessageReadBy:      string[];
+  lastMessageDeliveredTo: string[];
 }
 
 export function useChats(userId: string | null) {
@@ -60,6 +62,8 @@ export function useChats(userId: string | null) {
               ? (lm.timestamp as Timestamp).toDate()
               : null,
             unreadCount: getUnreadCount(d.unreadCounts, userId),
+            lastMessageReadBy:      lm?.readBy ?? [],
+            lastMessageDeliveredTo: lm?.deliveredTo ?? [],
           };
         });
         setChats(result);

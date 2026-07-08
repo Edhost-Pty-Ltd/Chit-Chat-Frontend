@@ -132,6 +132,11 @@ export function useNotificationSync(userId: string | null, pushNotification: Pus
                     ? `${senderName}: ${lastMsg.text || 'Sent a media file'}`
                     : (lastMsg.text || 'Sent a media file'),
                   contactId: chatData.type === 'direct' ? lastMsg.senderId : undefined,
+                  // Include navigation data for when notification is tapped
+                  chatId: chatId,
+                  displayName: chatName,
+                  isGroup: chatData.type === 'group',
+                  otherUserId: chatData.type === 'direct' ? lastMsg.senderId : undefined,
                 };
 
                 console.log('[useNotificationSync] Pushing notification:', notificationData);

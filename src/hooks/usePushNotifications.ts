@@ -153,10 +153,41 @@ function handleNotificationResponse(response: any) {
   const data = response.notification.request.content.data;
   console.log('[usePushNotifications] Notification tapped, data:', data);
 
-  // Navigate to Calendar screen when a calendar notification is tapped
-  if (data?.type === 'calendar-event') {
-    const { navigateTo } = require('../navigation/navigationRef');
-    navigateTo('Calendar');
+  const { navigateTo } = require('../navigation/navigationRef');
+
+  // Navigate based on notification type
+  switch (data?.type) {
+    case 'calendar-event':
+      // Navigate to Calendar screen
+      navigateTo('Calendar');
+      break;
+      
+    case 'message':
+      // Navigate to the specific chat
+      if (data.chatId) {
+        navigateTo('Chat', {
+          chatId: data.chatId,
+          displayName: data.displayName || 'Chat',
+          isGroup: data.isGroup || false,
+          otherUserId: data.otherUserId,
+        });
+      } else {
+        // Fallback to Chats list if no chatId
+        navigateTo('Chats');
+      }
+      break;
+      
+    case 'call':
+      // Navigate to Calls screen
+      navigateTo('Calls');
+      break;
+      
+    case 'number_change':
+    case 'system':
+    default:
+      // Navigate to Notifications screen for system notifications
+      navigateTo('Notifications');
+      break;
   }
 }
 

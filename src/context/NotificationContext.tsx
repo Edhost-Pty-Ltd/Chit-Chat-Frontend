@@ -28,7 +28,7 @@ function formatNotificationTime(date: Date): string {
   return date.toLocaleDateString();
 }
 
-export type NotifType = 'message' | 'call' | 'number_change' | 'system';
+export type NotifType = 'message' | 'call' | 'number_change' | 'system' | 'calendar-event';
 
 export interface AppNotification {
   id:        string;
@@ -39,6 +39,14 @@ export interface AppNotification {
   read:      boolean;
   /** Optional — user ID to navigate to chat with when tapped */
   contactId?: string;
+  /** Optional — chat ID for message notifications */
+  chatId?: string;
+  /** Optional — display name for chat navigation */
+  displayName?: string;
+  /** Optional — is this a group chat */
+  isGroup?: boolean;
+  /** Optional — other user ID for direct chats */
+  otherUserId?: string;
 }
 
 interface NotificationContextValue {
@@ -130,8 +138,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               body: notif.body,
               sound: true,
               data: { 
-                contactId: notif.contactId,
-                type: notif.type,
+                contactId: n.contactId,
+                type: n.type,
+                // Include all navigation data
+                chatId: (n as any).chatId,
+                displayName: (n as any).displayName,
+                isGroup: (n as any).isGroup,
+                otherUserId: (n as any).otherUserId,
               },
             },
             trigger: null,

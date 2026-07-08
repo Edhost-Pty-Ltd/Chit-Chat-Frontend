@@ -152,9 +152,11 @@ export async function sendMessage(
     );
 
     batch.update(chatRef, {
-      'lastMessage.text':      trimmed,
-      'lastMessage.senderId':  senderId,
-      'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.text':        trimmed,
+      'lastMessage.senderId':    senderId,
+      'lastMessage.timestamp':   serverTimestamp(),
+      'lastMessage.readBy':      [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
 
@@ -228,9 +230,11 @@ export async function sendVoiceMessage(
     );
 
     batch.update(chatRef, {
-      'lastMessage.text':      '[Voice Note]',
-      'lastMessage.senderId':  senderId,
-      'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.text':        '[Voice Note]',
+      'lastMessage.senderId':    senderId,
+      'lastMessage.timestamp':   serverTimestamp(),
+      'lastMessage.readBy':      [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
 
@@ -299,6 +303,8 @@ export async function sendImageMessage(
       'lastMessage.text': '📷 Photo',
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.readBy': [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
     
@@ -380,6 +386,8 @@ export async function sendVideoMessage(
       'lastMessage.text': '🎥 Video',
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.readBy': [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
     
@@ -452,6 +460,8 @@ export async function sendFileMessage(
       'lastMessage.text': `📎 ${fileName}`,
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.readBy': [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
     
@@ -590,6 +600,8 @@ export async function sendCurrentLocationMessage(
       'lastMessage.text': '📍 Location',
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.readBy': [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
     
@@ -662,6 +674,8 @@ export async function sendLiveLocationMessage(
       'lastMessage.text': '📍 Live Location',
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.readBy': [senderId],
+      'lastMessage.deliveredTo': [],
       ...unreadUpdates,
     });
     

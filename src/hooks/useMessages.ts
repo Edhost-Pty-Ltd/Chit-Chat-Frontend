@@ -139,11 +139,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
           setLoading(false);
         });
 
-        // Mark incoming messages as DELIVERED (not read) when they arrive
-        // Read receipts are handled separately when user opens the chat
-        if (currentUserId) {
-          markAsDelivered(chatId, currentUserId);
-        }
+        // Delivery is handled globally by useGlobalDelivery hook in App.tsx
       },
       (err) => {
         setError(err.message);
@@ -192,6 +188,25 @@ async function markAsRead(chatId: string, userId: string, readReceipts = true) {
         updates.deliveredTo = [...deliveredTo, userId];
       }
       await updateDoc(docSnap.ref, updates);
+    }
+
+    // Update chat-level lastMessage so chat list shows blue ticks in real-time
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (chatSnap.exists()) {
+      const chatData = chatSnap.data();
+      const lm = chatData.lastMessage;
+      if (lm && lm.senderId !== userId) {
+        const lmReadBy = lm.readBy || [];
+        if (!lmReadBy.includes(userId)) {
+          const lmDeliveredTo = lm.deliveredTo || [];
+          const chatUpdates: any = { 'lastMessage.readBy': [...lmReadBy, userId] };
+          if (!lmDeliveredTo.includes(userId)) {
+            chatUpdates['lastMessage.deliveredTo'] = [...lmDeliveredTo, userId];
+          }
+          await updateDoc(chatRef, chatUpdates);
+        }
+      }
     }
   } catch (error) {
     console.warn('[useMessages] Error marking as read:', error);

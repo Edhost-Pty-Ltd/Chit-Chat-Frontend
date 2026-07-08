@@ -24,6 +24,7 @@ import GroupCallNotificationManager from './src/components/GroupCallNotification
 import { BiometricGate } from './src/components/BiometricGate';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { useWritePresence } from './src/hooks/usePresence';
+import { useGlobalDelivery } from './src/hooks/useGlobalDelivery';
 
 // Disable native screens on web to avoid touch/interaction issues
 if (Platform.OS === 'web') {
@@ -71,6 +72,13 @@ function PushNotificationManager() {
 function PresenceManager() {
   const { user } = useHooksAuth();
   useWritePresence(user?.uid ?? null);
+  return null;
+}
+
+// Global delivery — marks all incoming messages as delivered when app is open
+function GlobalDeliveryManager() {
+  const { user } = useHooksAuth();
+  useGlobalDelivery(user?.uid ?? null);
   return null;
 }
 
@@ -133,6 +141,7 @@ export default function App() {
                   <ActivityWatcher />
                   <PushNotificationManager />
                   <PresenceManager />
+                  <GlobalDeliveryManager />
                   <NavigationContainer ref={navigationRef}>
                     <StatusBar style="auto" />
                     <AppNavigator />
