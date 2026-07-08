@@ -1,5 +1,5 @@
 ﻿// ─── Screen: Calls ───────────────────────────────────────────────────────────
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet,
   Modal, Pressable, ScrollView, Alert, ActivityIndicator, TextInput,
@@ -7,6 +7,8 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import type { CallHistoryItem } from '../types/call';
@@ -325,6 +327,59 @@ export default function CallsScreen() {
     return map;
   }, [contacts]);
 
+  // For unsaved contacts, we fetch their Firebase profile displayName (the name
+  // they used when signing up) so we can show proper initials instead of phone numbers.
+  const [userIdToFirebaseName, setUserIdToFirebaseName] = useState<Map<string, string>>(new Map());
+
+  // Fetch Firebase display names for call participants who are NOT in saved contacts
+  useEffect(() => {
+    const fetchUnsavedUserNames = async () => {
+      // Find userIds in call history that are NOT in saved contacts
+      const unsavedUserIds = callHistory
+        .map((c) => c.otherParty.userId)
+        .filter((uid) => !userIdToPhone.has(uid));
+
+      // Deduplicate
+      const uniqueUnsaved = [...new Set(unsavedUserIds)];
+      if (uniqueUnsaved.length === 0) return;
+
+      // Fetch display names from Firebase for each unsaved user
+      const newNames = new Map<string, string>();
+      await Promise.all(
+        uniqueUnsaved.map(async (uid) => {
+          // Skip if we already have this user's name cached
+          if (userIdToFirebaseName.has(uid)) {
+            newNames.set(uid, userIdToFirebaseName.get(uid)!);
+            return;
+          }
+          try {
+            const userDoc = await getDoc(doc(db, 'users', uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              // Use the displayName field (what they entered at signup)
+              if (data.displayName) {
+                newNames.set(uid, data.displayName);
+              }
+            }
+          } catch (err) {
+            console.warn('[CallsScreen] Failed to fetch user profile:', uid, err);
+          }
+        })
+      );
+
+      // Merge with existing cached names
+      if (newNames.size > 0) {
+        setUserIdToFirebaseName((prev) => {
+          const merged = new Map(prev);
+          newNames.forEach((name, uid) => merged.set(uid, name));
+          return merged;
+        });
+      }
+    };
+
+    fetchUnsavedUserNames();
+  }, [callHistory, userIdToPhone, userIdToFirebaseName]);
+
   /** Resolve a profile photo for a call participant: saved contact photo → the
    *  photo stored on the call record → null (fall back to initials). */
   const resolveCallerPhoto = useCallback(
@@ -335,14 +390,27 @@ export default function CallsScreen() {
     [userIdToPhoto]
   );
 
-  /** Resolve a display name for a call participant: phone-book name → phone number. */
+  /** Resolve a display name for a call participant:
+   *  1. Saved contact name (from phone book)
+   *  2. Firebase signup name (for unsaved contacts)
+   *  3. Fallback to whatever was stored in the call record (phone number)
+   */
   const resolveCallerName = useCallback(
     (userId: string, fallbackName: string): string => {
       const phone = userIdToPhone.get(userId);
-      if (!phone) return fallbackName; // not a saved contact — use whatever was stored
-      return resolveName(phone, phone); // saved → contact name; unsaved → phone number
+      if (phone) {
+        // Saved contact — use phone-book resolved name
+        return resolveName(phone, phone);
+      }
+      // Not a saved contact — try Firebase signup name
+      const firebaseName = userIdToFirebaseName.get(userId);
+      if (firebaseName) {
+        return firebaseName;
+      }
+      // Fall back to whatever was stored in the call record
+      return fallbackName;
     },
-    [userIdToPhone, resolveName]
+    [userIdToPhone, userIdToFirebaseName, resolveName]
   );
   
   const [tab, setTab] = useState<CallTab>('All');
