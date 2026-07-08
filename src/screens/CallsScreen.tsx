@@ -59,15 +59,17 @@ function formatTimestamp(date: Date): string {
   }
 }
 
-// Get initials from display name. Returns '?' if no valid alpha characters found.
+// Get initials from display name. For phone numbers, returns last 2 digits.
 function getInitials(name: string): string {
   // Strip emoji and non-letter characters, keep only letters (including accented)
   const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
   const parts = cleaned.split(/\s+/).filter(Boolean);
   if (parts.length === 0) {
-    // Fallback: try first alpha character of original string
-    const firstAlpha = name.match(/\p{L}/u);
-    return firstAlpha ? firstAlpha[0].toUpperCase() : '?';
+    // No letters found — likely a phone number. Use last 2 digits as initials.
+    const digits = name.replace(/\D/g, '');
+    if (digits.length >= 2) return digits.slice(-2);
+    if (digits.length === 1) return digits;
+    return '?';
   }
   // Single-word name → first letter only.
   if (parts.length === 1) return parts[0][0].toUpperCase();

@@ -62,8 +62,11 @@ export function RingingCallScreen({ otherParty, callType, initials, onEndCall }:
     const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
     const parts = cleaned.split(/\s+/).filter(Boolean);
     if (parts.length === 0) {
-      const firstAlpha = name.match(/\p{L}/u);
-      return firstAlpha ? firstAlpha[0].toUpperCase() : '?';
+      // No letters found — likely a phone number. Use last 2 digits as initials.
+      const digits = name.replace(/\D/g, '');
+      if (digits.length >= 2) return digits.slice(-2);
+      if (digits.length === 1) return digits;
+      return '?';
     }
     if (parts.length >= 2) {
       return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();

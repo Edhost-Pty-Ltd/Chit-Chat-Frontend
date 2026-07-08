@@ -221,8 +221,15 @@ export default function GroupCallNotificationManager() {
     } else if (parts.length === 1) {
       callerInitials = parts[0][0].toUpperCase();
     } else {
-      const firstAlpha = (currentNotification.initiatorName || '').match(/\p{L}/u);
-      callerInitials = firstAlpha ? firstAlpha[0].toUpperCase() : '?';
+      // No letters — likely a phone number stored as initiatorName. Use last 2 digits.
+      const digits = (currentNotification.initiatorName || '').replace(/\D/g, '');
+      if (digits.length >= 2) {
+        callerInitials = digits.slice(-2);
+      } else if (digits.length === 1) {
+        callerInitials = digits;
+      } else {
+        callerInitials = '?';
+      }
     }
   }
 
