@@ -59,27 +59,37 @@ function formatTimestamp(date: Date): string {
   }
 }
 
-// Get initials from display name. Never returns '?' for non-empty alphabetical names.
+// Get initials from a display name. Usernames are always alphabetical.
 function getInitials(name: string): string {
   if (!name || !name.trim()) return '?';
   
-  // First try: extract letters and get initials from word boundaries
-  const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
-  const parts = cleaned.split(/\s+/).filter(Boolean);
+  // Split on whitespace and take first letter of first + last word
+  const parts = name.trim().split(/\s+/).filter(Boolean);
   
   if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    const first = parts[0][0];
+    const last = parts[parts.length - 1][0];
+    // Only use if they're actual letters
+    if (/[a-zA-Z]/.test(first) && /[a-zA-Z]/.test(last)) {
+      return (first + last).toUpperCase();
+    }
   }
   if (parts.length === 1) {
-    return parts[0][0].toUpperCase();
+    const first = parts[0][0];
+    if (/[a-zA-Z]/.test(first)) {
+      return first.toUpperCase();
+    }
   }
   
-  // No letters at all — try digits (phone number)
+  // Try to find any letter in the string
+  const match = name.match(/[a-zA-Z]/);
+  if (match) return match[0].toUpperCase();
+  
+  // No letters at all — try last 2 digits (phone number)
   const digits = name.replace(/\D/g, '');
   if (digits.length >= 2) return digits.slice(-2);
   if (digits.length === 1) return digits;
   
-  // Truly nothing useful
   return '?';
 }
 

@@ -108,18 +108,25 @@ interface PastMember {
 function getInitials(name: string): string {
   if (!name || !name.trim()) return '?';
   
-  // Extract letters and get initials from word boundaries
-  const cleaned = name.replace(/[^\p{L}\s]/gu, '').trim();
-  const parts = cleaned.split(/\s+/).filter(Boolean);
+  const parts = name.trim().split(/\s+/).filter(Boolean);
   
   if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    const first = parts[0][0];
+    const last = parts[parts.length - 1][0];
+    if (/[a-zA-Z]/.test(first) && /[a-zA-Z]/.test(last)) {
+      return (first + last).toUpperCase();
+    }
   }
   if (parts.length === 1) {
-    return parts[0][0].toUpperCase();
+    const first = parts[0][0];
+    if (/[a-zA-Z]/.test(first)) {
+      return first.toUpperCase();
+    }
   }
   
-  // No letters — try digits (phone number)
+  const match = name.match(/[a-zA-Z]/);
+  if (match) return match[0].toUpperCase();
+  
   const digits = name.replace(/\D/g, '');
   if (digits.length >= 2) return digits.slice(-2);
   if (digits.length === 1) return digits;

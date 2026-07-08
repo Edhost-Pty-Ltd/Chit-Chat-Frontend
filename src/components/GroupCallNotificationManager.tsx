@@ -214,21 +214,20 @@ export default function GroupCallNotificationManager() {
       resolvedCallerName = callerPhone;
     }
     // Initials come from the signup username (initiatorName)
-    const cleaned = (currentNotification.initiatorName || '').replace(/[^\p{L}\s]/gu, '').trim();
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-    if (parts.length >= 2) {
-      callerInitials = (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    } else if (parts.length === 1) {
-      callerInitials = parts[0][0].toUpperCase();
+    const initiatorName = currentNotification.initiatorName || '';
+    const nameParts = initiatorName.trim().split(/\s+/).filter(Boolean);
+    if (nameParts.length >= 2 && /[a-zA-Z]/.test(nameParts[0][0]) && /[a-zA-Z]/.test(nameParts[nameParts.length - 1][0])) {
+      callerInitials = (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase();
+    } else if (nameParts.length >= 1 && /[a-zA-Z]/.test(nameParts[0][0])) {
+      callerInitials = nameParts[0][0].toUpperCase();
     } else {
-      // No letters — likely a phone number stored as initiatorName. Use last 2 digits.
-      const digits = (currentNotification.initiatorName || '').replace(/\D/g, '');
-      if (digits.length >= 2) {
-        callerInitials = digits.slice(-2);
-      } else if (digits.length === 1) {
-        callerInitials = digits;
+      // Try any letter in the string
+      const letterMatch = initiatorName.match(/[a-zA-Z]/);
+      if (letterMatch) {
+        callerInitials = letterMatch[0].toUpperCase();
       } else {
-        callerInitials = '?';
+        const digits = initiatorName.replace(/\D/g, '');
+        callerInitials = digits.length >= 2 ? digits.slice(-2) : (digits || '?');
       }
     }
   }
