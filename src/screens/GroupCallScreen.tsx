@@ -329,6 +329,39 @@ function RoomView({
     return () => clearInterval(t);
   }, []);
 
+  // Listen for call status changes in Firestore (server-side call ending)
+  useEffect(() => {
+    if (!callId) return;
+
+    console.log('[GroupCallScreen] Setting up Firestore listener for call:', callId);
+
+    const unsubscribe = import('firebase/firestore').then(async ({ doc, onSnapshot }) => {
+      const { db } = await import('../config/firebase');
+      const callRef = doc(db, 'groupCalls', callId);
+      
+      return onSnapshot(callRef, (snapshot) => {
+        if (!snapshot.exists()) {
+          console.log('[GroupCallScreen] Call document no longer exists - ending call');
+          onEnded();
+          return;
+        }
+
+        const data = snapshot.data();
+        console.log('[GroupCallScreen] Call status update:', data?.status);
+
+        // If server ended the call (e.g., because only 1 participant remained)
+        if (data?.status === 'ended') {
+          console.log('[GroupCallScreen] Call ended by server - disconnecting');
+          onEnded();
+        }
+      });
+    });
+
+    return () => {
+      unsubscribe.then((unsub) => unsub?.()).catch((e) => console.warn('[GroupCallScreen] Listener cleanup failed:', e));
+    };
+  }, [callId, onEnded]);
+
   // Ensure mic and camera are publishing once the local participant connects.
   // `LiveKitRoom audio/video` props handle the initial intent, but this safety
   // net ensures the tracks are actually published even if the room connects
@@ -559,10 +592,32 @@ function RoomView({
         style: 'destructive',
         onPress: async () => {
           historyWrittenRef.current = true;
+          
+          console.log('[GroupCallScreen] Hang up - removing from activeParticipants');
+          
+          // Step 1: Leave the call in Firestore (updates activeParticipants)
           try {
-            if (callId && userId) await groupCall.leaveGroupCall(callId, userId);
-          } catch {}
-          try { await room.disconnect(); } catch {}
+            if (callId && userId) {
+              await groupCall.leaveGroupCall(callId, userId);
+              console.log('[GroupCallScreen] Successfully left call in Firestore');
+            }
+          } catch (e) {
+            console.error('[GroupCallScreen] Failed to leave call:', e);
+          }
+          
+          // Step 2: Small delay to let Cloud Function trigger and update status
+          // This ensures other participants see the status change before we disconnect
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Step 3: Disconnect from LiveKit room
+          try {
+            await room.disconnect();
+            console.log('[GroupCallScreen] Disconnected from LiveKit room');
+          } catch (e) {
+            console.error('[GroupCallScreen] Room disconnect failed:', e);
+          }
+          
+          // Step 4: End call locally and navigate away
           await handleCallEnd(callDuration);
         },
       },

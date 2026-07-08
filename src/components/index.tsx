@@ -297,5 +297,7 @@ export { IncomingCallOverlay } from './IncomingCallOverlay';
 export { IncomingCallManager } from './IncomingCallManager';
 export { LocationMessageBubble } from './LocationMessageBubble';
 export { FloatingCallOverlay } from './FloatingCallOverlay';
+export { RingingCallScreen } from './RingingCallScreen';
+export { CallEndedScreen } from './CallEndedScreen';
 export { default as RTCView } from './RTCView';
 

@@ -39,7 +39,7 @@ export interface AppNotification {
   read:      boolean;
   /** Optional — user ID to navigate to chat with when tapped */
   contactId?: string;
-  /** Optional — chat ID for message notifications */
+  /** Optional — chat ID to navigate to when tapped (takes precedence over contactId) */
   chatId?: string;
   /** Optional — display name for chat navigation */
   displayName?: string;
@@ -138,13 +138,12 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               body: notif.body,
               sound: true,
               data: { 
-                contactId: n.contactId,
-                type: n.type,
-                // Include all navigation data
-                chatId: (n as any).chatId,
-                displayName: (n as any).displayName,
-                isGroup: (n as any).isGroup,
-                otherUserId: (n as any).otherUserId,
+                contactId: notif.contactId,
+                chatId: notif.chatId,
+                type: notif.type,
+                displayName: notif.displayName,
+                isGroup: notif.isGroup,
+                otherUserId: notif.otherUserId,
               },
             },
             trigger: null,

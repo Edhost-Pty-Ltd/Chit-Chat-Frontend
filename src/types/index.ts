@@ -194,6 +194,17 @@ export type RootStackParamList = {
     chatId?: string;
     callId?: string;
   };
+  OutgoingCall: {
+    callId: string;
+    displayName: string;
+    callType: 'audio' | 'video';
+    photoUrl: string | null;
+    // Params needed to start the active LiveKit call once the receiver answers.
+    roomName: string;
+    callerName: string;   // local participant's LiveKit display name
+    chatId: string;
+    memberCount: number;
+  };
   AudioCall: { 
     callId: string;
     isOutgoing: boolean;

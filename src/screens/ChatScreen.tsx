@@ -1162,16 +1162,34 @@ export default function ChatScreen() {
       );
 
       if (result) {
-        startActiveCall({
-          roomName: result.roomName,
-          displayName: userDisplayName,
-          audioOnly: callType === 'audio',
-          // For a group this is the group name; for 1-on-1 it's the other person.
-          groupName: displayName,
-          memberCount: memberIds.length,
-          chatId,
-          callId: result.callId,
-        });
+        if (isGroup) {
+          // Group call: the initiator enters the room immediately and the other
+          // members receive notifications to join. There is no single ringing
+          // target, so we start the active call directly.
+          startActiveCall({
+            roomName: result.roomName,
+            displayName: userDisplayName,
+            audioOnly: callType === 'audio',
+            groupName: displayName,
+            memberCount: memberIds.length,
+            chatId,
+            callId: result.callId,
+          });
+        } else {
+          // 1-on-1 call: show the ringing screen and wait for the callee to
+          // answer. OutgoingCallScreen owns the rest of the outgoing lifecycle
+          // (waiting for 'active', starting the call, timeout, cancellation).
+          navigation.navigate('OutgoingCall', {
+            callId: result.callId,
+            displayName,
+            callType,
+            photoUrl: otherUserPhoto ?? null,
+            roomName: result.roomName,
+            callerName: userDisplayName,
+            chatId,
+            memberCount: memberIds.length,
+          });
+        }
       } else {
         Alert.alert('Error', groupCall.error || 'Failed to start call');
       }
@@ -1179,7 +1197,7 @@ export default function ChatScreen() {
       console.error('[ChatScreen] Error initiating call:', error);
       Alert.alert('Error', 'Failed to start call');
     }
-  }, [userId, isGroup, chatId, otherUserId, displayName, user, groupCall, startActiveCall]);
+  }, [userId, isGroup, chatId, otherUserId, displayName, otherUserPhoto, user, groupCall, startActiveCall, navigation]);
 
   const handleVoiceCall = useCallback(() => startCall('audio'), [startCall]);
 

@@ -18,8 +18,8 @@ import { db } from '../config/firebase';
 import { doc, updateDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 
-import { AppText, AppIcon, AppBg, useForeground, useTypography, useGlass } from '../context/ThemeContext';
-import { Avatar } from '../components';
+import { AppText, AppIcon, AppBg, useGlass } from '../context/ThemeContext';
+import { Avatar, RingingCallScreen, CallEndedScreen } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { RootStackParamList, Contact } from '../types';
 import { CONTACTS } from '../data/mockData';
@@ -36,8 +36,6 @@ export default function AudioCallScreen() {
   const { user } = useAuth();
   const { minimizeCall, updateDuration } = useFloatingCall();
   const { bevel } = useGlass();
-  const { FG } = useForeground();
-  const { fontFamily, textColor } = useTypography();
 
   const [muted,        setMuted]        = useState(false);
   const [speakerOn,    setSpeakerOn]    = useState(false);
@@ -314,6 +312,29 @@ export default function AudioCallScreen() {
   };
 
   const availableContacts = CONTACTS.filter((c) => !participants.some((p) => p.id === c.id));
+
+  // ── Show ringing screen for outgoing calls before connection ──
+  if (isOutgoing && (callStatus === 'connecting' || callStatus === 'ringing')) {
+    return (
+      <RingingCallScreen
+        otherParty={otherParty}
+        callType="audio"
+        onEndCall={hangUp}
+      />
+    );
+  }
+
+  // ── Show call ended screen momentarily before navigation ──
+  if (callStatus === 'ended' || callStatus === 'rejected' || callStatus === 'missed' || callStatus === 'failed') {
+    const reason = callStatus as 'ended' | 'rejected' | 'missed' | 'failed';
+    return (
+      <CallEndedScreen
+        reason={reason}
+        onDismiss={() => navigation.goBack()}
+        dismissDelay={1500}
+      />
+    );
+  }
 
   return (
     <View style={styles.root}>

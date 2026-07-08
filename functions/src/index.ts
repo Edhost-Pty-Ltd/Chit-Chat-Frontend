@@ -102,6 +102,44 @@ import { getStorage } from 'firebase-admin/storage';
 
 const FIRESTORE_BATCH_LIMIT = 500;
 
+// ─── Group Call Participant Threshold Check ─────────────────────────────────
+// Trigger: When a group call's activeParticipants array changes
+// Purpose: Auto-end group calls when only 1 participant remains (fixes Bug 2)
+export const checkGroupCallParticipants = functionsV1.firestore
+  .document('groupCalls/{callId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    
+    // Only proceed if the call is still active
+    if (!after || after.status !== 'active') {
+      return null;
+    }
+    
+    const beforeParticipants = before?.activeParticipants || [];
+    const activeParticipants = after.activeParticipants || [];
+
+    // Only end the call when participants DROP to <= 1 from a previously-joined
+    // state of >= 2. This is critical: during connect, participants are added
+    // one at a time (callee: 1, then caller: 2). Ending at <= 1 unconditionally
+    // would kill every call the moment the first participant is added.
+    const droppedToOneOrFewer =
+      beforeParticipants.length >= 2 && activeParticipants.length <= 1;
+
+    if (droppedToOneOrFewer) {
+      console.log(`[checkGroupCallParticipants] Participants dropped from ${beforeParticipants.length} to ${activeParticipants.length} in call ${context.params.callId} - ending call`);
+      
+      await change.after.ref.update({
+        status: 'ended',
+        activeParticipants: [],
+      });
+      
+      console.log(`[checkGroupCallParticipants] Call ${context.params.callId} ended successfully`);
+    }
+    
+    return null;
+  });
+
 /** Delete a list of document refs in chunks that respect the 500-write batch limit. */
 async function deleteRefsInBatches(
   refs: FirebaseFirestore.DocumentReference[],

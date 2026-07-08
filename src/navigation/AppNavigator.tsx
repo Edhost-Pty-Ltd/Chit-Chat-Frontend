@@ -27,6 +27,7 @@ import CreateAccountScreen from '../screens/CreateAccountScreen';
 import VideoCallScreen    from '../screens/VideoCallScreen';
 import AudioCallScreen    from '../screens/AudioCallScreen';
 import GroupCallScreen    from '../screens/GroupCallScreen';
+import OutgoingCallScreen from '../screens/OutgoingCallScreen';
 import AccountSettingsScreen      from '../screens/AccountSettingsScreen';
 import PrivacySettingsScreen      from '../screens/PrivacySettingsScreen';
 import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
@@ -207,6 +208,7 @@ export default function AppNavigator() {
             <Stack.Screen name="VideoCall"       component={VideoCallScreen}       />
             <Stack.Screen name="AudioCall"       component={AudioCallScreen}       />
             <Stack.Screen name="GroupCall"       component={GroupCallScreen}       />
+            <Stack.Screen name="OutgoingCall"    component={OutgoingCallScreen}    />
             <Stack.Screen name="AccountSettings"      component={AccountSettingsScreen}      />
             <Stack.Screen name="PrivacySettings"      component={PrivacySettingsScreen}      />
             <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />

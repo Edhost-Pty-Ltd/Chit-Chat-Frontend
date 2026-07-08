@@ -139,7 +139,12 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
           setLoading(false);
         });
 
-        // Delivery is handled globally by useGlobalDelivery hook in App.tsx
+        // Mark incoming messages as DELIVERED (not read) when they arrive
+        // Read receipts are handled separately when user opens the chat
+        // Delivery is also handled globally by useGlobalDelivery hook in App.tsx
+        if (currentUserId) {
+          markAsDelivered(chatId, currentUserId);
+        }
       },
       (err) => {
         setError(err.message);

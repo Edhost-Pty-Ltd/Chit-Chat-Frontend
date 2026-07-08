@@ -17,16 +17,13 @@ try {
   Notifications = require('expo-notifications');
   // Configure how notifications are handled when app is in foreground.
   Notifications.setNotificationHandler({
-    handleNotification: async () => {
-      // Show native system notification banner for all notifications in foreground
-      return {
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      };
-    },
+    handleNotification: async () => ({
+      shouldShowAlert: false,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
   });
 } catch {
   // expo-notifications native module not available — push notifications disabled.
@@ -59,19 +56,36 @@ export function usePushNotifications(
       // 🔑 Bridge into the in-app notification context
       // Pass skipNative=true to prevent scheduling a duplicate native notification
       // (the native notification was already shown by the push system)
-      const data = notif.request.content.data as { type?: string; contactId?: number } | undefined;
+      const data = notif.request.content.data as { 
+        type?: string; 
+        contactId?: string;
+        chatId?: string;
+      } | undefined;
+      
       onNotificationReceived?.({
         type: (data?.type as NotifType) ?? 'system',
         title: notif.request.content.title ?? '',
         body: notif.request.content.body ?? '',
-        contactId: data?.contactId?.toString(),
+        contactId: data?.contactId,
+        chatId: data?.chatId,
       }, true);
     });
 
     // Listener for when a notification is tapped/interacted with
     const subscription2 = Notifications.addNotificationResponseReceivedListener((response: any) => {
-      console.log('[usePushNotifications] Notification response:', response);
-      handleNotificationResponse(response);
+      console.log('[usePushNotifications] Notification tapped:', response);
+
+      const data = response.notification.request.content.data as { type?: string } | undefined;
+
+      // Calendar notifications navigate to the Calendar screen.
+      if (data?.type === 'calendar-event') {
+        const { navigateTo } = require('../navigation/navigationRef');
+        navigateTo('Calendar');
+        return;
+      }
+
+      // Chat and other notifications are handled by NotificationTapHandler in
+      // App.tsx, which navigates to the relevant chat using the chatId payload.
     });
 
     return () => {
@@ -145,49 +159,6 @@ async function savePushToken(userId: string, token: string) {
     console.log('[usePushNotifications] Push token saved to Firestore');
   } catch (error) {
     console.error('[usePushNotifications] Error saving push token:', error);
-  }
-}
-
-// ── Handle notification response (when user taps notification) ────────────────
-function handleNotificationResponse(response: any) {
-  const data = response.notification.request.content.data;
-  console.log('[usePushNotifications] Notification tapped, data:', data);
-
-  const { navigateTo } = require('../navigation/navigationRef');
-
-  // Navigate based on notification type
-  switch (data?.type) {
-    case 'calendar-event':
-      // Navigate to Calendar screen
-      navigateTo('Calendar');
-      break;
-      
-    case 'message':
-      // Navigate to the specific chat
-      if (data.chatId) {
-        navigateTo('Chat', {
-          chatId: data.chatId,
-          displayName: data.displayName || 'Chat',
-          isGroup: data.isGroup || false,
-          otherUserId: data.otherUserId,
-        });
-      } else {
-        // Fallback to Chats list if no chatId
-        navigateTo('Chats');
-      }
-      break;
-      
-    case 'call':
-      // Navigate to Calls screen
-      navigateTo('Calls');
-      break;
-      
-    case 'number_change':
-    case 'system':
-    default:
-      // Navigate to Notifications screen for system notifications
-      navigateTo('Notifications');
-      break;
   }
 }
 

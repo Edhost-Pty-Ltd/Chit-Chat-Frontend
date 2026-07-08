@@ -1,5 +1,5 @@
 ﻿// ─── Screen: Calls ───────────────────────────────────────────────────────────
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   View, FlatList, TouchableOpacity, StyleSheet,
   Modal, Pressable, ScrollView, Alert, ActivityIndicator, TextInput,
@@ -7,23 +7,21 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import type { CallHistoryItem } from '../types/call';
 import type { RootStackParamList } from '../types';
-import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import { useCallHistory } from '../hooks/useCallHistory';
 import { useGroupCall } from '../hooks/useGroupCall';
-import { useActiveCall } from '../context/ActiveCallContext';
 import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
-import { useFocusEffect } from '@react-navigation/native';
-import { markMissedCallsAsViewed } from '../hooks/useMissedCalls';
-
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -63,9 +61,12 @@ function formatTimestamp(date: Date): string {
 
 // Get initials from display name
 function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  // Single-word name → first letter only (initial, not first two letters).
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  // Multi-word name → first letter of the first and last words.
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'outgoing'; status: string }) {
@@ -79,6 +80,7 @@ function CallInfoSheet({
   call,
   resolvedName,
   resolvedPhone,
+  resolvedPhoto,
   visible,
   onClose,
   onAudioCall,
@@ -88,6 +90,7 @@ function CallInfoSheet({
   call: CallHistoryItem | null;
   resolvedName: string;
   resolvedPhone: string;
+  resolvedPhoto: string | null;
   visible: boolean;
   onClose: () => void;
   onAudioCall: () => void;
@@ -96,7 +99,6 @@ function CallInfoSheet({
 }) {
   const { FG } = useForeground();
   const { bevel } = useGlass();
-  const { fontFamily, textColor } = useTypography();
 
   if (!call) return null;
 
@@ -118,10 +120,10 @@ function CallInfoSheet({
             initials={getInitials(resolvedName)} 
             color={COLORS.blue} 
             size={64} 
-            imageUrl={call.otherParty.photoUrl}
+            imageUrl={resolvedPhoto}
           />
           <View style={styles.infoMeta}>
-            <AppText style={[styles.infoName, { color: textColor, fontFamily }]}>{resolvedName}</AppText>
+            <AppText style={styles.infoName}>{resolvedName}</AppText>
             <AppText style={styles.infoNum}>
               {resolvedPhone || 'No number saved'}
             </AppText>
@@ -132,11 +134,11 @@ function CallInfoSheet({
         <View style={[styles.detailCard, bevel]}>
           <View style={styles.detailRow}>
             <CallDirectionIcon direction={call.direction} status={call.status} />
-            <AppText style={[styles.detailType, { color: statusColor, fontFamily }]} fixedColor={isMissed}>
+            <AppText style={[styles.detailType, { color: statusColor }]} fixedColor={isMissed}>
               {statusText}
             </AppText>
           </View>
-          <AppText style={[styles.detailTime, { color: FG.secondary }]}>
+          <AppText style={styles.detailTime}>
             {formatTimestamp(call.timestamp)}
           </AppText>
         </View>
@@ -154,7 +156,7 @@ function CallInfoSheet({
                   <AppIcon name={btn.icon} size={24} color="#fff" fixedColor />
                 </LinearGradient>
               </TouchableOpacity>
-              <AppText style={[styles.actionLabel, { color: textColor }]}>{btn.label}</AppText>
+              <AppText style={styles.actionLabel}>{btn.label}</AppText>
             </View>
           ))}
         </View>
@@ -165,7 +167,7 @@ function CallInfoSheet({
           activeOpacity={0.85}
           style={[styles.closeBtn, bevel]}
         >
-          <AppText style={[styles.closeBtnText, { color: textColor }]}>Close</AppText>
+          <AppText style={styles.closeBtnText}>Close</AppText>
         </TouchableOpacity>
       </View>
     </Modal>
@@ -190,7 +192,6 @@ function ContactPickerSheet({
 }) {
   const { bevel } = useGlass();
   const { FG } = useForeground();
-  const { fontFamily, textColor } = useTypography();
   const [query, setQuery] = useState('');
   const searchRef = useRef<TextInput>(null);
 
@@ -224,7 +225,7 @@ function ContactPickerSheet({
             <AppIcon name="close" size={22} color={COLORS.sub} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <AppText style={[styles.sheetTitle, { color: textColor, fontFamily }]}>Call a contact</AppText>
+            <AppText style={styles.sheetTitle}>Call a contact</AppText>
             <AppText style={styles.sheetSub}>{filtered.length} contacts</AppText>
           </View>
         </View>
@@ -234,7 +235,7 @@ function ContactPickerSheet({
           <AppIcon name="search-outline" size={18} color={COLORS.sub} />
           <TextInput
             ref={searchRef}
-            style={[styles.searchInput, { color: textColor }]}
+            style={[styles.searchInput, { color: COLORS.text }]}
             placeholder="Search contacts…"
             placeholderTextColor={COLORS.sub}
             value={query}
@@ -275,7 +276,7 @@ function ContactPickerSheet({
                   imageUrl={c.photoUri || c.firebasePhotoURL || null}
                 />
                 <View style={styles.contactMeta}>
-                  <AppText style={[styles.contactName, { color: textColor, fontFamily }]}>{c.displayName}</AppText>
+                  <AppText style={styles.contactName}>{c.displayName}</AppText>
                   <AppText style={styles.contactNum}>Tap to call</AppText>
                 </View>
                 {/* Audio call button */}
@@ -303,9 +304,7 @@ export default function CallsScreen() {
   const { contacts, loading: contactsLoading } = useContacts();
   const { resolveName } = usePhoneBook();
   const groupCall = useGroupCall();
-  const { startCall: startActiveCall } = useActiveCall();
   const { bevel } = useGlass();
-  const { fontFamily, textColor } = useTypography();
   const insets = useSafeAreaInsets();
 
   // Build a userId → phone map from device contacts so we can resolve names
@@ -318,27 +317,100 @@ export default function CallsScreen() {
     return map;
   }, [contacts]);
 
-    // Mark missed calls as viewed when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      if (user?.uid) {
-        markMissedCallsAsViewed(user.uid).catch((err) => {
-          console.warn('[CallsScreen] Failed to mark missed calls as viewed:', err);
+  // Build a userId → profile photo map from saved device contacts. Prefer the
+  // device contact photo, falling back to the (privacy-filtered) Firebase photo.
+  const userIdToPhoto = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const c of contacts) {
+      if (c.userId) map.set(c.userId, c.photoUri || c.firebasePhotoURL || null);
+    }
+    return map;
+  }, [contacts]);
+
+  // For unsaved contacts, we fetch their Firebase profile displayName (the name
+  // they used when signing up) so we can show proper initials instead of phone numbers.
+  const [userIdToFirebaseName, setUserIdToFirebaseName] = useState<Map<string, string>>(new Map());
+
+  // Fetch Firebase display names for call participants who are NOT in saved contacts
+  useEffect(() => {
+    const fetchUnsavedUserNames = async () => {
+      // Find userIds in call history that are NOT in saved contacts
+      const unsavedUserIds = callHistory
+        .map((c) => c.otherParty.userId)
+        .filter((uid) => !userIdToPhone.has(uid));
+
+      // Deduplicate
+      const uniqueUnsaved = [...new Set(unsavedUserIds)];
+      if (uniqueUnsaved.length === 0) return;
+
+      // Fetch display names from Firebase for each unsaved user
+      const newNames = new Map<string, string>();
+      await Promise.all(
+        uniqueUnsaved.map(async (uid) => {
+          // Skip if we already have this user's name cached
+          if (userIdToFirebaseName.has(uid)) {
+            newNames.set(uid, userIdToFirebaseName.get(uid)!);
+            return;
+          }
+          try {
+            const userDoc = await getDoc(doc(db, 'users', uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              // Use the displayName field (what they entered at signup)
+              if (data.displayName) {
+                newNames.set(uid, data.displayName);
+              }
+            }
+          } catch (err) {
+            console.warn('[CallsScreen] Failed to fetch user profile:', uid, err);
+          }
+        })
+      );
+
+      // Merge with existing cached names
+      if (newNames.size > 0) {
+        setUserIdToFirebaseName((prev) => {
+          const merged = new Map(prev);
+          newNames.forEach((name, uid) => merged.set(uid, name));
+          return merged;
         });
       }
-    }, [user?.uid])
+    };
+
+    fetchUnsavedUserNames();
+  }, [callHistory, userIdToPhone, userIdToFirebaseName]);
+
+  /** Resolve a profile photo for a call participant: saved contact photo → the
+   *  photo stored on the call record → null (fall back to initials). */
+  const resolveCallerPhoto = useCallback(
+    (userId: string, fallbackPhoto: string | null): string | null => {
+      const savedPhoto = userIdToPhoto.get(userId);
+      return savedPhoto ?? fallbackPhoto ?? null;
+    },
+    [userIdToPhoto]
   );
 
-  
-
-  /** Resolve a display name for a call participant: phone-book name → phone number. */
+  /** Resolve a display name for a call participant:
+   *  1. Saved contact name (from phone book)
+   *  2. Firebase signup name (for unsaved contacts)
+   *  3. Fallback to whatever was stored in the call record (phone number)
+   */
   const resolveCallerName = useCallback(
     (userId: string, fallbackName: string): string => {
       const phone = userIdToPhone.get(userId);
-      if (!phone) return fallbackName; // not a saved contact — use whatever was stored
-      return resolveName(phone, phone); // saved → contact name; unsaved → phone number
+      if (phone) {
+        // Saved contact — use phone-book resolved name
+        return resolveName(phone, phone);
+      }
+      // Not a saved contact — try Firebase signup name
+      const firebaseName = userIdToFirebaseName.get(userId);
+      if (firebaseName) {
+        return firebaseName;
+      }
+      // Fall back to whatever was stored in the call record
+      return fallbackName;
     },
-    [userIdToPhone, resolveName]
+    [userIdToPhone, userIdToFirebaseName, resolveName]
   );
   
   const [tab, setTab] = useState<CallTab>('All');
@@ -355,6 +427,10 @@ export default function CallsScreen() {
   const selectedCallPhone = selectedCall
     ? (userIdToPhone.get(selectedCall.otherParty.userId) ?? '')
     : '';
+  // Resolved profile photo for the selected call (saved contact photo → record photo).
+  const selectedCallPhoto = selectedCall
+    ? resolveCallerPhoto(selectedCall.otherParty.userId, selectedCall.otherParty.photoUrl)
+    : null;
 
   // Filter based on tab
   const filtered = tab === 'Missed' 
@@ -362,6 +438,9 @@ export default function CallsScreen() {
     : callHistory;
 
   // ── Shared LiveKit call initiator ─────────────────────────────────────────
+  // Creates the call document then navigates to OutgoingCall (the ringing
+  // screen), which owns the rest of the outgoing lifecycle: waiting for the
+  // callee to answer, starting the active call, timeout, and cancellation.
   const startLiveKitCall = async (
     calleeUserId: string,
     displayName: string,
@@ -378,7 +457,6 @@ export default function CallsScreen() {
 
     // Get or create a direct chat to use as the call room anchor
     const chatId = await getOrCreateDirectChat(user.uid, calleeUserId);
-    const roomName = `chitchat-${chatId}`;
     const callerName = user.phoneNumber || user.displayName || 'Unknown';
 
     const result = await groupCall.initiateGroupCall(
@@ -390,14 +468,16 @@ export default function CallsScreen() {
     );
 
     if (result) {
-      startActiveCall({
-        roomName: result.roomName,
-        displayName: callerName,
-        audioOnly: callType === 'audio',
-        groupName: displayName,   // other person's name for 1-on-1
-        memberCount: 2,
-        chatId,
+      // OutgoingCallScreen owns everything from here.
+      navigation.navigate('OutgoingCall', {
         callId: result.callId,
+        displayName,
+        callType,
+        photoUrl: null,
+        roomName: result.roomName,
+        callerName,
+        chatId,
+        memberCount: 2,
       });
     } else {
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
@@ -489,6 +569,7 @@ export default function CallsScreen() {
   const renderCall = ({ item }: { item: CallHistoryItem }) => {
     const isMissed = item.status === 'missed';
     const resolvedName = resolveCallerName(item.otherParty.userId, item.otherParty.displayName);
+    const resolvedPhoto = resolveCallerPhoto(item.otherParty.userId, item.otherParty.photoUrl);
     const statusLabel = item.status === 'completed' && item.duration
       ? formatDuration(item.duration)
       : item.status === 'missed' ? 'Missed'
@@ -506,10 +587,10 @@ export default function CallsScreen() {
           initials={getInitials(resolvedName)} 
           color={COLORS.blue} 
           size={48} 
-          imageUrl={item.otherParty.photoUrl}
+          imageUrl={resolvedPhoto}
         />
         <View style={styles.callMeta}>
-          <AppText style={[styles.callName, { color: textColor, fontFamily }]}>{resolvedName}</AppText>
+          <AppText style={styles.callName}>{resolvedName}</AppText>
           <View style={styles.callSubRow}>
             <CallDirectionIcon direction={item.direction} status={item.status} />
             <AppText 
@@ -561,6 +642,7 @@ export default function CallsScreen() {
         call={selectedCall}
         resolvedName={selectedCallName}
         resolvedPhone={selectedCallPhone}
+        resolvedPhoto={selectedCallPhoto}
         visible={infoOpen}
         onClose={() => setInfoOpen(false)}
         onAudioCall={handleInfoAudioCall}
@@ -578,7 +660,7 @@ export default function CallsScreen() {
       />
 
       <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-        <AppText style={[styles.title, { color: textColor, fontFamily }]}>Calls</AppText>
+        <AppText style={styles.title}>Calls</AppText>
         {/* New call button */}
         <TouchableOpacity 
           activeOpacity={0.85} 
@@ -810,9 +892,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.lg,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderWidth: 1.5,
-    borderColor: 'rgba(30,156,240,0.25)',
-    backgroundColor: 'rgba(135,206,235,0.12)',
+    ...SHADOW.card,
   },
   detailRow: {
     flexDirection: 'row',
