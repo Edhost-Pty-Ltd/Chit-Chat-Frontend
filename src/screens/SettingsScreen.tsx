@@ -31,7 +31,6 @@ const SETTINGS_SECTIONS: {
       { id: 'account',       icon: 'person-outline',        label: 'Account'       },
       { id: 'privacy',       icon: 'lock-closed-outline',   label: 'Privacy'       },
       { id: 'notifications', icon: 'notifications-outline', label: 'Notifications' },
-      { id: 'chat',          icon: 'chatbubble-outline',    label: 'Chat'          },
     ],
   },
   {

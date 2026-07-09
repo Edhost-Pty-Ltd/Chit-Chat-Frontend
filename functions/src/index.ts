@@ -299,3 +299,381 @@ export const cleanupStaleCalls = functionsV1.pubsub
     console.log(`[cleanupStaleCalls] Deleted ${deleted} stale call/invite doc(s).`);
     return null;
   });
+
+
+// ─── Push Notification Functions ────────────────────────────────────────────
+// Sends push notifications via Expo Push API when messages or calls are created.
+// These run server-side so notifications arrive even when the app is closed.
+
+import Expo, { ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
+
+const expo = new Expo();
+
+/**
+ * Helper: Send push notifications via Expo Push API
+ * Handles batching and error logging automatically.
+ */
+async function sendExpoPushNotifications(messages: ExpoPushMessage[]): Promise<void> {
+  if (messages.length === 0) return;
+
+  // Filter to only valid Expo push tokens
+  const validMessages = messages.filter((m) => {
+    if (!Expo.isExpoPushToken(m.to as string)) {
+      console.warn(`[Push] Invalid Expo push token: ${m.to}`);
+      return false;
+    }
+    return true;
+  });
+
+  if (validMessages.length === 0) {
+    console.log('[Push] No valid push tokens to send to');
+    return;
+  }
+
+  // Batch messages (Expo recommends max 100 per request)
+  const chunks = expo.chunkPushNotifications(validMessages);
+
+  for (const chunk of chunks) {
+    try {
+      const tickets: ExpoPushTicket[] = await expo.sendPushNotificationsAsync(chunk);
+      
+      // Log any errors
+      tickets.forEach((ticket, idx) => {
+        if (ticket.status === 'error') {
+          console.error(`[Push] Error sending to ${chunk[idx].to}:`, ticket.message);
+          if (ticket.details?.error === 'DeviceNotRegistered') {
+            // TODO: Could remove invalid tokens from Firestore here
+            console.log(`[Push] Device not registered, token should be removed: ${chunk[idx].to}`);
+          }
+        }
+      });
+    } catch (error) {
+      console.error('[Push] Error sending push notifications:', error);
+    }
+  }
+}
+
+/**
+ * Get user's push token from Firestore
+ */
+async function getUserPushToken(userId: string): Promise<string | null> {
+  try {
+    const dbAdmin = getFirestore();
+    const userDoc = await dbAdmin.collection('users').doc(userId).get();
+    if (!userDoc.exists) return null;
+    return userDoc.data()?.pushToken || null;
+  } catch (error) {
+    console.error(`[Push] Error fetching push token for user ${userId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get user's display name or phone
+ */
+async function getUserDisplayName(userId: string): Promise<string> {
+  try {
+    const dbAdmin = getFirestore();
+    const userDoc = await dbAdmin.collection('users').doc(userId).get();
+    if (!userDoc.exists) return 'Someone';
+    const data = userDoc.data();
+    return data?.displayName || data?.phone || 'Someone';
+  } catch (error) {
+    return 'Someone';
+  }
+}
+
+// ─── onMessageCreated: Trigger when a new message is added ──────────────────
+// Path: /chats/{chatId}/messages/{messageId}
+export const onMessageCreated = functionsV1.firestore
+  .document('chats/{chatId}/messages/{messageId}')
+  .onCreate(async (snap, context) => {
+    const { chatId, messageId } = context.params;
+    const message = snap.data();
+
+    if (!message) {
+      console.log('[onMessageCreated] No message data');
+      return null;
+    }
+
+    const senderId = message.senderId;
+    if (!senderId) {
+      console.log('[onMessageCreated] No sender ID');
+      return null;
+    }
+
+    // Skip system messages (block/unblock/leave-group notifications, etc.)
+    // These are rendered inline in the chat and should not push-notify anyone.
+    if (message.type === 'system' || senderId === 'system') {
+      console.log(`[onMessageCreated] Skipping system message in chat ${chatId}`);
+      return null;
+    }
+
+    console.log(`[onMessageCreated] New message in chat ${chatId} from ${senderId}`);
+
+    try {
+      const dbAdmin = getFirestore();
+
+      // Get the chat document to find recipients
+      const chatDoc = await dbAdmin.collection('chats').doc(chatId).get();
+      if (!chatDoc.exists) {
+        console.log('[onMessageCreated] Chat not found');
+        return null;
+      }
+
+      const chatData = chatDoc.data();
+      const members: string[] = chatData?.members || [];
+      const isGroup = chatData?.type === 'group';
+      const groupName = chatData?.groupName;
+
+      // Get sender's name
+      const senderName = await getUserDisplayName(senderId);
+
+      // Build notification messages for all recipients (excluding sender)
+      const messages: ExpoPushMessage[] = [];
+
+      for (const memberId of members) {
+        if (memberId === senderId) continue; // Don't notify the sender
+
+        const pushToken = await getUserPushToken(memberId);
+        if (!pushToken) {
+          console.log(`[onMessageCreated] No push token for user ${memberId}`);
+          continue;
+        }
+
+        // Determine notification content
+        const title = isGroup ? (groupName || 'Group Chat') : senderName;
+        let body = message.text || '';
+        
+        // Handle different message types
+        if (message.imageUrl) body = '📷 Photo';
+        else if (message.videoUrl) body = '🎥 Video';
+        else if (message.voiceUrl) body = '🎤 Voice message';
+        else if (message.fileUrl) body = '📎 File';
+        else if (message.location) body = '📍 Location';
+
+        // For group chats, prefix with sender name
+        if (isGroup && body) {
+          body = `${senderName}: ${body}`;
+        }
+
+        messages.push({
+          to: pushToken,
+          title,
+          body,
+          sound: 'default',
+          badge: 1,
+          data: {
+            type: 'message',
+            chatId,
+            messageId,
+            senderId,
+            displayName: title,
+            isGroup,
+            otherUserId: isGroup ? undefined : senderId,
+          },
+        });
+      }
+
+      // Send all notifications
+      await sendExpoPushNotifications(messages);
+      console.log(`[onMessageCreated] Sent ${messages.length} push notification(s)`);
+
+    } catch (error) {
+      console.error('[onMessageCreated] Error:', error);
+    }
+
+    return null;
+  });
+
+// ─── onCallCreated: Trigger when a new call is initiated ────────────────────
+// Path: /calls/{callId}
+export const onCallCreated = functionsV1.firestore
+  .document('calls/{callId}')
+  .onCreate(async (snap, context) => {
+    const { callId } = context.params;
+    const callData = snap.data();
+
+    if (!callData) {
+      console.log('[onCallCreated] No call data');
+      return null;
+    }
+
+    const { callerId, calleeId, type } = callData;
+
+    if (!callerId || !calleeId) {
+      console.log('[onCallCreated] Missing caller or callee ID');
+      return null;
+    }
+
+    console.log(`[onCallCreated] New ${type} call ${callId} from ${callerId} to ${calleeId}`);
+
+    try {
+      // Get caller's name
+      const callerName = await getUserDisplayName(callerId);
+
+      // Get callee's push token
+      const pushToken = await getUserPushToken(calleeId);
+      if (!pushToken) {
+        console.log(`[onCallCreated] No push token for callee ${calleeId}`);
+        return null;
+      }
+
+      const isVideo = type === 'video';
+      const title = `Incoming ${isVideo ? 'Video' : ''} Call`;
+      const body = `${callerName} is calling you`;
+
+      const messages: ExpoPushMessage[] = [{
+        to: pushToken,
+        title,
+        body,
+        sound: 'default',
+        badge: 1,
+        priority: 'high',
+        data: {
+          type: 'incoming-call',
+          callId,
+          callerId,
+          callerName,
+          callType: type,
+        },
+      }];
+
+      await sendExpoPushNotifications(messages);
+      console.log(`[onCallCreated] Sent call notification to ${calleeId}`);
+
+    } catch (error) {
+      console.error('[onCallCreated] Error:', error);
+    }
+
+    return null;
+  });
+
+// ─── onGroupCallCreated: Trigger when a group call is initiated ─────────────
+// Path: /groupCalls/{callId}
+export const onGroupCallCreated = functionsV1.firestore
+  .document('groupCalls/{callId}')
+  .onCreate(async (snap, context) => {
+    const { callId } = context.params;
+    const callData = snap.data();
+
+    if (!callData) {
+      console.log('[onGroupCallCreated] No call data');
+      return null;
+    }
+
+    const { initiatorId, participants, groupName, audioOnly } = callData;
+
+    if (!initiatorId || !participants || !Array.isArray(participants)) {
+      console.log('[onGroupCallCreated] Missing initiator or participants');
+      return null;
+    }
+
+    console.log(`[onGroupCallCreated] New group call ${callId} initiated by ${initiatorId}`);
+
+    try {
+      // Get initiator's name
+      const initiatorName = await getUserDisplayName(initiatorId);
+
+      const isVideo = !audioOnly;
+      const title = `Group ${isVideo ? 'Video' : ''} Call`;
+      const body = `${initiatorName} started a call in ${groupName || 'a group'}`;
+
+      const messages: ExpoPushMessage[] = [];
+
+      // Notify all participants except the initiator
+      for (const participantId of participants) {
+        if (participantId === initiatorId) continue;
+
+        const pushToken = await getUserPushToken(participantId);
+        if (!pushToken) {
+          console.log(`[onGroupCallCreated] No push token for participant ${participantId}`);
+          continue;
+        }
+
+        messages.push({
+          to: pushToken,
+          title,
+          body,
+          sound: 'default',
+          badge: 1,
+          priority: 'high',
+          data: {
+            type: 'group-call',
+            callId,
+            initiatorId,
+            initiatorName,
+            groupName,
+            audioOnly,
+          },
+        });
+      }
+
+      await sendExpoPushNotifications(messages);
+      console.log(`[onGroupCallCreated] Sent ${messages.length} group call notification(s)`);
+
+    } catch (error) {
+      console.error('[onGroupCallCreated] Error:', error);
+    }
+
+    return null;
+  });
+
+// ─── onMissedCall: Trigger when a call status changes to missed ─────────────
+// Path: /calls/{callId}
+export const onCallUpdated = functionsV1.firestore
+  .document('calls/{callId}')
+  .onUpdate(async (change, context) => {
+    const { callId } = context.params;
+    const before = change.before.data();
+    const after = change.after.data();
+
+    // Only trigger on status change to 'missed' or 'rejected'
+    if (before.status === after.status) return null;
+    if (after.status !== 'missed' && after.status !== 'rejected') return null;
+
+    const { callerId, calleeId, type } = after;
+
+    console.log(`[onCallUpdated] Call ${callId} changed to ${after.status}`);
+
+    try {
+      // Get caller's name (the one who initiated the call)
+      const callerName = await getUserDisplayName(callerId);
+
+      // Notify the callee about the missed call
+      const pushToken = await getUserPushToken(calleeId);
+      if (!pushToken) {
+        console.log(`[onCallUpdated] No push token for callee ${calleeId}`);
+        return null;
+      }
+
+      const isVideo = type === 'video';
+      const statusText = after.status === 'missed' ? 'Missed' : 'Rejected';
+      const title = `${statusText} ${isVideo ? 'Video ' : ''}Call`;
+      const body = `You ${after.status === 'missed' ? 'missed' : 'declined'} a call from ${callerName}`;
+
+      const messages: ExpoPushMessage[] = [{
+        to: pushToken,
+        title,
+        body,
+        sound: 'default',
+        badge: 1,
+        data: {
+          type: 'call',
+          callId,
+          callerId,
+          callerName,
+          callType: type,
+          callStatus: after.status,
+        },
+      }];
+
+      await sendExpoPushNotifications(messages);
+      console.log(`[onCallUpdated] Sent ${after.status} call notification to ${calleeId}`);
+
+    } catch (error) {
+      console.error('[onCallUpdated] Error:', error);
+    }
+
+    return null;
+  });

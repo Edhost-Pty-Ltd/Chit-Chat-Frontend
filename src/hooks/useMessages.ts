@@ -25,7 +25,10 @@ export interface FireMessage {
   voiceUrl:   string | null;
   videoUrl:   string | null;
   fileUrl:    string | null;
-  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call';
+  type:       'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call' | 'contact';
+  contactName?: string | null;
+  contactPhone?: string | null;
+  contactUserId?: string | null;
   callType?: 'audio' | 'video';
   callDuration?: number | null;  // in seconds
   callStatus?: 'completed' | 'missed' | 'rejected' | 'busy' | 'failed';
@@ -55,7 +58,7 @@ export interface FireMessage {
     messageId: string;
     senderId: string;
     text: string | null;
-   type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call';
+   type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call' | 'contact';
 
   } | null;
 }
@@ -143,6 +146,9 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
                 ? (d.liveLocationExpiry as Timestamp).toDate()
                 : null,
               replyTo: d.replyTo ?? null,
+              contactName: d.contactName ?? null,
+              contactPhone: d.contactPhone ?? null,
+              contactUserId: d.contactUserId ?? null,
             };
           });
           // No client-side expiry filter here — we keep all messages Firestore

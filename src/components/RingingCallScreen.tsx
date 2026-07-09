@@ -4,7 +4,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AppText, AppIcon } from '../context/ThemeContext';
+import { AppText, AppIcon, useTypography } from '../context/ThemeContext';
 import { Avatar } from './index';
 import { COLORS } from '../types/theme';
 import type { CallParticipant } from '../types/call';
@@ -18,6 +18,8 @@ interface RingingCallScreenProps {
 }
 
 export function RingingCallScreen({ otherParty, callType, initials, onEndCall }: RingingCallScreenProps) {
+  const { fontFamily } = useTypography();
+
   // Animated values for pulsing rings
   const pulse1 = useRef(new Animated.Value(0)).current;
   const pulse2 = useRef(new Animated.Value(0)).current;
@@ -132,10 +134,10 @@ export function RingingCallScreen({ otherParty, callType, initials, onEndCall }:
 
       {/* Caller info */}
       <View style={styles.info}>
-        <AppText fixedColor style={styles.name}>
+        <AppText fixedColor style={[styles.name, { fontFamily }]}>
           {otherParty.displayName}
         </AppText>
-        <AppText fixedColor style={styles.status}>
+        <AppText fixedColor style={[styles.status, { fontFamily }]}>
           {callType === 'video' ? 'Video calling...' : 'Calling...'}
         </AppText>
       </View>
@@ -146,7 +148,7 @@ export function RingingCallScreen({ otherParty, callType, initials, onEndCall }:
           <LinearGradient colors={['#E74C3C', '#C0392B']} style={styles.endCallGradient}>
             <AppIcon name="call" size={28} color="#FFFFFF" fixedColor />
           </LinearGradient>
-          <AppText fixedColor style={styles.actionLabel}>
+          <AppText fixedColor style={[styles.actionLabel, { fontFamily }]}>
             End Call
           </AppText>
         </View>

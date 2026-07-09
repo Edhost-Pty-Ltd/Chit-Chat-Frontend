@@ -86,8 +86,9 @@ export function useRegistration(): UseRegistrationReturn {
 
       await confirmationRef.current.confirm(code);
 
-      // OTP verified — automatically create profile
-      await createProfile();
+      // OTP verified — DO NOT auto-create profile here. The CreateAccount screen
+      // advances to the biometric step, and profile creation happens ONLY after
+      // the user passes the biometric two-factor check (in handleBiometric).
       return true;
     } catch (err: any) {
       setError(getRegistrationErrorMessage(err.code));

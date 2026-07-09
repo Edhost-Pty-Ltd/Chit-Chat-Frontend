@@ -60,7 +60,8 @@ import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
-import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead } from '../hooks/useChatActions';
+import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead, getOrCreateDirectChat } from '../hooks/useChatActions';
+import { normalizePhone } from '../utils/phoneUtils';
 import { parseSystemMessage } from '../utils/systemMessageParser';
 import { getDateLabel, groupMessagesByDate } from '../utils/dateUtils';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
@@ -510,6 +511,13 @@ export default function ChatScreen() {
   // ── Contact picker state (share contact via 3-dot menu) ─────────
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [contactQuery, setContactQuery] = useState('');
+
+  // ── Received-contact action sheet state ─────────────────────────
+  const [contactActionCard, setContactActionCard] = useState<{
+    name: string;
+    phone: string;
+    userId: string | null;
+  } | null>(null);
 
   // Debug log for contacts
   useEffect(() => {
@@ -1637,6 +1645,63 @@ export default function ChatScreen() {
     await stopLiveLocationSharing(chatId, messageId);
   };
 
+  // ── Received-contact actions ───────────────────────────────────
+  /** True if the given phone is already in the user's device phone book. */
+  const isContactSaved = useCallback((phone: string): boolean => {
+    if (!phone || !phoneContacts) return false;
+    const normalized = normalizePhone(phone);
+    return phoneContacts.some(pc => normalizePhone(pc.phone) === normalized);
+  }, [phoneContacts]);
+
+  /** Open a chat with the shared contact and navigate to it. */
+  const handleMessageSharedContact = useCallback(async (contactUserId: string | null, name: string) => {
+    setContactActionCard(null);
+    if (!userId || !contactUserId) {
+      Alert.alert('Unavailable', 'This contact is not on ChitChat yet.');
+      return;
+    }
+    if (contactUserId === userId) {
+      Alert.alert('This is you', 'You cannot message yourself.');
+      return;
+    }
+    try {
+      const newChatId = await getOrCreateDirectChat(userId, contactUserId);
+      navigation.replace('Chat', {
+        chatId: newChatId,
+        displayName: name,
+        isGroup: false,
+        otherUserId: contactUserId,
+        otherUserPhoto: null,
+      });
+    } catch (err) {
+      console.error('[ChatScreen] Failed to open chat with shared contact:', err);
+      Alert.alert('Error', 'Could not open chat with this contact.');
+    }
+  }, [userId, navigation]);
+
+  /** Open the native "New Contact" form pre-filled with the shared info. */
+  const handleSaveSharedContact = useCallback(async (name: string, phone: string) => {
+    setContactActionCard(null);
+    if (Platform.OS === 'web') {
+      Alert.alert('Not available', 'Saving contacts is not available on web.');
+      return;
+    }
+    try {
+      const Contacts = require('expo-contacts/legacy');
+      const parts = name.trim().split(/\s+/);
+      const firstName = parts[0] ?? name;
+      const lastName = parts.slice(1).join(' ') || undefined;
+      await Contacts.presentFormAsync(null, {
+        [Contacts.Fields.FirstName]: firstName,
+        [Contacts.Fields.LastName]: lastName,
+        [Contacts.Fields.PhoneNumbers]: [{ label: 'mobile', number: phone }],
+      });
+    } catch (err) {
+      console.error('[ChatScreen] Failed to open native contact form:', err);
+      Alert.alert('Error', 'Could not open the contact form.');
+    }
+  }, []);
+
   // ── Clear chat handler ──────────────────────────────────────────
   const handleClearChat = useCallback(async () => {
     if (!chatId) {
@@ -1967,6 +2032,30 @@ export default function ChatScreen() {
               onStopSharing={() => handleStopLiveLocation(item.messageId)}
               timestamp={item.timestamp}
             />
+          ) : item.type === 'contact' && item.contactName ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setContactActionCard({
+                name: item.contactName!,
+                phone: item.contactPhone ?? '',
+                userId: item.contactUserId ?? null,
+              })}
+              style={styles.contactBubbleIn}
+            >
+              <View style={styles.contactBubbleTop}>
+                <View style={styles.contactBubbleAvatar}>
+                  <AppText style={styles.contactBubbleInitials}>
+                    {item.contactName.slice(0, 2).toUpperCase()}
+                  </AppText>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText fixedColor style={styles.contactBubbleName}>{item.contactName}</AppText>
+                  <AppText fixedColor style={styles.contactBubblePhone}>{item.contactPhone ?? ''}</AppText>
+                </View>
+              </View>
+              <View style={styles.contactBubbleDivider} />
+              <AppText fixedColor style={styles.contactBubbleTime}>{formatTime(item.timestamp)}</AppText>
+            </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
               <TouchableOpacity 
@@ -2020,7 +2109,9 @@ export default function ChatScreen() {
                                                                ? '📍 Location'
                                 : item.replyTo.type === 'call'
                                   ? (item.replyTo.text || '📞 Call')
-                                  : 'Message'}
+                                  : item.replyTo.type === 'contact'
+                                    ? '👤 Contact'
+                                    : 'Message'}
 
                     </AppText>
                   </View>
@@ -2109,6 +2200,33 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
               tickIcon={tickIcon}
             />
+          ) : item.type === 'contact' && item.contactName ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setContactActionCard({
+                name: item.contactName!,
+                phone: item.contactPhone ?? '',
+                userId: item.contactUserId ?? null,
+              })}
+              style={styles.contactBubbleOut}
+            >
+              <View style={styles.contactBubbleTop}>
+                <View style={styles.contactBubbleAvatar}>
+                  <AppText style={styles.contactBubbleInitials}>
+                    {item.contactName.slice(0, 2).toUpperCase()}
+                  </AppText>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText style={[styles.contactBubbleName, { color: textColor }]}>{item.contactName}</AppText>
+                  <AppText style={[styles.contactBubblePhone, { color: COLORS.sub }]}>{item.contactPhone ?? ''}</AppText>
+                </View>
+              </View>
+              <View style={styles.contactBubbleDivider} />
+              <View style={styles.timeOutRow}>
+                <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
+                <AppIcon name={tickIcon.icon} size={13} color={tickIcon.color} fixedColor />
+              </View>
+            </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <View style={[styles.bubble, styles.bubbleOut, styles.imageBubble]}>
               <TouchableOpacity 
@@ -2168,6 +2286,8 @@ export default function ChatScreen() {
                                   ? '📍 Location'
                               : item.replyTo.type === 'call'
                               ? (item.replyTo.text || '📞 Call')
+                              : item.replyTo.type === 'contact'
+                              ? '👤 Contact'
                               : 'Message'}
 
                     </AppText>
@@ -2782,6 +2902,93 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* ── Received Contact Action Modal ── */}
+      <Modal
+        visible={contactActionCard !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setContactActionCard(null)}
+      >
+        <TouchableOpacity
+          style={styles.contactActionOverlay}
+          activeOpacity={1}
+          onPress={() => setContactActionCard(null)}
+        >
+          <TouchableOpacity activeOpacity={1} style={[styles.contactActionSheet, { backgroundColor: FG.glassBg }]}>
+            <AppBg />
+            {contactActionCard && (
+              <>
+                <View style={styles.contactActionHeader}>
+                  <View style={styles.contactBubbleAvatar}>
+                    <AppText style={styles.contactBubbleInitials}>
+                      {contactActionCard.name.slice(0, 2).toUpperCase()}
+                    </AppText>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={[styles.contactActionName, { color: textColor }]} numberOfLines={1}>
+                      {contactActionCard.name}
+                    </AppText>
+                    <AppText style={{ fontSize: 13, color: COLORS.sub, marginTop: 2 }}>
+                      {contactActionCard.phone}
+                    </AppText>
+                  </View>
+                </View>
+
+                <View style={styles.contactActionDivider} />
+
+                {/* Message action — always available for ChitChat users */}
+                <TouchableOpacity
+                  style={styles.contactActionButton}
+                  activeOpacity={0.7}
+                  onPress={() => handleMessageSharedContact(contactActionCard.userId, contactActionCard.name)}
+                >
+                  <AppIcon name="chatbubble-outline" size={22} color={COLORS.blue} fixedColor />
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <AppText style={[styles.contactActionButtonTitle, { color: textColor }]}>
+                      {isContactSaved(contactActionCard.phone) ? 'Message' : 'Message (number not saved)'}
+                    </AppText>
+                    <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>
+                      Open a chat with this contact
+                    </AppText>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Save-contact action — only if not already saved */}
+                {!isContactSaved(contactActionCard.phone) && (
+                  <>
+                    <View style={styles.contactActionDivider} />
+                    <TouchableOpacity
+                      style={styles.contactActionButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleSaveSharedContact(contactActionCard.name, contactActionCard.phone)}
+                    >
+                      <AppIcon name="person-add-outline" size={22} color={COLORS.blue} fixedColor />
+                      <View style={{ flex: 1, marginLeft: 14 }}>
+                        <AppText style={[styles.contactActionButtonTitle, { color: textColor }]}>
+                          Save contact
+                        </AppText>
+                        <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>
+                          Add {contactActionCard.name} to your phone contacts
+                        </AppText>
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                <View style={styles.contactActionDivider} />
+                <TouchableOpacity
+                  style={[styles.contactActionButton, { justifyContent: 'center' }]}
+                  activeOpacity={0.7}
+                  onPress={() => setContactActionCard(null)}
+                >
+                  <AppText style={{ color: COLORS.sub, fontSize: 15, fontWeight: '600' }}>Cancel</AppText>
+                </TouchableOpacity>
+              </>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ── Contact Picker Modal ── */}
       <Modal visible={contactPickerOpen} transparent animationType="slide" onRequestClose={() => setContactPickerOpen(false)}>
         <KeyboardAvoidingView 
@@ -2792,7 +2999,9 @@ export default function ChatScreen() {
           <View style={[styles.contactPickerSheet, { backgroundColor: FG.glassBg }]}>
             <AppBg />
             <View style={styles.attachHandle} />
-            <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share Contact</AppText>
+            <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>
+              {isGroup ? 'Share Contact' : `Send ${displayName}'s contact to…`}
+            </AppText>
 
             {/* Search */}
             <View style={[styles.contactSearchWrap, bevel]}>
@@ -2833,7 +3042,7 @@ export default function ChatScreen() {
                     Please grant contacts permission in your device settings to share contacts
                   </AppText>
                 </View>
-              ) : !phoneContacts || phoneContacts.length === 0 ? (
+              ) : !phoneContacts || phoneContacts.filter(c => c.userId && c.userId !== userId && c.userId !== otherUserId).length === 0 ? (
                 <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
                   <AppIcon name="people-outline" size={48} color={COLORS.sub} />
                   <AppText style={{ color: textColor, fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
@@ -2846,28 +3055,43 @@ export default function ChatScreen() {
               ) : (
                 <>
                   {phoneContacts
+                    .filter(c => c.userId && c.userId !== userId)       // must be a ChitChat user and not self
+                    .filter(c => c.userId !== otherUserId)               // don't share the recipient back to themselves
                     .filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery))
                     .map((c) => (
                       <TouchableOpacity
-                        key={c.userId || c.phone}
+                        key={c.phone}
                         style={[styles.contactPickerRow, bevel]}
                         activeOpacity={0.75}
                         onPress={async () => {
                           setContactPickerOpen(false);
-                          if (!userId) return;
-                          // Send contact as a text message with contact card format
-                          const contactText = `📇 *${c.displayName}*\n📞 ${c.phone}`;
+                          if (!userId || !otherUserId) return;
                           try {
-                            await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                            // Fetch the CURRENT chat partner's phone (the contact we want to share)
+                            const partnerSnap = await getDoc(doc(db, 'users', otherUserId));
+                            const partnerPhone = partnerSnap.exists() ? (partnerSnap.data().phone as string | undefined) : undefined;
+                            if (!partnerPhone) {
+                              console.error('[ShareContact] Could not resolve chat partner phone number');
+                              return;
+                            }
+
+                            // Find or create the chat between me (sender) and the picked recipient
+                            const recipientChatId = await getOrCreateDirectChat(userId, c.userId);
+
+                            // Write the CURRENT chat partner's contact card into the recipient chat
+                            await addDoc(collection(db, 'chats', recipientChatId, 'messages'), {
                               senderId: userId,
-                              text: contactText,
-                              type: 'text',
+                              type: 'contact',
+                              contactName: displayName,     // current chat partner's name
+                              contactPhone: partnerPhone,   // current chat partner's phone
+                              contactUserId: otherUserId,   // current chat partner's Firestore userId
+                              text: null,
                               timestamp: serverTimestamp(),
                               readBy: [userId],
                               deliveredTo: [],
                             });
-                            await updateDoc(doc(db, 'chats', chatId), {
-                              'lastMessage.text': `📇 ${c.displayName}`,
+                            await updateDoc(doc(db, 'chats', recipientChatId), {
+                              'lastMessage.text': `👤 ${displayName}`,
                               'lastMessage.senderId': userId,
                               'lastMessage.timestamp': serverTimestamp(),
                             });
@@ -2889,7 +3113,7 @@ export default function ChatScreen() {
                         <AppIcon name="share-outline" size={18} color={COLORS.blue} fixedColor />
                       </TouchableOpacity>
                     ))}
-                  {phoneContacts.filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery)).length === 0 && contactQuery.trim() && (
+                  {phoneContacts.filter(c => c.userId && c.userId !== userId).filter(c => c.userId !== otherUserId).filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery)).length === 0 && contactQuery.trim() && (
                     <View style={{ alignItems: 'center', paddingTop: 40, gap: 10 }}>
                       <AppIcon name="search-outline" size={44} color={COLORS.sub} />
                       <AppText style={{ color: COLORS.sub, fontSize: 14 }}>No contacts match "{contactQuery}"</AppText>
@@ -4372,5 +4596,110 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 8,
+  },
+
+  // ── Contact card bubble (WhatsApp-style) ──────────────────────
+  contactBubbleIn: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: RADIUS.lg,
+    borderBottomLeftRadius: 4,
+    minWidth: 220,
+    maxWidth: 280,
+    overflow: 'hidden',
+    ...SHADOW.card,
+  },
+  contactBubbleOut: {
+    backgroundColor: 'rgba(30,156,240,0.15)',
+    borderRadius: RADIUS.lg,
+    borderBottomRightRadius: 4,
+    minWidth: 220,
+    maxWidth: 280,
+    overflow: 'hidden',
+    ...SHADOW.card,
+  },
+  contactBubbleTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  contactBubbleAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactBubbleInitials: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  contactBubbleName: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  contactBubblePhone: {
+    fontSize: 12,
+    color: COLORS.sub,
+  },
+  contactBubbleDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.sub,
+    opacity: 0.25,
+    marginHorizontal: 14,
+  },
+  contactBubbleTime: {
+    fontSize: 11,
+    color: COLORS.sub,
+    textAlign: 'right',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+
+  // ── Received-contact action modal ────────────────────────────
+  contactActionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  contactActionSheet: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: RADIUS.xl,
+    overflow: 'hidden',
+    ...SHADOW.glow,
+  },
+  contactActionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  contactActionName: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  contactActionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.sub,
+    opacity: 0.2,
+  },
+  contactActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  contactActionButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

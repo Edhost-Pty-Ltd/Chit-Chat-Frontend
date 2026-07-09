@@ -27,6 +27,7 @@ import type { CallParticipant } from '../types/call';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { useAuth } from '../hooks/useAuth';
+import { sendCallMessage } from '../hooks/useChatActions';
 
 type RouteP = RouteProp<RootStackParamList, 'OutgoingCall'>;
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'OutgoingCall'>;
@@ -144,6 +145,23 @@ export default function OutgoingCallScreen() {
         if (callEndedRef.current) {
           return;
         }
+
+        // Write call message to chat for missed/declined calls
+        if (chatId && (data.status === 'declined' || data.status === 'missed' || data.status === 'cancelled')) {
+          try {
+            const callStatus = data.status === 'declined' ? 'rejected' : 'missed';
+            await sendCallMessage(
+              chatId,
+              user?.uid ?? '',
+              callType,
+              null, // no duration for unanswered calls
+              callStatus as 'missed' | 'rejected',
+            );
+          } catch (err) {
+            console.warn('[OutgoingCall] Failed to write call message:', err);
+          }
+        }
+
         if (data.status === 'declined') {
           Alert.alert('Call declined', `${displayName} declined the call.`);
         } else if (data.status === 'missed') {

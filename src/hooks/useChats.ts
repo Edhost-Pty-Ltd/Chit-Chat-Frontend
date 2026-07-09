@@ -19,6 +19,10 @@ export interface ChatPreview {
   lastSenderId: string;
   timestamp:    Date | null;
   unreadCount:  number;
+  /** UIDs that have delivered the last message. Optional to survive older cached rows. */
+  lastMessageDeliveredTo?: string[];
+  /** UIDs that have read the last message. Optional to survive older cached rows. */
+  lastMessageReadBy?: string[];
 }
 
 export function useChats(userId: string | null) {
@@ -78,6 +82,8 @@ export function useChats(userId: string | null) {
               ? (lm.timestamp as Timestamp).toDate()
               : null,
             unreadCount: getUnreadCount(d.unreadCounts, userId),
+            lastMessageDeliveredTo: lm?.deliveredTo ?? [],
+            lastMessageReadBy:      lm?.readBy      ?? [],
           };
         });
 

@@ -865,6 +865,26 @@ export default function ChatsScreen() {
             <AppText style={[styles.chatTime, { color: FG.secondary }]}>{formatTime(item.timestamp)}</AppText>
           </View>
           <View style={styles.chatBottomRow}>
+            {/* Tick for outgoing messages */}
+            {item.lastSenderId === userId && (
+              <AppIcon
+                name={
+                  (item.lastMessageReadBy ?? []).some(id => id !== userId)
+                    ? 'checkmark-done'
+                    : (item.lastMessageDeliveredTo ?? []).some(id => id !== userId)
+                      ? 'checkmark-done'
+                      : 'checkmark'
+                }
+                size={14}
+                color={
+                  (item.lastMessageReadBy ?? []).some(id => id !== userId)
+                    ? COLORS.blue
+                    : COLORS.sub
+                }
+                fixedColor
+                style={{ marginRight: 4 }}
+              />
+            )}
             {renderLastMessagePreview()}
             {item.unreadCount > 0 && (
               <View style={styles.badge}>

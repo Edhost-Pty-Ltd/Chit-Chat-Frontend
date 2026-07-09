@@ -28,7 +28,7 @@ function formatNotificationTime(date: Date): string {
   return date.toLocaleDateString();
 }
 
-export type NotifType = 'message' | 'call' | 'number_change' | 'system';
+export type NotifType = 'message' | 'call' | 'number_change' | 'system' | 'calendar-event';
 
 export interface AppNotification {
   id:        string;
@@ -41,6 +41,12 @@ export interface AppNotification {
   contactId?: string;
   /** Optional — chat ID to navigate to when tapped (takes precedence over contactId) */
   chatId?: string;
+  /** Optional — display name for chat navigation */
+  displayName?: string;
+  /** Optional — is this a group chat */
+  isGroup?: boolean;
+  /** Optional — other user ID for direct chats */
+  otherUserId?: string;
 }
 
 interface NotificationContextValue {
@@ -120,10 +126,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       // Add to inbox
       setNotifications((prev) => [notif, ...prev]);
 
-      // Show toast — auto-dismiss after 4 s
-      setToast(notif);
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 4000);
+      // Native system notification handles the banner display now
+      // No in-app toast — the dark system banner is used instead
 
       // Send native device notification (skip if already shown by push)
       if (!skipNative) {
@@ -137,6 +141,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                 contactId: notif.contactId,
                 chatId: notif.chatId,
                 type: notif.type,
+                displayName: notif.displayName,
+                isGroup: notif.isGroup,
+                otherUserId: notif.otherUserId,
               },
             },
             trigger: null,

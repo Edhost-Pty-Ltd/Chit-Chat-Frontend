@@ -40,14 +40,29 @@ export async function isBiometricAvailable(): Promise<boolean> {
   }
 }
 
-/** Human-readable label for the strongest available biometric method. */
+/** Human-readable label for the strongest available biometric method.
+ *  Note: expo-local-authentication reports HARDWARE support, not enrollment.
+ *  On Android, phones often advertise face-recognition hardware even when the
+ *  user only has fingerprint enrolled, so we prefer Fingerprint on Android.
+ *  On iOS, Face ID and Touch ID are distinct devices, so hardware === enrolled. */
 export async function getBiometricLabel(): Promise<string> {
   try {
     if (!LocalAuthentication) return 'Biometrics';
     const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
     const AT = LocalAuthentication.AuthenticationType ?? { FINGERPRINT: 1, FACIAL_RECOGNITION: 2, IRIS: 3 };
-    if (types.includes(AT.FACIAL_RECOGNITION)) return 'Face ID';
+
+    if (Platform.OS === 'ios') {
+      // iOS: hardware maps directly to enrollment.
+      if (types.includes(AT.FACIAL_RECOGNITION)) return 'Face ID';
+      if (types.includes(AT.FINGERPRINT)) return 'Touch ID';
+      if (types.includes(AT.IRIS)) return 'Iris';
+      return 'Biometrics';
+    }
+
+    // Android: prefer Fingerprint since it's the more commonly enrolled option
+    // and the hardware list is unreliable for face recognition enrollment.
     if (types.includes(AT.FINGERPRINT)) return 'Fingerprint';
+    if (types.includes(AT.FACIAL_RECOGNITION)) return 'Face Unlock';
     if (types.includes(AT.IRIS)) return 'Iris';
     return 'Biometrics';
   } catch (err) {
