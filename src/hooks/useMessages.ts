@@ -2,14 +2,20 @@
 // Real-time listener for messages inside a single chat.
 // Also exposes sendMessage, which handles both 1-on-1 and group chats.
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   collection, query, orderBy, onSnapshot,
   addDoc, doc, updateDoc, serverTimestamp,
-  Timestamp, increment, getDocs, getDoc, limit,
+  Timestamp, increment, getDocs, getDoc, limit, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { loadLocalMessages, mergeLocalMessages } from './useLocalMessages';
+
+// How many of the most recent messages the live listener keeps in sync.
+// Older messages remain visible from the local cache (useLocalMessages); on a
+// slow network this bounds the initial payload instead of streaming the entire
+// history. loadOlder() grows the window a page at a time.
+const MESSAGE_PAGE = 50;
 
 export interface FireMessage {
   messageId:  string;
@@ -58,6 +64,15 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
   const [messages, setMessages] = useState<FireMessage[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState<string | null>(null);
+  const [pageSize,     setPageSize]     = useState(MESSAGE_PAGE);
+  const [hasMore,      setHasMore]      = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
+  // Reset the paging window whenever the chat changes.
+  useEffect(() => {
+    setPageSize(MESSAGE_PAGE);
+    setHasMore(false);
+  }, [chatId]);
 
   // ── Seed from local cache immediately on mount ────────────────
   // This means messages appear instantly (even when offline) and
@@ -78,14 +93,20 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
 
     setLoading(true);
 
+    // Only sync the newest `pageSize` messages. Ordering descending + limit
+    // means the server sends the most recent slice first; the merge step below
+    // re-sorts ascending and preserves any older messages already cached.
     const q = query(
       collection(db, 'chats', chatId, 'messages'),
-      orderBy('timestamp', 'asc'),
+      orderBy('timestamp', 'desc'),
+      limit(pageSize),
     );
 
     const unsub = onSnapshot(
       q,
       (snap) => {
+        // A full page implies there may be older messages on the server.
+        setHasMore(snap.docs.length >= pageSize);
         const now = new Date();
         const firestoreMsgs: FireMessage[] = snap.docs
           .map((doc) => {
@@ -129,14 +150,15 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
           // Cloud Function). New messages flow through; expired ones simply stop
           // appearing in future snapshots.
 
-        // Merge into local cache (keeps locally-retained messages alive).
-        mergeLocalMessages(chatId, firestoreMsgs).catch(() => {});
-
-        // Load the merged local state (includes locally-retained messages that
-        // Firestore has already deleted) and render it.
-        loadLocalMessages(chatId).then((merged) => {
+        // Merge into the local cache and render the merged result directly.
+        // Using the value returned by the merge (rather than a separate
+        // loadLocalMessages read) avoids a read/write race that, on a cold
+        // start with an empty cache, briefly showed the empty "say hello"
+        // state until the chat was reopened.
+        mergeLocalMessages(chatId, firestoreMsgs).then((merged) => {
           setMessages(merged);
           setLoading(false);
+          setLoadingOlder(false);
         });
 
         // Mark incoming messages as DELIVERED (not read) when they arrive
@@ -148,11 +170,20 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
       (err) => {
         setError(err.message);
         setLoading(false);
+        setLoadingOlder(false);
       },
     );
 
     return () => unsub();
-  }, [chatId, currentUserId]);
+  }, [chatId, currentUserId, pageSize]);
+
+  // ── Load an older page of messages ────────────────────────────
+  // Grows the live window; the listener re-subscribes with a larger limit.
+  const loadOlder = useCallback(() => {
+    if (loadingOlder || !hasMore) return;
+    setLoadingOlder(true);
+    setPageSize((n) => n + MESSAGE_PAGE);
+  }, [loadingOlder, hasMore]);
 
   // ── Send a text message ───────────────────────────────────────
   async function sendMessage(text: string): Promise<boolean> {
@@ -163,7 +194,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
     return await sendMessageAction(chatId, currentUserId, text);
   }
 
-  return { messages, loading, error, sendMessage, markAsRead };
+  return { messages, loading, error, sendMessage, markAsRead, loadOlder, hasMore, loadingOlder };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -178,6 +209,11 @@ async function markAsRead(chatId: string, userId: string, readReceipts = true) {
     const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(30));
     const snapshot = await getDocs(q);
 
+    // Batch all receipt updates into a single round-trip instead of one
+    // updateDoc per message — critical on slow networks.
+    const batch = writeBatch(db);
+    let pending = 0;
+
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
       if (data.senderId === userId) continue;
@@ -191,8 +227,11 @@ async function markAsRead(chatId: string, userId: string, readReceipts = true) {
       if (!deliveredTo.includes(userId)) {
         updates.deliveredTo = [...deliveredTo, userId];
       }
-      await updateDoc(docSnap.ref, updates);
+      batch.update(docSnap.ref, updates);
+      pending++;
     }
+
+    if (pending > 0) await batch.commit();
   } catch (error) {
     console.warn('[useMessages] Error marking as read:', error);
   }
@@ -206,16 +245,23 @@ async function markAsDelivered(chatId: string, userId: string) {
     const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(30));
     const snapshot = await getDocs(q);
 
+    // Batch delivery updates into a single commit rather than one write each.
+    const batch = writeBatch(db);
+    let pending = 0;
+
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
       if (data.senderId === userId) continue;
       const deliveredTo = data.deliveredTo || [];
       if (deliveredTo.includes(userId)) continue;
 
-      await updateDoc(docSnap.ref, {
+      batch.update(docSnap.ref, {
         deliveredTo: [...deliveredTo, userId],
       });
+      pending++;
     }
+
+    if (pending > 0) await batch.commit();
   } catch (error) {
     console.warn('[useMessages] Error marking as delivered:', error);
   }

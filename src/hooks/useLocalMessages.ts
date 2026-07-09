@@ -56,7 +56,14 @@ export async function loadLocalMessages(chatId: string): Promise<FireMessage[]> 
 export async function mergeLocalMessages(
   chatId: string,
   incoming: FireMessage[],
-): Promise<void> {
+): Promise<FireMessage[]> {
+  // Sort helper shared by the success and fallback paths.
+  const byTimestamp = (a: FireMessage, b: FireMessage) => {
+    const ta = a.timestamp?.getTime() ?? 0;
+    const tb = b.timestamp?.getTime() ?? 0;
+    return ta - tb;
+  };
+
   try {
     const existing = await loadLocalMessages(chatId);
 
@@ -66,15 +73,17 @@ export async function mergeLocalMessages(
     for (const m of incoming)  map.set(m.messageId, m);
 
     // Sort ascending by timestamp.
-    const merged = Array.from(map.values()).sort((a, b) => {
-      const ta = a.timestamp?.getTime() ?? 0;
-      const tb = b.timestamp?.getTime() ?? 0;
-      return ta - tb;
-    });
+    const merged = Array.from(map.values()).sort(byTimestamp);
 
     await AsyncStorage.setItem(KEY(chatId), JSON.stringify(merged.map(serialise)));
+
+    // Return the merged list so callers can render it directly without a
+    // second read (which would race against this write).
+    return merged;
   } catch (err) {
     console.warn('[useLocalMessages] merge error:', err);
+    // Fall back to the incoming batch so the UI still renders something.
+    return [...incoming].sort(byTimestamp);
   }
 }
 

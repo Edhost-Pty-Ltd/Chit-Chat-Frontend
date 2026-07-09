@@ -282,7 +282,7 @@ export default function ChatScreen() {
 );
 
   // ── Messages — real-time Firestore stream ───────────────────────
-  const { messages, loading, sendMessage, markAsRead } = useMessages(chatId, userId);
+  const { messages, loading, sendMessage, markAsRead, loadOlder, hasMore, loadingOlder } = useMessages(chatId, userId);
 
   // ── Filter out blocked messages for recipient ───────────────────
   // If I receive a message that was sent while I was blocked, don't show it
@@ -790,11 +790,14 @@ export default function ChatScreen() {
   }, []);
 
   // ── Auto-scroll when new messages arrive ────────────────────────
+  // Skip while paging in older messages so the viewport stays anchored to
+  // what the user is reading instead of jumping to the bottom.
   useEffect(() => {
+    if (loadingOlder) return;
     if (filteredMessages.length > 0) {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  }, [filteredMessages.length]);
+  }, [filteredMessages.length, loadingOlder]);
 
   // ── Handle permission denied states ─────────────────────────────
   useEffect(() => {
@@ -2439,12 +2442,34 @@ export default function ChatScreen() {
               renderItem={renderItem}
               contentContainerStyle={styles.messageList}
               showsVerticalScrollIndicator={false}
+              // Keep the viewport stable when older messages are prepended.
+              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+              ListHeaderComponent={
+                hasMore ? (
+                  <TouchableOpacity
+                    style={styles.loadEarlierBtn}
+                    activeOpacity={0.7}
+                    disabled={loadingOlder}
+                    onPress={loadOlder}
+                  >
+                    {loadingOlder ? (
+                      <ActivityIndicator size="small" color={COLORS.blue} />
+                    ) : (
+                      <AppText style={styles.loadEarlierText}>Load earlier messages</AppText>
+                    )}
+                  </TouchableOpacity>
+                ) : null
+              }
               ListFooterComponent={
                 typingNames.length > 0
                   ? <TypingIndicator names={typingNames} />
                   : null
               }
-              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+              onContentSizeChange={() => {
+                // Only auto-pin to the bottom for new/live content, not when
+                // older messages are being paged in above the viewport.
+                if (!loadingOlder) listRef.current?.scrollToEnd({ animated: false });
+              }}
             />
           )}
 
@@ -3434,6 +3459,8 @@ const styles = StyleSheet.create({
 
   // ── Messages ──────────────────────────────────────────────────────────────
   messageList: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
+  loadEarlierBtn: { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 18, marginBottom: 8, borderRadius: RADIUS.full, ...GLASS.card },
+  loadEarlierText: { fontSize: 13, fontWeight: '600', color: COLORS.blue },
   datePillWrap: { alignItems: 'center', marginBottom: 10 },
   datePill: { ...GLASS.card, borderRadius: RADIUS.full, paddingHorizontal: 16, paddingVertical: 5 },
   datePillText: { fontSize: 11, color: COLORS.sub },

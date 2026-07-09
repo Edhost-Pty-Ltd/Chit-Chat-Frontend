@@ -35,6 +35,7 @@ import { useContacts, AppContact } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { ActiveCallParams } from '../context/ActiveCallContext';
 import { SignalingService } from '../services/signalingService';
+import { db } from '../config/firebase';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'GroupCall'>;
 type RouteP = RouteProp<RootStackParamList, 'GroupCall'>;
@@ -336,7 +337,16 @@ function RoomView({
   const groupCall = useGroupCall();
   const participants = useParticipants();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
-  const { resolveName } = usePhoneBook();
+  const { resolveName, contactsMap } = usePhoneBook();
+
+  // Firebase signup usernames keyed by uid. LiveKit participant.identity is the
+  // Firebase uid, while participant.name is only their phone number — so we look
+  // up the registered username to show instead of the bare number.
+  const [uidNames, setUidNames] = useState<Map<string, string>>(new Map());
+
+  // Remember the other party (uid + resolved name) while they're connected, so
+  // call history is saved correctly even if they disconnect before we hang up.
+  const otherPartyRef = useRef<{ userId: string; displayName: string } | null>(null);
 
   const [callDuration, setCallDuration] = useState(0);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
@@ -419,17 +429,75 @@ function RoomView({
     publish();
   }, [localParticipant, audioOnly]);
 
-  // Build display name for a participant. The LiveKit participant name is the
-  // person's phone number, so resolve it against the device phone book: saved
-  // contact name if available, otherwise the phone number.
-  const nameFor = (p: any) => resolveName(p?.name || p?.identity, 'Guest');
+  // Fetch the Firebase signup username for every participant uid we don't yet
+  // have, so participants who aren't saved in the device phone book still show
+  // their registered name instead of their phone number.
+  const participantIdKey = participants.map((p) => p.identity).filter(Boolean).join(',');
+  useEffect(() => {
+    const ids = participants.map((p) => p.identity).filter(Boolean) as string[];
+    const missing = ids.filter((id) => !uidNames.has(id));
+    if (missing.length === 0) return;
 
-  // Header title: a real group name passes through unchanged; a 1-on-1's
-  // phone-number title resolves to the saved contact name when available.
-  const headerTitle = resolveName(groupName, groupName);
+    let cancelled = false;
+    (async () => {
+      const { doc, getDoc } = await import('firebase/firestore');
+      const updates = new Map<string, string>();
+      await Promise.all(
+        missing.map(async (uid) => {
+          try {
+            const snap = await getDoc(doc(db, 'users', uid));
+            if (snap.exists()) {
+              const dn = snap.data().displayName;
+              if (dn) updates.set(uid, dn);
+            }
+          } catch { /* ignore — falls back to phone number */ }
+        })
+      );
+      if (!cancelled && updates.size > 0) {
+        setUidNames((prev) => new Map([...prev, ...updates]));
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participantIdKey]);
+
+  // Build display name for a participant. Priority:
+  //   1. Saved device contact (matched by phone number = participant.name)
+  //   2. Firebase signup username (matched by uid = participant.identity)
+  //   3. The raw phone number as a last resort
+  const nameFor = (p: any) => {
+    const phone = p?.name as string | undefined;
+    const uid = p?.identity as string | undefined;
+    if (phone && contactsMap.has(phone)) return contactsMap.get(phone)!;
+    if (uid && uidNames.get(uid)) return uidNames.get(uid)!;
+    return resolveName(phone || uid, 'Guest');
+  };
 
   // Separate local + remote
   const remotes = participants.filter((p) => !p.isLocal);
+
+  // Capture the current remote party for call-history purposes. Re-runs when
+  // participants join or a username resolves, so we store the uid + best name.
+  useEffect(() => {
+    const remote = participants.find((p) => !p.isLocal);
+    if (remote?.identity) {
+      otherPartyRef.current = { userId: remote.identity, displayName: nameFor(remote) };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participantIdKey, uidNames]);
+
+  // Header title. A genuine group has a human-readable name (e.g. "Family"),
+  // which we keep as-is. A 1-on-1 call carries the other party's phone number as
+  // its "group name", so in that case we resolve the remote participant instead
+  // (contact → Firebase username → number) rather than showing raw digits.
+  const looksLikePhone = (s?: string | null) => !!s && /^\+?[\d\s()-]{5,}$/.test(s.trim());
+  const headerTitle =
+    groupName && !looksLikePhone(groupName)
+      ? resolveName(groupName, groupName)
+      : remotes.length >= 1
+        ? nameFor(remotes[0])
+        : resolveName(groupName, groupName);
   const localId = localParticipant?.identity;
 
   // ── Auto-end 1-on-1 calls when the other participant leaves ─────────────────
@@ -486,8 +554,14 @@ function RoomView({
     if (callId && userId) {
       try {
         const otherParticipant = participants.find((p) => !p.isLocal);
-        const otherPartyId = otherParticipant?.identity ?? '';
-        const otherPartyName = otherParticipant ? nameFor(otherParticipant) : groupName;
+        // Fall back to the party captured while connected — the remote may have
+        // already left by the time we hang up, which previously stored an empty
+        // userId and a bare phone number in history.
+        const captured = otherPartyRef.current;
+        const otherPartyId = otherParticipant?.identity ?? captured?.userId ?? '';
+        const otherPartyName = otherParticipant
+          ? nameFor(otherParticipant)
+          : (captured?.displayName ?? groupName);
         await SignalingService.saveToCallHistory(
           userId,
           callId,
@@ -934,6 +1008,30 @@ function FloatingCallView({
     : undefined;
   const hasVideo = !!(camTrack && isTrackReference(camTrack));
 
+  // Resolve the remote's display name for the avatar: saved contact (by phone)
+  // → Firebase signup username (by uid) → phone number → group name.
+  const { contactsMap } = usePhoneBook();
+  const [remoteName, setRemoteName] = useState('');
+  useEffect(() => {
+    const phone = (remote as any)?.name as string | undefined;
+    const uid = remote?.identity;
+    if (phone && contactsMap.has(phone)) { setRemoteName(contactsMap.get(phone)!); return; }
+    if (!uid) { setRemoteName(phone || groupName); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const snap = await getDoc(doc(db, 'users', uid));
+        const dn = snap.exists() ? snap.data().displayName : '';
+        if (!cancelled) setRemoteName(dn || phone || groupName);
+      } catch { if (!cancelled) setRemoteName(phone || groupName); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remote?.identity, contactsMap]);
+
+  const avatarName = remoteName || groupName;
+
   const position = useRef(new Animated.ValueXY({ x: width - FLOAT_W - 16, y: 90 })).current;
   const offset = useRef({ x: width - FLOAT_W - 16, y: 90 });
   const panResponder = useRef(
@@ -990,7 +1088,7 @@ function FloatingCallView({
           <VideoTrack trackRef={camTrack as any} style={StyleSheet.absoluteFill} objectFit="cover" />
         ) : (
           <View style={styles.floatAvatarWrap}>
-            <Avatar initials={getInitials(groupName)} color={COLORS.blue} size={44} />
+            <Avatar initials={getInitials(avatarName)} color={COLORS.blue} size={44} />
           </View>
         )}
         <View style={styles.floatBadge}>
