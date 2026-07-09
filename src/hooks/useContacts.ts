@@ -1,7 +1,9 @@
 // ─── useContacts Hook ─────────────────────────────────────────────────────────
-// Fetches phone contacts, normalizes numbers to E.164 format,
-// then cross-references with Firestore users collection to find
-// which contacts are registered on SkyConnect.
+// Fetches ALL phone contacts, normalizes numbers to E.164 format,
+// then cross-references with Firestore users collection to mark
+// which contacts are registered on ChitChat.
+// For the "Share Contact" feature, all phone contacts are returned so the
+// user can share any contact card, not just registered app users.
 
 import { useState, useEffect } from 'react';
 import { getContactsAsync, requestPermissionsAsync, Fields } from 'expo-contacts/legacy';
@@ -12,12 +14,13 @@ import { db } from '../config/firebase';
 import { normalizePhone, chunkArray } from '../utils/phoneUtils';
 
 export interface AppContact {
-  userId:      string;       // Firestore user ID
+  userId:      string;       // Firestore user ID (empty string if not a ChitChat user)
   phone:       string;       // normalized E.164 phone number
   displayName: string;       // contact name from phone book, or phone number if not saved
   isSaved:     boolean;      // true = found in phone contacts
+  isOnApp:     boolean;      // true = registered ChitChat user
   photoUri?:   string;       // contact photo from phone book
-  firebasePhotoURL?: string; // Firebase profile photo
+  firebasePhotoURL?: string; // Firebase profile photo (only for app users)
 }
 
 export function useContacts() {
@@ -39,6 +42,7 @@ export function useContacts() {
       const { status } = await requestPermissionsAsync();
       
       if (status !== 'granted') {
+        setHasPermission(false);
         setError('Contacts permission denied');
         setLoading(false);
         return;
@@ -54,8 +58,9 @@ export function useContacts() {
         ],
       });
 
-      // ── 3. Build a map of normalized phone → contact name ────────
-      const phoneToName = new Map<string, string>();
+      // ── 3. Build a map of normalized phone → contact info ────────
+      // Use a map to de-duplicate by normalized phone number
+      const phoneToName  = new Map<string, string>();
       const phoneToPhoto = new Map<string, string>();
 
       for (const contact of data) {
@@ -63,9 +68,12 @@ export function useContacts() {
         for (const pn of contact.phoneNumbers) {
           if (!pn.number) continue;
           const normalized = normalizePhone(pn.number);
-          const name = contact.name || pn.number;
-          phoneToName.set(normalized, name);
-          if (contact.imageAvailable && contact.image?.uri) {
+          if (!normalized) continue;
+          // Only set if not already present (first match wins)
+          if (!phoneToName.has(normalized)) {
+            phoneToName.set(normalized, contact.name || pn.number);
+          }
+          if (contact.imageAvailable && contact.image?.uri && !phoneToPhoto.has(normalized)) {
             phoneToPhoto.set(normalized, contact.image.uri);
           }
         }
@@ -77,11 +85,11 @@ export function useContacts() {
         return;
       }
 
-      // ── 4. Query Firestore for registered users ───────────────────
-      // Firestore "in" query supports max 30 items per query
-      const phones   = Array.from(phoneToName.keys());
-      const chunks   = chunkArray(phones, 30);
-      const appContacts: AppContact[] = [];
+      // ── 4. Query Firestore to find which contacts are on ChitChat ─
+      const phones  = Array.from(phoneToName.keys());
+      const chunks  = chunkArray(phones, 30);
+      // Map of normalized phone → { userId, firebasePhotoURL }
+      const appUserMap = new Map<string, { userId: string; firebasePhotoURL: string | null }>();
 
       for (const chunk of chunks) {
         const q = query(
@@ -90,42 +98,42 @@ export function useContacts() {
         );
         const snap = await getDocs(q);
 
-        for (const doc of snap.docs) {
-          const data = doc.data();
-          const phone = data.phone as string;
-          const contactName = phoneToName.get(phone);
-
-          // Respect the user's profile-photo privacy. These contacts are all
-          // saved in the viewer's phone book, so 'Everyone' and 'Contacts' both
-          // allow the photo; only 'Nobody' hides the Firebase profile photo.
-          // (The device contact photo, photoUri, is the viewer's own data and
-          // always shows.)
-          const photoPrivacy = data.privacyProfilePhoto ?? 'Contacts';
-          const firebasePhotoURL =
-            photoPrivacy === 'Nobody' ? null : (data.photoURL || null);
-
-          // All users in this result are in phone contacts (isSaved: true)
-          // Use the contact name from phoneToName
-          appContacts.push({
-            userId:      doc.id,
-            phone,
-            displayName: contactName ?? phone,
-            isSaved:     true, // Always true since we queried for phones in contacts
-            photoUri:    phoneToPhoto.get(phone), // Contact photo from device
-            firebasePhotoURL, // Firebase profile photo (privacy-filtered)
-          });
+        for (const docSnap of snap.docs) {
+          const docData = docSnap.data();
+          const phone   = docData.phone as string;
+          // Respect the user's profile-photo privacy setting
+          const photoPrivacy    = docData.privacyProfilePhoto ?? 'Contacts';
+          const firebasePhotoURL = photoPrivacy === 'Nobody' ? null : (docData.photoURL || null);
+          appUserMap.set(phone, { userId: docSnap.id, firebasePhotoURL });
         }
       }
 
-      // Sort: saved contacts first (by name), then unsaved (by number)
+      // ── 5. Build the full contact list (all phone contacts) ───────
+      const appContacts: AppContact[] = [];
+
+      for (const [phone, name] of phoneToName.entries()) {
+        const appUser = appUserMap.get(phone);
+        appContacts.push({
+          userId:           appUser?.userId ?? '',
+          phone,
+          displayName:      name,
+          isSaved:          true,
+          isOnApp:          !!appUser,
+          photoUri:         phoneToPhoto.get(phone),
+          firebasePhotoURL: appUser?.firebasePhotoURL ?? undefined,
+        });
+      }
+
+      // Sort: ChitChat users first, then all others — both groups sorted by name
       appContacts.sort((a, b) => {
-        if (a.isSaved && !b.isSaved) return -1;
-        if (!a.isSaved && b.isSaved) return 1;
+        if (a.isOnApp && !b.isOnApp) return -1;
+        if (!a.isOnApp && b.isOnApp) return 1;
         return a.displayName.localeCompare(b.displayName);
       });
 
       setContacts(appContacts);
     } catch (err: any) {
+      console.error('[useContacts] Failed to load contacts:', err);
       setError(err.message ?? 'Failed to load contacts');
     } finally {
       setLoading(false);

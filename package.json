@@ -4,6 +4,12 @@
   "main": "index.ts",
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.1",
+    "@expo-google-fonts/dancing-script": "^0.4.2",
+    "@expo-google-fonts/merriweather": "^0.4.2",
+    "@expo-google-fonts/nunito": "^0.4.2",
+    "@expo-google-fonts/roboto": "^0.4.3",
+    "@expo-google-fonts/roboto-condensed": "^0.4.2",
+    "@expo-google-fonts/roboto-mono": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@livekit/react-native": "^2.11.1",
     "@livekit/react-native-expo-plugin": "^1.0.2",

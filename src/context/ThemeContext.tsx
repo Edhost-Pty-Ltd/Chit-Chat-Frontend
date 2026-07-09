@@ -41,13 +41,18 @@ export interface FontPreset {
   weight: '400' | '600' | '700' | '800';
 }
 
+// Google-font family names must match the loaded font keys in useFonts() below.
+// Using the concrete family strings (e.g. 'Roboto_400Regular') guarantees the
+// same rendering on iOS and Android — the previous iOS-only names ('Georgia',
+// 'Arial Rounded MT Bold', etc.) silently fell back to the system font on
+// Android so every preset looked identical.
 export const FONT_PRESETS: FontPreset[] = [
-  { id: 'system',    label: 'System Default', fontFamily: 'System',                style: 'normal', weight: '400' },
-  { id: 'serif',     label: 'Serif',          fontFamily: 'Georgia',               style: 'normal', weight: '400' },
-  { id: 'mono',      label: 'Monospace',      fontFamily: 'Courier New',           style: 'normal', weight: '400' },
-  { id: 'rounded',   label: 'Rounded',        fontFamily: 'Arial Rounded MT Bold', style: 'normal', weight: '700' },
-  { id: 'cursive',   label: 'Cursive',        fontFamily: 'Palatino',              style: 'italic', weight: '400' },
-  { id: 'condensed', label: 'Condensed',      fontFamily: 'Arial Narrow',          style: 'normal', weight: '600' },
+  { id: 'system',    label: 'System Default', fontFamily: 'Roboto_400Regular',           style: 'normal', weight: '400' },
+  { id: 'serif',     label: 'Serif',          fontFamily: 'Merriweather_400Regular',     style: 'normal', weight: '400' },
+  { id: 'mono',      label: 'Monospace',      fontFamily: 'RobotoMono_400Regular',       style: 'normal', weight: '400' },
+  { id: 'rounded',   label: 'Rounded',        fontFamily: 'Nunito_700Bold',              style: 'normal', weight: '700' },
+  { id: 'cursive',   label: 'Cursive',        fontFamily: 'DancingScript_400Regular',    style: 'normal', weight: '400' },
+  { id: 'condensed', label: 'Condensed',      fontFamily: 'RobotoCondensed_600SemiBold', style: 'normal', weight: '600' },
 ];
 
 export const TEXT_COLOR_PRESETS = [

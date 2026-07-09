@@ -402,6 +402,13 @@ export const onMessageCreated = functionsV1.firestore
       return null;
     }
 
+    // Skip system messages (block/unblock/leave-group notifications, etc.)
+    // These are rendered inline in the chat and should not push-notify anyone.
+    if (message.type === 'system' || senderId === 'system') {
+      console.log(`[onMessageCreated] Skipping system message in chat ${chatId}`);
+      return null;
+    }
+
     console.log(`[onMessageCreated] New message in chat ${chatId} from ${senderId}`);
 
     try {

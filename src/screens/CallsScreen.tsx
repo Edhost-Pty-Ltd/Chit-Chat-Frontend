@@ -464,6 +464,24 @@ export default function CallsScreen() {
   ) => {
     if (!user) { Alert.alert('Error', 'You must be logged in to make calls'); return; }
 
+    // Block check (either direction blocks the call)
+    try {
+      const [iBlockedThem, theyBlockedMe] = await Promise.all([
+        getDoc(doc(db, 'users', user.uid, 'blockedUsers', calleeUserId)),
+        getDoc(doc(db, 'users', calleeUserId, 'blockedUsers', user.uid)),
+      ]);
+      if (iBlockedThem.exists()) {
+        Alert.alert("Can't call", `You've blocked ${displayName}. Unblock them to make calls.`);
+        return;
+      }
+      if (theyBlockedMe.exists()) {
+        Alert.alert("Can't call", `You can no longer call ${displayName}.`);
+        return;
+      }
+    } catch (err) {
+      console.warn('[CallsScreen] Block check failed:', err);
+    }
+
     // Privacy check
     const calleePrivacy = await fetchUserPrivacySettings(calleeUserId);
     if (calleePrivacy.calls === 'Nobody') {

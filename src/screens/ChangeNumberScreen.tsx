@@ -187,7 +187,7 @@ export default function ChangeNumberScreen() {
   return (
     <>
       <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <LinearGradient colors={['#87CEEB', '#C5E8F7', '#E8F6FF']} style={StyleSheet.absoluteFill} />
+        <AppBg />
 
         {/* Header */}
         <View style={[styles.header, { backgroundColor: 'transparent', borderBottomColor: 'rgba(30,156,240,0.18)' }]}>

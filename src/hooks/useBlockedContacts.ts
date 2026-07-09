@@ -93,19 +93,6 @@ async function sendBlockNotifications(
       'lastMessage.timestamp': serverTimestamp(),
     });
 
-    // Create notification for blocked user
-    const notificationRef = doc(collection(db, 'users', blockedId, 'notifications'));
-    batch.set(notificationRef, {
-      id: notificationRef.id,
-      type: 'blocked',
-      title: 'You were blocked',
-      message: `${blockerName} blocked you`,
-      fromUserId: blockerId,
-      fromUserName: blockerName,
-      timestamp: serverTimestamp(),
-      read: false,
-    });
-
     await batch.commit();
     console.log('[sendBlockNotifications] Block notifications sent to chat:', chatId);
   } catch (error) {

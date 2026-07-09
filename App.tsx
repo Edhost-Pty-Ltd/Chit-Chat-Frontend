@@ -1,10 +1,16 @@
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
+import { useFonts as useRoboto, Roboto_400Regular, Roboto_700Bold } from '@expo-google-fonts/roboto';
+import { Merriweather_400Regular } from '@expo-google-fonts/merriweather';
+import { RobotoMono_400Regular } from '@expo-google-fonts/roboto-mono';
+import { Nunito_700Bold } from '@expo-google-fonts/nunito';
+import { DancingScript_400Regular } from '@expo-google-fonts/dancing-script';
+import { RobotoCondensed_600SemiBold } from '@expo-google-fonts/roboto-condensed';
 
 // Import Firebase config FIRST to ensure it's initialized before any contexts
 import './src/config/firebase';
@@ -137,6 +143,17 @@ function NotificationTapHandler() {
 }
 
 export default function App() {
+  // Load Google Fonts used by the Appearance settings font presets.
+  const [fontsLoaded] = useRoboto({
+    Roboto_400Regular,
+    Roboto_700Bold,
+    Merriweather_400Regular,
+    RobotoMono_400Regular,
+    Nunito_700Bold,
+    DancingScript_400Regular,
+    RobotoCondensed_600SemiBold,
+  });
+
   // Global handler for unhandled promise rejections
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -183,6 +200,15 @@ export default function App() {
       }
     }
   }, []);
+
+  // Wait for fonts before rendering so preset fonts render correctly on first paint.
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#87CEEB' }}>
+        <ActivityIndicator size="large" color="#1E9CF0" />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaProvider>
