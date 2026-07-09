@@ -8,6 +8,7 @@ import {
   onSnapshot, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { loadLocalChats, saveLocalChats } from './useLocalChats';
 
 export interface ChatPreview {
   chatId:       string;
@@ -18,8 +19,10 @@ export interface ChatPreview {
   lastSenderId: string;
   timestamp:    Date | null;
   unreadCount:  number;
-  lastMessageReadBy:      string[];
-  lastMessageDeliveredTo: string[];
+  /** UIDs that have delivered the last message. Optional to survive older cached rows. */
+  lastMessageDeliveredTo?: string[];
+  /** UIDs that have read the last message. Optional to survive older cached rows. */
+  lastMessageReadBy?: string[];
 }
 
 export function useChats(userId: string | null) {
@@ -34,7 +37,20 @@ export function useChats(userId: string | null) {
       return;
     }
 
+    let cancelled = false;
+
     setLoading(true);
+
+    // ── Seed from the local cache immediately ─────────────────────
+    // Shows the previous chat list instantly on cold start and keeps it
+    // visible while offline or waiting for a slow network to respond.
+    loadLocalChats(userId).then((cached) => {
+      if (cancelled) return;
+      if (cached.length > 0) {
+        setChats(cached);
+        setLoading(false);
+      }
+    });
 
     // Real-time listener — simplified query (no orderBy) for debugging
     const q = query(
@@ -47,7 +63,11 @@ export function useChats(userId: string | null) {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        console.log('[useChats] Snapshot received, docs:', snap.docs.length);
+        console.log(
+          '[useChats] Snapshot received, docs:', snap.docs.length,
+          'fromCache:', snap.metadata.fromCache,
+        );
+
         const result: ChatPreview[] = snap.docs.map((doc) => {
           const d = doc.data();
           const lm = d.lastMessage;
@@ -62,21 +82,40 @@ export function useChats(userId: string | null) {
               ? (lm.timestamp as Timestamp).toDate()
               : null,
             unreadCount: getUnreadCount(d.unreadCounts, userId),
-            lastMessageReadBy:      lm?.readBy ?? [],
             lastMessageDeliveredTo: lm?.deliveredTo ?? [],
+            lastMessageReadBy:      lm?.readBy      ?? [],
           };
         });
+
+        // Ignore an empty snapshot that only came from the (cold) local cache.
+        // On a slow network the SDK fires an empty fromCache snapshot before the
+        // server responds — treating it as "No chats yet" causes a flash of the
+        // empty state. We keep showing the cached list (or the spinner) until a
+        // real result arrives.
+        if (result.length === 0 && snap.metadata.fromCache) {
+          return;
+        }
+
         setChats(result);
         setLoading(false);
+
+        // Persist authoritative (server) snapshots for offline use.
+        if (!snap.metadata.fromCache) {
+          saveLocalChats(userId, result);
+        }
       },
       (err) => {
         console.error('[useChats] Error:', err.code, err.message);
+        // Keep any cached chats already on screen; only surface the error.
         setError(err.message);
         setLoading(false);
       },
     );
 
-    return () => unsub(); // cleanup on unmount
+    return () => {
+      cancelled = true;
+      unsub();
+    }; // cleanup on unmount
   }, [userId]);
 
   return { chats, loading, error };

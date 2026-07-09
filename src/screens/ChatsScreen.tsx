@@ -869,15 +869,15 @@ export default function ChatsScreen() {
             {item.lastSenderId === userId && (
               <AppIcon
                 name={
-                  item.lastMessageReadBy.some(id => id !== userId)
+                  (item.lastMessageReadBy ?? []).some(id => id !== userId)
                     ? 'checkmark-done'
-                    : item.lastMessageDeliveredTo.some(id => id !== userId)
+                    : (item.lastMessageDeliveredTo ?? []).some(id => id !== userId)
                       ? 'checkmark-done'
                       : 'checkmark'
                 }
                 size={14}
                 color={
-                  item.lastMessageReadBy.some(id => id !== userId)
+                  (item.lastMessageReadBy ?? []).some(id => id !== userId)
                     ? COLORS.blue
                     : COLORS.sub
                 }

@@ -11,7 +11,11 @@
 
 import { Platform } from 'react-native';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  enableIndexedDbPersistence,
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getDatabase } from 'firebase/database';
 
@@ -37,7 +41,24 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 console.log('[Firebase] Firebase app initialized:', app.name);
 
 // Firestore — real-time database (JS SDK)
-export const db = getFirestore(app);
+// On React Native the default WebChannel streaming transport frequently stalls
+// on slow / restrictive mobile networks, which makes listeners hang and appear
+// to "not load". Auto-detecting long polling lets the SDK fall back to a more
+// resilient transport when streaming isn't reliable.
+// initializeFirestore must run before any getFirestore() call and throws if the
+// instance already exists (e.g. on Fast Refresh), so we guard with a fallback.
+function createFirestore() {
+  try {
+    return initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
+    });
+  } catch (err) {
+    // Already initialized (hot reload) — reuse the existing instance.
+    return getFirestore(app);
+  }
+}
+
+export const db = createFirestore();
 
 console.log('[Firebase] Firestore initialized');
 

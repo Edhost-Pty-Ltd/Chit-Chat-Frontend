@@ -60,7 +60,8 @@ import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
-import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead } from '../hooks/useChatActions';
+import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead, getOrCreateDirectChat } from '../hooks/useChatActions';
+import { normalizePhone } from '../utils/phoneUtils';
 import { parseSystemMessage } from '../utils/systemMessageParser';
 import { getDateLabel, groupMessagesByDate } from '../utils/dateUtils';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
@@ -106,9 +107,32 @@ interface PastMember {
 
 /** Extract up to 2-char initials from a display name */
 function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  if (!name || !name.trim()) return '?';
+  
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  
+  if (parts.length >= 2) {
+    const first = parts[0][0];
+    const last = parts[parts.length - 1][0];
+    if (/[a-zA-Z]/.test(first) && /[a-zA-Z]/.test(last)) {
+      return (first + last).toUpperCase();
+    }
+  }
+  if (parts.length === 1) {
+    const first = parts[0][0];
+    if (/[a-zA-Z]/.test(first)) {
+      return first.toUpperCase();
+    }
+  }
+  
+  const match = name.match(/[a-zA-Z]/);
+  if (match) return match[0].toUpperCase();
+  
+  const digits = name.replace(/\D/g, '');
+  if (digits.length >= 2) return digits.slice(-2);
+  if (digits.length === 1) return digits;
+  
+  return '?';
 }
 
 /** Format a Date to a short time string like "14:32" */
@@ -259,64 +283,7 @@ export default function ChatScreen() {
 );
 
   // ── Messages — real-time Firestore stream ───────────────────────
-  const { messages, loading, sendMessage, markAsRead } = useMessages(chatId, userId);
-
-  // ── Backfill existing call history as chat bubbles (one-time migration) ──
-  useEffect(() => {
-    if (!chatId || !userId || !otherUserId || isGroup) return;
-    
-    const backfillCallMessages = async () => {
-      try {
-        const { collection: fbCollection, query: fbQuery, orderBy: fbOrderBy, getDocs, where } = await import('firebase/firestore');
-        
-        // Check if there are already call messages in this chat
-        const messagesRef = fbCollection(db, 'chats', chatId, 'messages');
-        const callMsgsQuery = fbQuery(messagesRef, where('type', '==', 'call'));
-        const callMsgsSnap = await getDocs(callMsgsQuery);
-        
-        // If we already have call messages, skip backfill
-        if (!callMsgsSnap.empty) return;
-        
-        // Get call history for this user
-        const historyRef = fbCollection(db, 'users', userId, 'callHistory');
-        const historyQuery = fbQuery(historyRef, fbOrderBy('timestamp', 'desc'));
-        const historySnap = await getDocs(historyQuery);
-        
-        if (historySnap.empty) return;
-        
-        // Filter calls with this otherUserId
-        const callsWithContact = historySnap.docs
-          .map(d => d.data())
-          .filter(call => call.otherParty?.userId === otherUserId);
-        
-        if (callsWithContact.length === 0) return;
-        
-        console.log('[ChatScreen] Backfilling', callsWithContact.length, 'call messages');
-        
-        // Import sendCallMessage to write them
-        const { sendCallMessage: writeCallMsg } = await import('../hooks/useChatActions');
-        
-        // Write each call as a message (only from outgoing to avoid duplicates)
-        for (const call of callsWithContact) {
-          if (call.direction === 'outgoing') {
-            await writeCallMsg(
-              chatId,
-              userId,
-              call.type || 'audio',
-              call.duration || null,
-              call.status || 'completed',
-            );
-          }
-        }
-        
-        console.log('[ChatScreen] Backfill complete');
-      } catch (err) {
-        console.warn('[ChatScreen] Call backfill error:', err);
-      }
-    };
-    
-    backfillCallMessages();
-  }, [chatId, userId, otherUserId, isGroup]);
+  const { messages, loading, sendMessage, markAsRead, loadOlder, hasMore, loadingOlder } = useMessages(chatId, userId);
 
   // ── Filter out blocked messages for recipient ───────────────────
   // If I receive a message that was sent while I was blocked, don't show it
@@ -433,6 +400,30 @@ export default function ChatScreen() {
   // ── Contacts (for share contact feature) ──────────────────────────────────
   const { contacts: phoneContacts, loading: contactsLoading, hasPermission: contactsPermission } = useContacts();
 
+  // ── Firebase signup name for unsaved contacts (used for avatar initials on calls) ──
+  const [otherUserSignupName, setOtherUserSignupName] = useState<string | null>(null);
+  useEffect(() => {
+    if (isGroup || !otherUserId) return;
+    // Check if the contact is saved in the phone book
+    const isSaved = phoneContacts.some((c) => c.userId === otherUserId);
+    if (isSaved) {
+      // Saved contact — initials come from the phone-book name, no fetch needed
+      setOtherUserSignupName(null);
+      return;
+    }
+    // Unsaved contact — fetch their Firebase profile for the signup username
+    getDoc(doc(db, 'users', otherUserId)).then((snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.displayName) {
+          setOtherUserSignupName(data.displayName);
+        }
+      }
+    }).catch((err) => {
+      console.warn('[ChatScreen] Failed to fetch other user profile:', err);
+    });
+  }, [isGroup, otherUserId, phoneContacts]);
+
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
 
@@ -520,6 +511,13 @@ export default function ChatScreen() {
   // ── Contact picker state (share contact via 3-dot menu) ─────────
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [contactQuery, setContactQuery] = useState('');
+
+  // ── Received-contact action sheet state ─────────────────────────
+  const [contactActionCard, setContactActionCard] = useState<{
+    name: string;
+    phone: string;
+    userId: string | null;
+  } | null>(null);
 
   // Debug log for contacts
   useEffect(() => {
@@ -800,11 +798,14 @@ export default function ChatScreen() {
   }, []);
 
   // ── Auto-scroll when new messages arrive ────────────────────────
+  // Skip while paging in older messages so the viewport stays anchored to
+  // what the user is reading instead of jumping to the bottom.
   useEffect(() => {
+    if (loadingOlder) return;
     if (filteredMessages.length > 0) {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  }, [filteredMessages.length]);
+  }, [filteredMessages.length, loadingOlder]);
 
   // ── Handle permission denied states ─────────────────────────────
   useEffect(() => {
@@ -1245,6 +1246,8 @@ export default function ChatScreen() {
             callerName: userDisplayName,
             chatId,
             memberCount: memberIds.length,
+            // For unsaved contacts, derive initials from their signup username
+            initials: otherUserSignupName ? getInitials(otherUserSignupName) : undefined,
           });
         }
       } else {
@@ -1642,6 +1645,63 @@ export default function ChatScreen() {
     await stopLiveLocationSharing(chatId, messageId);
   };
 
+  // ── Received-contact actions ───────────────────────────────────
+  /** True if the given phone is already in the user's device phone book. */
+  const isContactSaved = useCallback((phone: string): boolean => {
+    if (!phone || !phoneContacts) return false;
+    const normalized = normalizePhone(phone);
+    return phoneContacts.some(pc => normalizePhone(pc.phone) === normalized);
+  }, [phoneContacts]);
+
+  /** Open a chat with the shared contact and navigate to it. */
+  const handleMessageSharedContact = useCallback(async (contactUserId: string | null, name: string) => {
+    setContactActionCard(null);
+    if (!userId || !contactUserId) {
+      Alert.alert('Unavailable', 'This contact is not on ChitChat yet.');
+      return;
+    }
+    if (contactUserId === userId) {
+      Alert.alert('This is you', 'You cannot message yourself.');
+      return;
+    }
+    try {
+      const newChatId = await getOrCreateDirectChat(userId, contactUserId);
+      navigation.replace('Chat', {
+        chatId: newChatId,
+        displayName: name,
+        isGroup: false,
+        otherUserId: contactUserId,
+        otherUserPhoto: null,
+      });
+    } catch (err) {
+      console.error('[ChatScreen] Failed to open chat with shared contact:', err);
+      Alert.alert('Error', 'Could not open chat with this contact.');
+    }
+  }, [userId, navigation]);
+
+  /** Open the native "New Contact" form pre-filled with the shared info. */
+  const handleSaveSharedContact = useCallback(async (name: string, phone: string) => {
+    setContactActionCard(null);
+    if (Platform.OS === 'web') {
+      Alert.alert('Not available', 'Saving contacts is not available on web.');
+      return;
+    }
+    try {
+      const Contacts = require('expo-contacts/legacy');
+      const parts = name.trim().split(/\s+/);
+      const firstName = parts[0] ?? name;
+      const lastName = parts.slice(1).join(' ') || undefined;
+      await Contacts.presentFormAsync(null, {
+        [Contacts.Fields.FirstName]: firstName,
+        [Contacts.Fields.LastName]: lastName,
+        [Contacts.Fields.PhoneNumbers]: [{ label: 'mobile', number: phone }],
+      });
+    } catch (err) {
+      console.error('[ChatScreen] Failed to open native contact form:', err);
+      Alert.alert('Error', 'Could not open the contact form.');
+    }
+  }, []);
+
   // ── Clear chat handler ──────────────────────────────────────────
   const handleClearChat = useCallback(async () => {
     if (!chatId) {
@@ -1972,6 +2032,30 @@ export default function ChatScreen() {
               onStopSharing={() => handleStopLiveLocation(item.messageId)}
               timestamp={item.timestamp}
             />
+          ) : item.type === 'contact' && item.contactName ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setContactActionCard({
+                name: item.contactName!,
+                phone: item.contactPhone ?? '',
+                userId: item.contactUserId ?? null,
+              })}
+              style={styles.contactBubbleIn}
+            >
+              <View style={styles.contactBubbleTop}>
+                <View style={styles.contactBubbleAvatar}>
+                  <AppText style={styles.contactBubbleInitials}>
+                    {item.contactName.slice(0, 2).toUpperCase()}
+                  </AppText>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText fixedColor style={styles.contactBubbleName}>{item.contactName}</AppText>
+                  <AppText fixedColor style={styles.contactBubblePhone}>{item.contactPhone ?? ''}</AppText>
+                </View>
+              </View>
+              <View style={styles.contactBubbleDivider} />
+              <AppText fixedColor style={styles.contactBubbleTime}>{formatTime(item.timestamp)}</AppText>
+            </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
               <TouchableOpacity 
@@ -2025,7 +2109,9 @@ export default function ChatScreen() {
                                                                ? '📍 Location'
                                 : item.replyTo.type === 'call'
                                   ? (item.replyTo.text || '📞 Call')
-                                  : 'Message'}
+                                  : item.replyTo.type === 'contact'
+                                    ? '👤 Contact'
+                                    : 'Message'}
 
                     </AppText>
                   </View>
@@ -2114,6 +2200,33 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
               tickIcon={tickIcon}
             />
+          ) : item.type === 'contact' && item.contactName ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setContactActionCard({
+                name: item.contactName!,
+                phone: item.contactPhone ?? '',
+                userId: item.contactUserId ?? null,
+              })}
+              style={styles.contactBubbleOut}
+            >
+              <View style={styles.contactBubbleTop}>
+                <View style={styles.contactBubbleAvatar}>
+                  <AppText style={styles.contactBubbleInitials}>
+                    {item.contactName.slice(0, 2).toUpperCase()}
+                  </AppText>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText style={[styles.contactBubbleName, { color: textColor }]}>{item.contactName}</AppText>
+                  <AppText style={[styles.contactBubblePhone, { color: COLORS.sub }]}>{item.contactPhone ?? ''}</AppText>
+                </View>
+              </View>
+              <View style={styles.contactBubbleDivider} />
+              <View style={styles.timeOutRow}>
+                <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
+                <AppIcon name={tickIcon.icon} size={13} color={tickIcon.color} fixedColor />
+              </View>
+            </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <View style={[styles.bubble, styles.bubbleOut, styles.imageBubble]}>
               <TouchableOpacity 
@@ -2173,6 +2286,8 @@ export default function ChatScreen() {
                                   ? '📍 Location'
                               : item.replyTo.type === 'call'
                               ? (item.replyTo.text || '📞 Call')
+                              : item.replyTo.type === 'contact'
+                              ? '👤 Contact'
                               : 'Message'}
 
                     </AppText>
@@ -2447,12 +2562,34 @@ export default function ChatScreen() {
               renderItem={renderItem}
               contentContainerStyle={styles.messageList}
               showsVerticalScrollIndicator={false}
+              // Keep the viewport stable when older messages are prepended.
+              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+              ListHeaderComponent={
+                hasMore ? (
+                  <TouchableOpacity
+                    style={styles.loadEarlierBtn}
+                    activeOpacity={0.7}
+                    disabled={loadingOlder}
+                    onPress={loadOlder}
+                  >
+                    {loadingOlder ? (
+                      <ActivityIndicator size="small" color={COLORS.blue} />
+                    ) : (
+                      <AppText style={styles.loadEarlierText}>Load earlier messages</AppText>
+                    )}
+                  </TouchableOpacity>
+                ) : null
+              }
               ListFooterComponent={
                 typingNames.length > 0
                   ? <TypingIndicator names={typingNames} />
                   : null
               }
-              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+              onContentSizeChange={() => {
+                // Only auto-pin to the bottom for new/live content, not when
+                // older messages are being paged in above the viewport.
+                if (!loadingOlder) listRef.current?.scrollToEnd({ animated: false });
+              }}
             />
           )}
 
@@ -2765,6 +2902,93 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* ── Received Contact Action Modal ── */}
+      <Modal
+        visible={contactActionCard !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setContactActionCard(null)}
+      >
+        <TouchableOpacity
+          style={styles.contactActionOverlay}
+          activeOpacity={1}
+          onPress={() => setContactActionCard(null)}
+        >
+          <TouchableOpacity activeOpacity={1} style={[styles.contactActionSheet, { backgroundColor: FG.glassBg }]}>
+            <AppBg />
+            {contactActionCard && (
+              <>
+                <View style={styles.contactActionHeader}>
+                  <View style={styles.contactBubbleAvatar}>
+                    <AppText style={styles.contactBubbleInitials}>
+                      {contactActionCard.name.slice(0, 2).toUpperCase()}
+                    </AppText>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <AppText style={[styles.contactActionName, { color: textColor }]} numberOfLines={1}>
+                      {contactActionCard.name}
+                    </AppText>
+                    <AppText style={{ fontSize: 13, color: COLORS.sub, marginTop: 2 }}>
+                      {contactActionCard.phone}
+                    </AppText>
+                  </View>
+                </View>
+
+                <View style={styles.contactActionDivider} />
+
+                {/* Message action — always available for ChitChat users */}
+                <TouchableOpacity
+                  style={styles.contactActionButton}
+                  activeOpacity={0.7}
+                  onPress={() => handleMessageSharedContact(contactActionCard.userId, contactActionCard.name)}
+                >
+                  <AppIcon name="chatbubble-outline" size={22} color={COLORS.blue} fixedColor />
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <AppText style={[styles.contactActionButtonTitle, { color: textColor }]}>
+                      {isContactSaved(contactActionCard.phone) ? 'Message' : 'Message (number not saved)'}
+                    </AppText>
+                    <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>
+                      Open a chat with this contact
+                    </AppText>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Save-contact action — only if not already saved */}
+                {!isContactSaved(contactActionCard.phone) && (
+                  <>
+                    <View style={styles.contactActionDivider} />
+                    <TouchableOpacity
+                      style={styles.contactActionButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleSaveSharedContact(contactActionCard.name, contactActionCard.phone)}
+                    >
+                      <AppIcon name="person-add-outline" size={22} color={COLORS.blue} fixedColor />
+                      <View style={{ flex: 1, marginLeft: 14 }}>
+                        <AppText style={[styles.contactActionButtonTitle, { color: textColor }]}>
+                          Save contact
+                        </AppText>
+                        <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>
+                          Add {contactActionCard.name} to your phone contacts
+                        </AppText>
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                <View style={styles.contactActionDivider} />
+                <TouchableOpacity
+                  style={[styles.contactActionButton, { justifyContent: 'center' }]}
+                  activeOpacity={0.7}
+                  onPress={() => setContactActionCard(null)}
+                >
+                  <AppText style={{ color: COLORS.sub, fontSize: 15, fontWeight: '600' }}>Cancel</AppText>
+                </TouchableOpacity>
+              </>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ── Contact Picker Modal ── */}
       <Modal visible={contactPickerOpen} transparent animationType="slide" onRequestClose={() => setContactPickerOpen(false)}>
         <KeyboardAvoidingView 
@@ -2775,7 +2999,9 @@ export default function ChatScreen() {
           <View style={[styles.contactPickerSheet, { backgroundColor: FG.glassBg }]}>
             <AppBg />
             <View style={styles.attachHandle} />
-            <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share Contact</AppText>
+            <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>
+              {isGroup ? 'Share Contact' : `Send ${displayName}'s contact to…`}
+            </AppText>
 
             {/* Search */}
             <View style={[styles.contactSearchWrap, bevel]}>
@@ -2816,7 +3042,7 @@ export default function ChatScreen() {
                     Please grant contacts permission in your device settings to share contacts
                   </AppText>
                 </View>
-              ) : !phoneContacts || phoneContacts.length === 0 ? (
+              ) : !phoneContacts || phoneContacts.filter(c => c.userId && c.userId !== userId && c.userId !== otherUserId).length === 0 ? (
                 <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
                   <AppIcon name="people-outline" size={48} color={COLORS.sub} />
                   <AppText style={{ color: textColor, fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
@@ -2829,28 +3055,43 @@ export default function ChatScreen() {
               ) : (
                 <>
                   {phoneContacts
+                    .filter(c => c.userId && c.userId !== userId)       // must be a ChitChat user and not self
+                    .filter(c => c.userId !== otherUserId)               // don't share the recipient back to themselves
                     .filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery))
                     .map((c) => (
                       <TouchableOpacity
-                        key={c.userId || c.phone}
+                        key={c.phone}
                         style={[styles.contactPickerRow, bevel]}
                         activeOpacity={0.75}
                         onPress={async () => {
                           setContactPickerOpen(false);
-                          if (!userId) return;
-                          // Send contact as a text message with contact card format
-                          const contactText = `📇 *${c.displayName}*\n📞 ${c.phone}`;
+                          if (!userId || !otherUserId) return;
                           try {
-                            await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                            // Fetch the CURRENT chat partner's phone (the contact we want to share)
+                            const partnerSnap = await getDoc(doc(db, 'users', otherUserId));
+                            const partnerPhone = partnerSnap.exists() ? (partnerSnap.data().phone as string | undefined) : undefined;
+                            if (!partnerPhone) {
+                              console.error('[ShareContact] Could not resolve chat partner phone number');
+                              return;
+                            }
+
+                            // Find or create the chat between me (sender) and the picked recipient
+                            const recipientChatId = await getOrCreateDirectChat(userId, c.userId);
+
+                            // Write the CURRENT chat partner's contact card into the recipient chat
+                            await addDoc(collection(db, 'chats', recipientChatId, 'messages'), {
                               senderId: userId,
-                              text: contactText,
-                              type: 'text',
+                              type: 'contact',
+                              contactName: displayName,     // current chat partner's name
+                              contactPhone: partnerPhone,   // current chat partner's phone
+                              contactUserId: otherUserId,   // current chat partner's Firestore userId
+                              text: null,
                               timestamp: serverTimestamp(),
                               readBy: [userId],
                               deliveredTo: [],
                             });
-                            await updateDoc(doc(db, 'chats', chatId), {
-                              'lastMessage.text': `📇 ${c.displayName}`,
+                            await updateDoc(doc(db, 'chats', recipientChatId), {
+                              'lastMessage.text': `👤 ${displayName}`,
                               'lastMessage.senderId': userId,
                               'lastMessage.timestamp': serverTimestamp(),
                             });
@@ -2872,7 +3113,7 @@ export default function ChatScreen() {
                         <AppIcon name="share-outline" size={18} color={COLORS.blue} fixedColor />
                       </TouchableOpacity>
                     ))}
-                  {phoneContacts.filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery)).length === 0 && contactQuery.trim() && (
+                  {phoneContacts.filter(c => c.userId && c.userId !== userId).filter(c => c.userId !== otherUserId).filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery)).length === 0 && contactQuery.trim() && (
                     <View style={{ alignItems: 'center', paddingTop: 40, gap: 10 }}>
                       <AppIcon name="search-outline" size={44} color={COLORS.sub} />
                       <AppText style={{ color: COLORS.sub, fontSize: 14 }}>No contacts match "{contactQuery}"</AppText>
@@ -3442,6 +3683,8 @@ const styles = StyleSheet.create({
 
   // ── Messages ──────────────────────────────────────────────────────────────
   messageList: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 8 },
+  loadEarlierBtn: { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 18, marginBottom: 8, borderRadius: RADIUS.full, ...GLASS.card },
+  loadEarlierText: { fontSize: 13, fontWeight: '600', color: COLORS.blue },
   datePillWrap: { alignItems: 'center', marginBottom: 10 },
   datePill: { ...GLASS.card, borderRadius: RADIUS.full, paddingHorizontal: 16, paddingVertical: 5 },
   datePillText: { fontSize: 11, color: COLORS.sub },
@@ -4353,5 +4596,110 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 8,
+  },
+
+  // ── Contact card bubble (WhatsApp-style) ──────────────────────
+  contactBubbleIn: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: RADIUS.lg,
+    borderBottomLeftRadius: 4,
+    minWidth: 220,
+    maxWidth: 280,
+    overflow: 'hidden',
+    ...SHADOW.card,
+  },
+  contactBubbleOut: {
+    backgroundColor: 'rgba(30,156,240,0.15)',
+    borderRadius: RADIUS.lg,
+    borderBottomRightRadius: 4,
+    minWidth: 220,
+    maxWidth: 280,
+    overflow: 'hidden',
+    ...SHADOW.card,
+  },
+  contactBubbleTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  contactBubbleAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactBubbleInitials: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  contactBubbleName: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  contactBubblePhone: {
+    fontSize: 12,
+    color: COLORS.sub,
+  },
+  contactBubbleDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.sub,
+    opacity: 0.25,
+    marginHorizontal: 14,
+  },
+  contactBubbleTime: {
+    fontSize: 11,
+    color: COLORS.sub,
+    textAlign: 'right',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+
+  // ── Received-contact action modal ────────────────────────────
+  contactActionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  contactActionSheet: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: RADIUS.xl,
+    overflow: 'hidden',
+    ...SHADOW.glow,
+  },
+  contactActionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  contactActionName: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  contactActionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.sub,
+    opacity: 0.2,
+  },
+  contactActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  contactActionButtonTitle: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
