@@ -493,7 +493,7 @@ export async function sendNumberChangeNotification(
     const chatsSnap = await getDocs(chatsQuery);
     console.log(`[sendNumberChangeNotification] Found ${chatsSnap.docs.length} chats`);
     
-    const messageText = `${displayName} changed their phone number from ${oldNumber} to ${newNumber}`;
+    const messageText = `NUMBER_CHANGE:${currentUserId}:${displayName}:${oldNumber}:${newNumber}`;
     
     // Send system message to each chat
     for (const chatDoc of chatsSnap.docs) {
@@ -511,7 +511,7 @@ export async function sendNumberChangeNotification(
       
       batch.set(msgRef, {
         messageId: msgRef.id,
-        senderId: currentUserId,
+        senderId: 'system',
         text: messageText,
         type: 'system',
         subtype: 'number-change',
@@ -519,7 +519,8 @@ export async function sendNumberChangeNotification(
         newNumber,
         timestamp: serverTimestamp(),
         expiresAt: expiresAt,
-        readBy: [currentUserId],
+        readBy: [],
+        deliveredTo: [],
       });
       
       // Update chat lastMessage + increment unread for other members
@@ -528,8 +529,8 @@ export async function sendNumberChangeNotification(
       );
       
       batch.update(doc(db, 'chats', chatId), {
-        'lastMessage.text': messageText,
-        'lastMessage.senderId': currentUserId,
+        'lastMessage.text': `${displayName} changed their number`,
+        'lastMessage.senderId': 'system',
         'lastMessage.timestamp': serverTimestamp(),
         ...unreadUpdates,
       });
@@ -791,3 +792,80 @@ export async function sendCallMessage(
   }
 }
 
+
+
+// ── Group system messages ─────────────────────────────────────────────────────
+
+/** Send a system message when a member is added to a group */
+export async function sendGroupAddMessage(
+  chatId: string,
+  adderId: string,
+  addedId: string,
+  adderName: string,
+  addedName: string,
+) {
+  const text = `GROUP_ADD:${adderId}:${addedId}:${adderName}:${addedName}`;
+  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+    senderId: 'system',
+    text,
+    type: 'system',
+    timestamp: serverTimestamp(),
+    readBy: [],
+    deliveredTo: [],
+  });
+}
+
+/** Send a system message when a member is removed from a group */
+export async function sendGroupRemoveMessage(
+  chatId: string,
+  removerId: string,
+  removedId: string,
+  removerName: string,
+  removedName: string,
+) {
+  const text = `GROUP_REMOVE:${removerId}:${removedId}:${removerName}:${removedName}`;
+  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+    senderId: 'system',
+    text,
+    type: 'system',
+    timestamp: serverTimestamp(),
+    readBy: [],
+    deliveredTo: [],
+  });
+}
+
+/** Send a system message when a member leaves a group */
+export async function sendGroupLeaveMessage(
+  chatId: string,
+  leaverId: string,
+  leaverName: string,
+) {
+  const text = `GROUP_LEAVE:${leaverId}:${leaverName}`;
+  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+    senderId: 'system',
+    text,
+    type: 'system',
+    timestamp: serverTimestamp(),
+    readBy: [],
+    deliveredTo: [],
+  });
+}
+
+/** Send a system message when a user changes their phone number (to all their chats) */
+export async function sendNumberChangeMessage(
+  chatId: string,
+  userId: string,
+  userName: string,
+  oldNumber: string,
+  newNumber: string,
+) {
+  const text = `NUMBER_CHANGE:${userId}:${userName}:${oldNumber}:${newNumber}`;
+  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+    senderId: 'system',
+    text,
+    type: 'system',
+    timestamp: serverTimestamp(),
+    readBy: [],
+    deliveredTo: [],
+  });
+}

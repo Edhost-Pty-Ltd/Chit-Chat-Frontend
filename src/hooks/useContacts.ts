@@ -1,9 +1,7 @@
 // ─── useContacts Hook ─────────────────────────────────────────────────────────
-// Fetches ALL phone contacts, normalizes numbers to E.164 format,
-// then cross-references with Firestore users collection to mark
-// which contacts are registered on ChitChat.
-// For the "Share Contact" feature, all phone contacts are returned so the
-// user can share any contact card, not just registered app users.
+// Fetches phone contacts, normalizes numbers to E.164 format,
+// then cross-references with Firestore users collection to return
+// ONLY contacts that have a registered ChitChat account.
 
 import { useState, useEffect } from 'react';
 import { getContactsAsync, requestPermissionsAsync, Fields } from 'expo-contacts/legacy';
@@ -108,29 +106,27 @@ export function useContacts() {
         }
       }
 
-      // ── 5. Build the full contact list (all phone contacts) ───────
+      // ── 5. Build the contact list (only registered ChitChat users) ───
       const appContacts: AppContact[] = [];
 
       for (const [phone, name] of phoneToName.entries()) {
         const appUser = appUserMap.get(phone);
+        if (!appUser) continue; // skip contacts without a ChitChat account
         appContacts.push({
-          userId:           appUser?.userId ?? '',
+          userId:           appUser.userId,
           phone,
           displayName:      name,
           isSaved:          true,
-          isOnApp:          !!appUser,
+          isOnApp:          true,
           photoUri:         phoneToPhoto.get(phone),
-          firebasePhotoURL: appUser?.firebasePhotoURL ?? undefined,
+          firebasePhotoURL: appUser.firebasePhotoURL ?? undefined,
         });
       }
 
-      // Sort: ChitChat users first, then all others — both groups sorted by name
-      appContacts.sort((a, b) => {
-        if (a.isOnApp && !b.isOnApp) return -1;
-        if (!a.isOnApp && b.isOnApp) return 1;
-        return a.displayName.localeCompare(b.displayName);
-      });
+      // Sort alphabetically by name
+      appContacts.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
+      console.log('[useContacts] Loaded', appContacts.length, 'ChitChat contacts');
       setContacts(appContacts);
     } catch (err: any) {
       console.error('[useContacts] Failed to load contacts:', err);
