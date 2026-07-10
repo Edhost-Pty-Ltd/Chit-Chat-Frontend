@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, getDoc } from 'firebase/firestore';
+import NetInfo from '@react-native-community/netinfo';
 import { db } from '../config/firebase';
 import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
@@ -24,6 +25,7 @@ import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
 import { useFocusEffect } from '@react-navigation/native';
 import { markMissedCallsAsViewed } from '../hooks/useMissedCalls';
+import { loadLocalUserProfiles, saveLocalUserProfiles } from '../hooks/useLocalUserProfiles';
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -392,6 +394,29 @@ export default function CallsScreen() {
   //  - Display the phone number as the name label
   const [userIdToFirebaseProfile, setUserIdToFirebaseProfile] = useState<Map<string, { displayName: string; phone: string }>>(new Map());
 
+  // Seed from the shared local profile cache (also populated by ChatsScreen) so
+  // unsaved contacts' names/phones show immediately offline / on a cold start,
+  // instead of blank until the Firestore lookup below completes.
+  useEffect(() => {
+    loadLocalUserProfiles().then((cached) => {
+      if (cached.size > 0) {
+        setUserIdToFirebaseProfile((prev) => new Map([...cached, ...prev]));
+      }
+    });
+  }, []);
+
+  // Persist saved contacts' userId → phone to the shared cache so their names
+  // still resolve offline via the device phone book (there is no Firestore
+  // cache on React Native, so an offline lookup by userId would otherwise fail).
+  useEffect(() => {
+    if (!contacts.length) return;
+    const profiles = new Map<string, { displayName: string; phone: string }>();
+    for (const c of contacts) {
+      if (c.userId && c.phone) profiles.set(c.userId, { displayName: c.displayName, phone: c.phone });
+    }
+    if (profiles.size > 0) saveLocalUserProfiles(profiles).catch(() => {});
+  }, [contacts]);
+
   // Fetch Firebase profiles for call participants who are NOT in saved contacts
   useEffect(() => {
     const fetchUnsavedUserProfiles = async () => {
@@ -434,6 +459,8 @@ export default function CallsScreen() {
           newProfiles.forEach((profile, uid) => merged.set(uid, profile));
           return merged;
         });
+        // Persist to the shared local cache for instant offline resolution.
+        saveLocalUserProfiles(newProfiles).catch(() => {});
       }
     };
 
@@ -464,15 +491,19 @@ export default function CallsScreen() {
       if (savedContact) {
         return savedContact.displayName;
       }
-      // Not a saved contact — show their phone number
+      // Otherwise resolve via the cached phone number.
       const firebaseProfile = userIdToFirebaseProfile.get(userId);
       if (firebaseProfile?.phone) {
+        // Prefer the device phone book name (works offline); resolveName
+        // returns the phone number itself when the contact isn't saved.
+        const deviceName = resolveName(firebaseProfile.phone);
+        if (deviceName && deviceName !== firebaseProfile.phone) return deviceName;
         return formatSAPhone(firebaseProfile.phone);
       }
       // Fallback to whatever was stored in the call record
       return fallbackName;
     },
-    [contacts, userIdToFirebaseProfile]
+    [contacts, userIdToFirebaseProfile, resolveName]
   );
 
   /** Resolve INITIALS for the avatar:
@@ -487,8 +518,13 @@ export default function CallsScreen() {
       if (savedContact) {
         return getInitials(savedContact.displayName);
       }
-      // Not a saved contact — use their Firebase signup username for initials
+      // Prefer the device phone book name (offline-capable) for initials.
       const firebaseProfile = userIdToFirebaseProfile.get(userId);
+      if (firebaseProfile?.phone) {
+        const deviceName = resolveName(firebaseProfile.phone);
+        if (deviceName && deviceName !== firebaseProfile.phone) return getInitials(deviceName);
+      }
+      // Otherwise fall back to their Firebase signup username.
       if (firebaseProfile?.displayName) {
         return getInitials(firebaseProfile.displayName);
       }
@@ -500,7 +536,7 @@ export default function CallsScreen() {
       // Absolute last resort
       return getInitials(userId || 'U');
     },
-    [contacts, userIdToFirebaseProfile]
+    [contacts, userIdToFirebaseProfile, resolveName]
   );
   
   const [tab, setTab] = useState<CallTab>('All');
@@ -545,6 +581,16 @@ export default function CallsScreen() {
     callType: 'audio' | 'video',
   ) => {
     if (!user) { Alert.alert('Error', 'You must be logged in to make calls'); return; }
+
+    // Calls need a live connection (signaling + LiveKit media). Fail fast with
+    // a clear message instead of hanging on the block/privacy/token chain
+    // below, which would otherwise leave the "Starting call..." spinner stuck
+    // for a long time before eventually erroring out.
+    const net = await NetInfo.fetch();
+    if (net.isConnected === false) {
+      Alert.alert('No connection', "You're offline. Calls require an internet connection.");
+      return;
+    }
 
     // Block check (either direction blocks the call)
     try {

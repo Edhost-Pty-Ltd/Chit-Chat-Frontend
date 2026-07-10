@@ -18,6 +18,8 @@ import { fetchUserPrivacySettings, isVisibleTo } from '../hooks/usePrivacySettin
 import { useStatus } from '../hooks/useStatus';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
+import { loadLocalUserProfiles, saveLocalUserProfiles } from '../hooks/useLocalUserProfiles';
+import { usePhoneBook } from '../hooks/usePhoneBook';
 import { db } from '../config/firebase';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
@@ -600,6 +602,10 @@ export default function ChatsScreen() {
   const { chats, loading: chatsLoading } = useChats(userId);
   const { contacts, loading: contactsLoading, reload: reloadContacts, hasPermission, error: contactsError } = useContacts();
   const { contactStatuses } = useStatus(userId);
+  // Device phone book (phone → saved contact name). expo-contacts reads local
+  // device data, so this works fully offline — unlike useContacts, which needs
+  // a Firestore cross-reference. It's the reliable source for contact names.
+  const { contactsMap: devicePhoneBook } = usePhoneBook();
 
   // Create a map of userId -> hasStatus for quick lookup
   const userStatusMap = useMemo(() => {
@@ -627,15 +633,55 @@ export default function ChatsScreen() {
   // Cache of privacy settings: userId → profilePhoto visibility ('Everyone'|'Contacts'|'Nobody')
   const [privacyPhotoMap, setPrivacyPhotoMap] = useState<Map<string, string>>(new Map());
 
+  // Seed memberInfo from the local cache immediately so chat names for unsaved
+  // contacts (resolved via their phone number) show up right away offline /
+  // on a cold start, instead of "Unknown" until the Firestore lookup completes.
+  useEffect(() => {
+    loadLocalUserProfiles().then((cached) => {
+      if (cached.size > 0) {
+        setMemberInfo((prev) => new Map([...cached, ...prev]));
+      }
+    });
+  }, []);
+
+  // Persist saved contacts' userId → phone so their names still resolve offline
+  // via the device phone book. Without this, only unsaved members were cached,
+  // and offline (no Firestore cache on React Native) saved contacts fell back
+  // to showing their phone number.
+  useEffect(() => {
+    if (!contacts.length) return;
+    const profiles = new Map<string, { displayName: string; phone: string }>();
+    for (const c of contacts) {
+      if (c.userId && c.phone) profiles.set(c.userId, { displayName: c.displayName, phone: c.phone });
+    }
+    if (profiles.size > 0) saveLocalUserProfiles(profiles).catch(() => {});
+  }, [contacts]);
+
   // Animated width: 0 → 1 (multiplied by max width in style)
   const searchAnim = useRef(new Animated.Value(0)).current;
   const searchRef  = useRef<TextInput>(null);
 
-  // Build contacts map: phone → displayName (for resolveDisplayName)
+  // Build contacts map: phone → displayName (for resolveDisplayName).
+  // Start from the device phone book (offline-capable) so saved-contact names
+  // resolve even when useContacts' Firestore cross-reference is unavailable,
+  // then overlay any names from useContacts.
   const contactsMap = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, string>(devicePhoneBook);
     for (const c of contacts) {
       map.set(c.phone, c.displayName);
+    }
+    return map;
+  }, [contacts, devicePhoneBook]);
+
+  // Build userId → saved contact displayName directly. useContacts() already
+  // joined the device phone book against registered accounts by phone number,
+  // so this is the authoritative saved-contact name for a chat member — no
+  // need to re-match phone number strings (which can silently drift in format
+  // between what's stored in Firestore and what's in the device contacts).
+  const savedContactNamesByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      if (c.userId) map.set(c.userId, c.displayName);
     }
     return map;
   }, [contacts]);
@@ -701,6 +747,15 @@ export default function ChatsScreen() {
 
       setMemberInfo(newInfo);
       setPrivacyPhotoMap(newPrivacy);
+
+      // Persist the newly-resolved profiles so they're available immediately
+      // next time, even offline.
+      const toCache = new Map<string, { displayName: string; phone: string; photoURL?: string }>();
+      for (const uid of unknownIds) {
+        const info = newInfo.get(uid);
+        if (info) toCache.set(uid, { ...info, photoURL: info.photoURL ?? undefined });
+      }
+      if (toCache.size > 0) saveLocalUserProfiles(toCache).catch(() => {});
     })();
   }, [chats, userId, contacts]);
 
@@ -732,7 +787,7 @@ export default function ChatsScreen() {
   // Resolve display name for a chat
   const getDisplayName = (chat: ChatPreview): string => {
     if (!userId) return 'Unknown';
-    return resolveDisplayName(chat, userId, contactsMap, firestoreUsersMap);
+    return resolveDisplayName(chat, userId, contactsMap, firestoreUsersMap, savedContactNamesByUserId);
   };
 
   /** Return the photo URI for another user, hiding it if their privacy setting blocks the viewer. */
@@ -807,7 +862,7 @@ export default function ChatsScreen() {
     const otherUser = otherMemberId ? firestoreUsersMap.get(otherMemberId) : null;
     const contactPhotoUri = otherUser?.contactPhotoUri;
     const firebasePhotoURL = getVisiblePhoto(otherMemberId, otherUser?.photoURL);
-    const isSavedContact = !!(contactPhotoUri || (otherUser && contactsMap.has(otherUser.phone)));
+    const isSavedContact = !!(contactPhotoUri || (otherMemberId && savedContactNamesByUserId.has(otherMemberId)));
     
     // Check if user has active status
     const hasStatus = otherMemberId ? userStatusMap.get(otherMemberId) || false : false;

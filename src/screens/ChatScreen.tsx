@@ -751,10 +751,11 @@ export default function ChatScreen() {
         
         console.log('[ChatScreen] Blocked status - by me:', iBlockedThem, ', by them:', theyBlockedMe);
       } catch (error) {
-        console.error('[ChatScreen] Error checking blocked status:', error);
-        setIsBlocked(false);
-        setBlockedByMe(false);
-        setBlockedByThem(false);
+        // Expected while offline (Firestore throws when a doc isn't cached
+        // and there's no connection) — warn instead of error so it doesn't
+        // trigger the intrusive red error overlay in dev, and keep whatever
+        // blocked state was last known rather than resetting it.
+        console.warn('[ChatScreen] Error checking blocked status (likely offline):', error);
       } finally {
         setCheckingBlockedStatus(false);
       }
@@ -782,7 +783,8 @@ export default function ChatScreen() {
             setBlockedByThem(theyBlockedMe);
             setIsBlocked(iBlockedThem || theyBlockedMe);
           } catch (error) {
-            console.error('[ChatScreen] Error re-checking blocked status:', error);
+            // Expected while offline — see note in the mount-time check above.
+            console.warn('[ChatScreen] Error re-checking blocked status (likely offline):', error);
           }
         })();
       }
@@ -4575,6 +4577,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 20 : 20,
     paddingHorizontal: 20, paddingTop: 12,
     maxHeight: '85%',
+    minHeight: 320,
     ...SHADOW.glow,
   },
   contactSearchWrap: {
@@ -4587,7 +4590,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   contactSearchInput: { flex: 1, fontSize: 14, padding: 0 },
-  contactPickerList: { flex: 1 },
+  contactPickerList: { flexGrow: 1, minHeight: 200 },
   contactPickerContent: { paddingBottom: 20 },
   contactPickerRow: {
     flexDirection: 'row',

@@ -43,6 +43,7 @@ export function resolveDisplayName(
   currentUserId: string,
   contactsMap: Map<string, string>,
   firestoreUsers: Map<string, FirestoreUserInfo>,
+  savedContactNamesByUserId?: Map<string, string>,
 ): string {
   // 1. Group chats use groupName or fallback to "Group"
   if (chat.type === 'group') {
@@ -53,10 +54,19 @@ export function resolveDisplayName(
   const otherMemberId = chat.members.find((id) => id !== currentUserId);
   if (!otherMemberId) return 'Unknown';
 
+  // Priority 2 (preferred): the other member's saved contact name, looked up
+  // directly by userId. This is the same join useContacts() already did when
+  // cross-referencing the device phone book against registered accounts, so
+  // it's guaranteed correct — unlike re-matching phone number strings below,
+  // which silently breaks if the two sources normalize a number differently.
+  const savedName = savedContactNamesByUserId?.get(otherMemberId);
+  if (savedName) return savedName;
+
   const otherUser = firestoreUsers.get(otherMemberId);
   if (!otherUser) return 'Unknown';
 
-  // Priority 2: Phone book contact name (only if saved in this device's contacts)
+  // Fallback: phone book contact name matched by phone number string (only
+  // reached if the userId-keyed lookup above found nothing).
   const contactName = contactsMap.get(otherUser.phone);
   if (contactName) return contactName;
 

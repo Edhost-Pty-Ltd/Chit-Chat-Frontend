@@ -108,6 +108,16 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
     const unsub = onSnapshot(
       q,
       (snap) => {
+        // Ignore an empty snapshot that only came from the (cold) local
+        // Firestore cache. When a chat is opened for the first time on this
+        // device while offline / on a slow network, Firestore immediately
+        // fires an empty fromCache snapshot before it can reach the server —
+        // treating that as "no messages" incorrectly showed "Say hello!"
+        // until connectivity returned and the real snapshot arrived.
+        if (snap.docs.length === 0 && snap.metadata.fromCache) {
+          return;
+        }
+
         // A full page implies there may be older messages on the server.
         setHasMore(snap.docs.length >= pageSize);
         const now = new Date();
