@@ -151,6 +151,7 @@ export function useContacts() {
       // Sort alphabetically by name
       appContacts.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
+      console.log('[useContacts] Loaded', appContacts.length, 'ChitChat contacts');
       setContacts(appContacts);
       AsyncStorage.setItem(CACHE_KEY, JSON.stringify(appContacts)).catch(() => {});
     } catch (err: any) {

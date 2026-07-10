@@ -60,7 +60,7 @@ import { clearLocalMessages } from '../hooks/useLocalMessages';
 import { useContacts, AppContact } from '../hooks/useContacts';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { uploadVoiceNote, UploadProgress } from '../utils/voiceNoteStorage';
-import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead, getOrCreateDirectChat } from '../hooks/useChatActions';
+import { sendVoiceMessage, sendImageMessage, sendFileMessage, sendCurrentLocationMessage, sendLiveLocationMessage, stopLiveLocationSharing, markChatAsRead, getOrCreateDirectChat, sendGroupAddMessage, sendGroupRemoveMessage } from '../hooks/useChatActions';
 import { normalizePhone } from '../utils/phoneUtils';
 import { parseSystemMessage } from '../utils/systemMessageParser';
 import { getDateLabel, groupMessagesByDate } from '../utils/dateUtils';
@@ -101,6 +101,7 @@ interface PastMember {
   displayName: string;
   photoURL: string | null;
   leftAt: Date;
+  reason?: string; // "left" | "Removed by [name]"
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -181,7 +182,8 @@ type TickStatus = 'sent' | 'delivered' | 'read';
 function getTickStatus(
   message: FireMessage,
   currentUserId: string | null,
-  isGroup: boolean
+  isGroup: boolean,
+  groupMemberCount?: number
 ): TickStatus {
   // Only show ticks for outgoing messages
   if (message.senderId !== currentUserId) return 'read';
@@ -200,9 +202,10 @@ function getTickStatus(
     return 'sent';
   }
 
-  // For group chats - any member read = blue ticks
-  if (readCount > 0) return 'read';
-  // All members delivered = grey double tick
+  // For group chats - blue ticks only when ALL other members have read
+  const otherMemberCount = (groupMemberCount || 1) - 1; // exclude self
+  if (otherMemberCount > 0 && readCount >= otherMemberCount) return 'read';
+  // Double grey tick when at least one member delivered
   if (deliveredCount > 0) return 'delivered';
   // Otherwise single tick
   return 'sent';
@@ -221,6 +224,20 @@ function getTickIcon(status: TickStatus): {
     case 'read':
       return { icon: 'checkmark-done', color: COLORS.blue };
   }
+}
+
+/** Get a consistent color for a group chat sender name (WhatsApp-style) */
+const GROUP_NAME_COLORS = [
+  '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#0097a7',
+  '#00796b', '#689f38', '#e65100', '#f57c00', '#5d4037',
+  '#455a64', '#1565c0', '#ad1457', '#6a1b9a', '#283593',
+];
+function getSenderNameColor(senderId: string): string {
+  let hash = 0;
+  for (let i = 0; i < senderId.length; i++) {
+    hash = senderId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return GROUP_NAME_COLORS[Math.abs(hash) % GROUP_NAME_COLORS.length];
 }
 
 /** Load muted state from AsyncStorage */
@@ -399,6 +416,16 @@ export default function ChatScreen() {
 
   // ── Contacts (for share contact feature) ──────────────────────────────────
   const { contacts: phoneContacts, loading: contactsLoading, hasPermission: contactsPermission } = useContacts();
+  
+  // Debug: log contacts whenever they change
+  useEffect(() => {
+    console.log('[ChatScreen] phoneContacts updated:', {
+      count: phoneContacts?.length ?? 0,
+      loading: contactsLoading,
+      hasPermission: contactsPermission,
+      sample: phoneContacts?.slice(0, 2).map(c => ({ name: c.displayName, userId: c.userId })) ?? []
+    });
+  }, [phoneContacts, contactsLoading, contactsPermission]);
 
   // ── Firebase signup name for unsaved contacts (used for avatar initials on calls) ──
   const [otherUserSignupName, setOtherUserSignupName] = useState<string | null>(null);
@@ -453,15 +480,24 @@ export default function ChatScreen() {
   // ── Group members state ─────────────────────────────────────────
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [groupCreatedBy, setGroupCreatedBy] = useState<string | null>(null);
+  const [groupPhotoURL, setGroupPhotoURL] = useState<string | null>(null);
+  const [groupBio, setGroupBio] = useState<string>('');
+  const [editingBio, setEditingBio] = useState(false);
+  const [bioInput, setBioInput] = useState<string>('');
 
   // Resolve typing user display names (depends on groupMembers)
   const typingNames = useMemo(() => {
     return typingUsers.map(({ userId: uid }) => {
       if (!isGroup) return displayName;
       const member = groupMembers.find((m) => m.userId === uid);
-      return member?.displayName ?? 'Someone';
+      if (member?.displayName) return member.displayName;
+      // Fallback to contacts list
+      const contact = phoneContacts.find((c) => c.userId === uid);
+      if (contact?.displayName) return contact.displayName;
+      return contact?.phone ?? uid;
     });
-  }, [typingUsers, isGroup, displayName, groupMembers]);
+  }, [typingUsers, isGroup, displayName, groupMembers, phoneContacts]);
 
   // ── Past members state ──────────────────────────────────────────
   const [pastMembers, setPastMembers] = useState<PastMember[]>([]);
@@ -519,12 +555,44 @@ export default function ChatScreen() {
     userId: string | null;
   } | null>(null);
 
+  // ── Add member picker state (group info) ────────────────────────
+  const [addMemberPickerOpen, setAddMemberPickerOpen] = useState(false);
+  const [addMemberQuery, setAddMemberQuery] = useState('');
+
+  // ── Invite link picker state (send link within app) ─────────────
+  const [invitePickerOpen, setInvitePickerOpen] = useState(false);
+  const [invitePickerQuery, setInvitePickerQuery] = useState('');
+
+  // ── Group invite preview modal state ────────────────────────────
+  const [invitePreview, setInvitePreview] = useState<{
+    inviteCode: string;
+    groupName: string;
+    groupId?: string;
+  } | null>(null);
+  const [invitePreviewData, setInvitePreviewData] = useState<{
+    groupPhotoURL: string | null;
+    groupName: string;
+    createdBy: string;
+    createdAt: string;
+    memberCount: number;
+    isAlreadyMember: boolean;
+  } | null>(null);
+  const [loadingInvitePreview, setLoadingInvitePreview] = useState(false);
+
   // Debug log for contacts
   useEffect(() => {
     if (contactPickerOpen) {
       console.log('[ChatScreen] Contact picker opened. Contacts:', phoneContacts?.length ?? 0, 'Loading:', contactsLoading, 'Permission:', contactsPermission);
+      if (phoneContacts && phoneContacts.length > 0) {
+        const filtered = phoneContacts
+          .filter(c => c.userId && c.userId !== userId)
+          .filter(c => c.userId !== otherUserId);
+        console.log('[ChatScreen] After filtering (excluding self & chat partner):', filtered.length);
+        console.log('[ChatScreen] userId:', userId, 'otherUserId:', otherUserId);
+        console.log('[ChatScreen] First 3 contacts:', filtered.slice(0, 3).map(c => ({ name: c.displayName, userId: c.userId })));
+      }
     }
-  }, [contactPickerOpen, phoneContacts, contactsLoading, contactsPermission]);
+  }, [contactPickerOpen, phoneContacts, contactsLoading, contactsPermission, userId, otherUserId]);
 
   // ── Camera ref ──────────────────────────────────────────────────
   const cameraRef = useRef<any>(null);
@@ -577,6 +645,9 @@ export default function ChatScreen() {
 
         const chatData = chatSnap.data();
         const memberIds = chatData.members as string[] || [];
+        setGroupCreatedBy(chatData.createdBy ?? null);
+        setGroupPhotoURL(chatData.groupPhotoURL ?? null);
+        setGroupBio(chatData.groupBio ?? '');
         
         console.log('[ChatScreen] Found member IDs:', memberIds);
 
@@ -659,6 +730,7 @@ export default function ChatScreen() {
         const pastMemberData = chatData.pastMembers as Array<{
           userId: string;
           leftAt: any; // Firestore Timestamp
+          reason?: string;
         }> | undefined;
         
         console.log('[ChatScreen] Found past member data:', pastMemberData);
@@ -687,6 +759,7 @@ export default function ChatScreen() {
                 displayName: resolveName(userData.phone, 'Unknown'),
                 photoURL: userData.photoURL || null,
                 leftAt: leftAtDate,
+                reason: pastMemberEntry.reason ?? 'Left',
               } as PastMember;
             }
             
@@ -696,6 +769,7 @@ export default function ChatScreen() {
               displayName: 'Unknown User',
               photoURL: null,
               leftAt: leftAtDate,
+              reason: pastMemberEntry.reason ?? 'Left',
             } as PastMember;
           } catch (error) {
             console.error('[ChatScreen] Error fetching past member:', pastMemberEntry.userId, error);
@@ -1849,6 +1923,7 @@ export default function ChatScreen() {
       const pastMembersEntry = {
         userId,
         leftAt: new Date(),
+        reason: 'Left',
       };
       
       const currentPastMembers = chatData.pastMembers || [];
@@ -1861,20 +1936,22 @@ export default function ChatScreen() {
       
       // 2. Add system message to the chat
       const msgRef = doc(collection(db, 'chats', chatId, 'messages'));
+      const leaveText = `GROUP_LEAVE:${userId}:${userDisplayName}`;
       batch.set(msgRef, {
         messageId: msgRef.id,
-        senderId: userId,
-        text: `${userDisplayName} left the group`,
+        senderId: 'system',
+        text: leaveText,
         type: 'system',
         subtype: 'member-left',
         timestamp: serverTimestamp(),
-        readBy: [userId],
+        readBy: [],
+        deliveredTo: [],
       });
       
       // 3. Update lastMessage
       batch.update(chatRef, {
         'lastMessage.text': `${userDisplayName} left the group`,
-        'lastMessage.senderId': userId,
+        'lastMessage.senderId': 'system',
         'lastMessage.timestamp': serverTimestamp(),
       });
       
@@ -1902,6 +1979,274 @@ export default function ChatScreen() {
   // ── Check if recording is active ────────────────────────────────
   const isRecording = recorder.state.status === 'recording';
 
+  // ── Add member to group ─────────────────────────────────────────
+  const handleAddMember = useCallback(async (contact: { userId: string; displayName: string }) => {
+    setAddMemberPickerOpen(false);
+    if (!userId || !chatId || !isGroup) return;
+    try {
+      const chatRef = doc(db, 'chats', chatId);
+      const chatSnap = await getDoc(chatRef);
+      if (!chatSnap.exists()) return;
+      const currentMembers = chatSnap.data().members as string[] || [];
+      if (currentMembers.includes(contact.userId)) {
+        Alert.alert('Already a member', `${contact.displayName} is already in this group.`);
+        return;
+      }
+      // Update members array
+      await updateDoc(chatRef, { members: [...currentMembers, contact.userId] });
+      // Send system message
+      const adderName = user?.displayName || 'Someone';
+      await sendGroupAddMessage(chatId, userId, contact.userId, adderName, contact.displayName);
+      
+      // Update lastMessage so the group appears immediately in the added user's chat list
+      const systemMessageText = `${contact.displayName} was added`;
+      await updateDoc(chatRef, {
+        'lastMessage.text': systemMessageText,
+        'lastMessage.senderId': 'system',
+        'lastMessage.timestamp': serverTimestamp(),
+        'lastMessage.readBy': [],
+        'lastMessage.deliveredTo': [],
+      });
+      
+      // Refresh group members list
+      setGroupMembers(prev => [...prev, {
+        userId: contact.userId,
+        displayName: contact.displayName,
+        photoURL: null,
+        status: 'offline',
+      }]);
+      Alert.alert('Added', `${contact.displayName} has been added to the group.`);
+    } catch (err) {
+      console.error('[ChatScreen] Failed to add member:', err);
+      Alert.alert('Error', 'Failed to add member.');
+    }
+  }, [userId, chatId, isGroup, user]);
+
+  // ── Remove member from group (creator only) ─────────────────────
+  const handleRemoveMember = useCallback(async (member: GroupMember) => {
+    if (!userId || !chatId || !isGroup) return;
+    Alert.alert(
+      'Remove Member',
+      `Remove ${member.displayName} from this group?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const chatRef = doc(db, 'chats', chatId);
+              const chatSnap = await getDoc(chatRef);
+              if (!chatSnap.exists()) return;
+              const chatData = chatSnap.data();
+              const currentMembers = chatData.members as string[] || [];
+              const updatedMembers = currentMembers.filter(id => id !== member.userId);
+              
+              // Add to pastMembers
+              const currentPastMembers = chatData.pastMembers || [];
+              const removerName = user?.displayName || 'Admin';
+              const updatedPastMembers = [...currentPastMembers, { userId: member.userId, leftAt: new Date(), reason: `Removed by ${removerName}` }];
+              
+              await updateDoc(chatRef, { members: updatedMembers, pastMembers: updatedPastMembers });
+
+              await sendGroupRemoveMessage(chatId, userId, member.userId, removerName, member.displayName);
+
+              setGroupMembers(prev => prev.filter(m => m.userId !== member.userId));
+              setPastMembers(prev => [...prev, { userId: member.userId, displayName: member.displayName, photoURL: member.photoURL, leftAt: new Date(), reason: `Removed by ${removerName}` }]);
+            } catch (err) {
+              console.error('[ChatScreen] Failed to remove member:', err);
+              Alert.alert('Error', 'Failed to remove member.');
+            }
+          },
+        },
+      ]
+    );
+  }, [userId, chatId, isGroup, user]);
+
+  // ── Change group profile photo ──────────────────────────────────
+  const handleChangeGroupPhoto = useCallback(async () => {
+    if (!chatId || !isGroup) return;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      
+      const uri = result.assets[0].uri;
+      // Upload to Firebase Storage
+      const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
+      const storage = getStorage();
+      const photoRef = ref(storage, `group-photos/${chatId}.jpg`);
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      await uploadBytes(photoRef, blob);
+      const downloadURL = await getDownloadURL(photoRef);
+      
+      // Update Firestore
+      await updateDoc(doc(db, 'chats', chatId), { groupPhotoURL: downloadURL });
+      setGroupPhotoURL(downloadURL);
+    } catch (err) {
+      console.error('[ChatScreen] Failed to update group photo:', err);
+      Alert.alert('Error', 'Failed to update group photo.');
+    }
+  }, [chatId, isGroup]);
+
+  // ── Save group bio ──────────────────────────────────────────────
+  const handleSaveGroupBio = useCallback(async () => {
+    if (!chatId || !isGroup) return;
+    try {
+      await updateDoc(doc(db, 'chats', chatId), { groupBio: bioInput.trim() });
+      setGroupBio(bioInput.trim());
+      setEditingBio(false);
+    } catch (err) {
+      console.error('[ChatScreen] Failed to save group bio:', err);
+      Alert.alert('Error', 'Failed to save group description.');
+    }
+  }, [chatId, isGroup, bioInput]);
+
+  // ── Share group invite link (within ChitChat) ────────────────────
+  const handleOpenInvitePreview = useCallback(async (inviteCode: string, groupName: string) => {
+    setInvitePreview({ inviteCode, groupName });
+    setLoadingInvitePreview(true);
+    setInvitePreviewData(null);
+    try {
+      const q2 = query(collection(db, 'chats'), where('inviteCode', '==', inviteCode));
+      const snap = await getDocs(q2);
+      if (snap.empty) {
+        setInvitePreviewData(null);
+        setLoadingInvitePreview(false);
+        Alert.alert('Error', 'This invite link is invalid or expired.');
+        setInvitePreview(null);
+        return;
+      }
+      const chatDoc = snap.docs[0];
+      const chatData = chatDoc.data();
+      const members = chatData.members as string[] || [];
+      const createdAt = chatData.createdAt?.toDate?.() || new Date();
+      const creatorId = chatData.createdBy || '';
+      
+      // Resolve creator name
+      let creatorName = creatorId;
+      if (creatorId) {
+        const creatorSnap = await getDoc(doc(db, 'users', creatorId));
+        if (creatorSnap.exists()) {
+          const creatorData = creatorSnap.data();
+          creatorName = creatorData.phone || creatorId;
+        }
+      }
+
+      setInvitePreviewData({
+        groupPhotoURL: chatData.groupPhotoURL || null,
+        groupName: chatData.groupName || groupName,
+        createdBy: creatorName,
+        createdAt: createdAt.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' }),
+        memberCount: members.length,
+        isAlreadyMember: members.includes(userId!),
+      });
+    } catch (err) {
+      console.error('[ChatScreen] Failed to load invite preview:', err);
+      Alert.alert('Error', 'Failed to load group info.');
+      setInvitePreview(null);
+    } finally {
+      setLoadingInvitePreview(false);
+    }
+  }, [userId]);
+
+  const handleJoinFromPreview = useCallback(async () => {
+    if (!invitePreview || !userId) return;
+    try {
+      const q2 = query(collection(db, 'chats'), where('inviteCode', '==', invitePreview.inviteCode));
+      const snap = await getDocs(q2);
+      if (snap.empty) {
+        Alert.alert('Error', 'This invite link is invalid or expired.');
+        setInvitePreview(null);
+        return;
+      }
+      const chatDoc = snap.docs[0];
+      const chatData = chatDoc.data();
+      const members = chatData.members as string[];
+      if (members.includes(userId)) {
+        // Already a member — navigate to the group
+        setInvitePreview(null);
+        navigation.navigate('Chat', {
+          chatId: chatDoc.id,
+          displayName: chatData.groupName || invitePreview.groupName,
+          isGroup: true,
+          otherUserId: undefined,
+          otherUserPhoto: chatData.groupPhotoURL || null,
+        });
+        return;
+      }
+      // Add user to members
+      await updateDoc(doc(db, 'chats', chatDoc.id), {
+        members: [...members, userId],
+      });
+      const { sendGroupAddMessage } = await import('../hooks/useChatActions');
+      const userName = user?.displayName || 'Someone';
+      await sendGroupAddMessage(chatDoc.id, userId, userId, userName, userName);
+      await updateDoc(doc(db, 'chats', chatDoc.id), {
+        'lastMessage.text': `${userName} joined`,
+        'lastMessage.senderId': 'system',
+        'lastMessage.timestamp': serverTimestamp(),
+      });
+      setInvitePreview(null);
+      Alert.alert('Joined!', `You joined "${chatData.groupName || invitePreview.groupName}".`);
+    } catch (err) {
+      console.error('[ChatScreen] Failed to join group:', err);
+      Alert.alert('Error', 'Failed to join group.');
+    }
+  }, [invitePreview, userId, user, navigation]);
+  const handleShareInviteLink = useCallback(async () => {
+    if (!chatId) return;
+    setInvitePickerQuery('');
+    setInvitePickerOpen(true);
+  }, [chatId]);
+
+  /** Actually send the invite link to a chosen contact */
+  const handleSendInviteTo = useCallback(async (contact: { userId: string; displayName: string }) => {
+    setInvitePickerOpen(false);
+    if (!userId || !chatId) return;
+    try {
+      const chatRef = doc(db, 'chats', chatId);
+      const chatSnap = await getDoc(chatRef);
+      let inviteCode = chatSnap.data()?.inviteCode;
+      if (!inviteCode) {
+        inviteCode = chatId.slice(0, 8) + Math.random().toString(36).slice(2, 8);
+        await updateDoc(chatRef, { inviteCode });
+      }
+      const link = `chitchat.app/join/${inviteCode}`;
+
+      // Find or create the 1-on-1 chat with the picked contact
+      const recipientChatId = await getOrCreateDirectChat(userId, contact.userId);
+
+      // Send the invite link as a special 'group-invite' message type
+      await addDoc(collection(db, 'chats', recipientChatId, 'messages'), {
+        senderId: userId,
+        text: link,
+        type: 'group-invite',
+        groupName: displayName,
+        groupId: chatId,
+        inviteCode,
+        timestamp: serverTimestamp(),
+        readBy: [userId],
+        deliveredTo: [],
+      });
+      await updateDoc(doc(db, 'chats', recipientChatId), {
+        'lastMessage.text': `📎 Group invite: ${displayName}`,
+        'lastMessage.senderId': userId,
+        'lastMessage.timestamp': serverTimestamp(),
+      });
+
+      Alert.alert('Sent', `Invite link sent to ${contact.displayName}.`);
+    } catch (err) {
+      console.error('[ChatScreen] Failed to send invite link:', err);
+      Alert.alert('Error', 'Failed to send invite link.');
+    }
+  }, [userId, chatId, displayName]);
+
   // ── Render a single message bubble or date separator ────────────
   const renderItem = ({ item }: { item: MessageListItem }) => {
     // Handle date separators
@@ -1922,7 +2267,12 @@ export default function ChatScreen() {
   // ── Render a single message bubble ──────────────────────────────
   const renderMessage = ({ item }: { item: FireMessage }) => {
     // ── System messages (block/unblock notifications) ───────────────
-    if (item.type === 'system') {
+    // Also detect system messages by text pattern (in case type field is missing from cache)
+    const isSystemMsg = item.type === 'system' || 
+      item.senderId === 'system' ||
+      (item.text && /^(GROUP_ADD|GROUP_REMOVE|GROUP_LEAVE|BLOCK|UNBLOCK|NUMBER_CHANGE):/.test(item.text));
+    
+    if (isSystemMsg) {
       const displayText = parseSystemMessage(item.text || '', userId);
       return (
         <View style={styles.systemMessageContainer}>
@@ -1944,7 +2294,7 @@ export default function ChatScreen() {
     
     
     // Get tick status for outgoing messages
-    const tickStatus = getTickStatus(item, userId, isGroup);
+    const tickStatus = getTickStatus(item, userId, isGroup, isGroup ? groupMembers.length : undefined);
     const tickIcon = getTickIcon(tickStatus);
 
     // Debug logging for outgoing text messages
@@ -2034,6 +2384,27 @@ export default function ChatScreen() {
               onStopSharing={() => handleStopLiveLocation(item.messageId)}
               timestamp={item.timestamp}
             />
+          ) : item.type === 'group-invite' && item.groupName ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                const inviteCode = item.inviteCode || item.text?.split('/').pop();
+                if (inviteCode) handleOpenInvitePreview(inviteCode, item.groupName!);
+              }}
+              style={styles.groupInviteBubbleIn}
+            >
+              <View style={styles.groupInviteIconWrap}>
+                <AppIcon name="people" size={32} color={COLORS.blue} fixedColor />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText fixedColor style={styles.groupInviteTitle}>Group Invite</AppText>
+                <AppText fixedColor style={styles.groupInviteName}>{item.groupName}</AppText>
+                <View style={styles.groupInviteButtonWrap}>
+                  <AppText fixedColor style={styles.groupInviteButtonText}>TAP TO VIEW</AppText>
+                </View>
+              </View>
+              <AppText fixedColor style={styles.groupInviteTime}>{formatTime(item.timestamp)}</AppText>
+            </TouchableOpacity>
           ) : item.type === 'contact' && item.contactName ? (
             <TouchableOpacity
               activeOpacity={0.85}
@@ -2060,6 +2431,11 @@ export default function ChatScreen() {
             </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
+              {isGroup && (
+                <AppText fixedColor style={[styles.groupSenderName, { color: getSenderNameColor(item.senderId) }]}>
+                  {resolveSenderName(item.senderId)}
+                </AppText>
+              )}
               <TouchableOpacity 
                 activeOpacity={0.9}
                 onPress={() => {
@@ -2079,6 +2455,11 @@ export default function ChatScreen() {
             </LinearGradient>
           ) : (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+              {isGroup && (
+                <AppText fixedColor style={[styles.groupSenderName, { color: getSenderNameColor(item.senderId) }]}>
+                  {resolveSenderName(item.senderId)}
+                </AppText>
+              )}
               {item.replyTo && (
                 <TouchableOpacity 
                   style={styles.replyBubble}
@@ -2202,6 +2583,27 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
               tickIcon={tickIcon}
             />
+          ) : item.type === 'group-invite' && item.groupName ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                const inviteCode = item.inviteCode || item.text?.split('/').pop();
+                if (inviteCode) handleOpenInvitePreview(inviteCode, item.groupName!);
+              }}
+              style={styles.groupInviteBubbleOut}
+            >
+              <View style={styles.groupInviteIconWrap}>
+                <AppIcon name="people" size={32} color="#fff" fixedColor />
+              </View>
+              <View style={{ flex: 1 }}>
+                <AppText fixedColor style={[styles.groupInviteTitle, { color: 'rgba(255,255,255,0.8)' }]}>Group Invite</AppText>
+                <AppText fixedColor style={[styles.groupInviteName, { color: '#fff' }]}>{item.groupName}</AppText>
+              </View>
+              <View style={styles.groupInviteTimeWithTick}>
+                <AppText fixedColor style={[styles.groupInviteTime, { color: 'rgba(255,255,255,0.7)' }]}>{formatTime(item.timestamp)}</AppText>
+                <AppIcon name={tickIcon.icon} size={13} color={tickIcon.color} fixedColor />
+              </View>
+            </TouchableOpacity>
           ) : item.type === 'contact' && item.contactName ? (
             <TouchableOpacity
               activeOpacity={0.85}
@@ -2674,7 +3076,7 @@ export default function ChatScreen() {
               <ScrollView horizontal={false} showsVerticalScrollIndicator={false}>
                 <View style={styles.emojiGrid}>
                   {EMOJI_LIST.map((e) => (
-                    <TouchableOpacity key={e} style={styles.emojiItem} onPress={() => handleSend(e)}>
+                    <TouchableOpacity key={e} style={styles.emojiItem} onPress={() => setInput(prev => prev + e)}>
                       <AppText fixedColor style={styles.emojiChar}>{e}</AppText>
                     </TouchableOpacity>
                   ))}
@@ -2904,6 +3306,165 @@ export default function ChatScreen() {
         </View>
       </Modal>
 
+      {/* ── Add Member Picker Modal (group info) ── */}
+      <Modal visible={addMemberPickerOpen} transparent animationType="slide" onRequestClose={() => setAddMemberPickerOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setAddMemberPickerOpen(false)} />
+          <View style={[styles.contactPickerSheet, { backgroundColor: FG.glassBg, minHeight: 320 }]}>
+            <AppBg />
+            <View style={styles.attachHandle} />
+            <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Add Member</AppText>
+
+            <View style={[styles.contactSearchWrap, bevel]}>
+              <AppIcon name="search-outline" size={16} color={COLORS.sub} />
+              <TextInput
+                style={[styles.contactSearchInput, { color: textColor }]}
+                placeholder="Search contacts…"
+                placeholderTextColor={COLORS.sub}
+                value={addMemberQuery}
+                onChangeText={setAddMemberQuery}
+              />
+              {addMemberQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setAddMemberQuery('')}>
+                  <AppIcon name="close-circle" size={16} color={COLORS.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ flexGrow: 1, minHeight: 200 }}
+              contentContainerStyle={styles.contactPickerContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {contactsLoading ? (
+                <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
+                  <ActivityIndicator size="large" color={COLORS.blue} />
+                  <AppText style={{ color: COLORS.sub, fontSize: 14 }}>Loading contacts...</AppText>
+                </View>
+              ) : (() => {
+                const memberIds = groupMembers.map(m => m.userId);
+                const available = (phoneContacts ?? [])
+                  .filter(c => c.userId && c.userId !== userId)
+                  .filter(c => !memberIds.includes(c.userId))
+                  .filter(c => !addMemberQuery.trim() || c.displayName.toLowerCase().includes(addMemberQuery.toLowerCase()) || c.phone.includes(addMemberQuery));
+                if (available.length === 0) {
+                  return (
+                    <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
+                      <AppIcon name="people-outline" size={48} color={COLORS.sub} />
+                      <AppText style={{ color: textColor, fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
+                        {addMemberQuery.trim() ? 'No matching contacts' : 'No contacts to add'}
+                      </AppText>
+                      <AppText style={{ color: COLORS.sub, fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>
+                        {addMemberQuery.trim() ? `No contacts match "${addMemberQuery}"` : 'All your ChitChat contacts are already in this group'}
+                      </AppText>
+                    </View>
+                  );
+                }
+                return available.map(c => (
+                  <TouchableOpacity
+                    key={c.phone}
+                    style={[styles.contactPickerRow, bevel]}
+                    activeOpacity={0.75}
+                    onPress={() => handleAddMember({ userId: c.userId, displayName: c.displayName })}
+                  >
+                    <Avatar
+                      initials={c.displayName.slice(0, 2).toUpperCase()}
+                      color={COLORS.blue}
+                      size={44}
+                      imageUrl={c.photoUri || c.firebasePhotoURL || null}
+                    />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <AppText style={[{ fontSize: 14, fontWeight: '600' }, { color: textColor }]}>{c.displayName}</AppText>
+                      <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>{c.phone}</AppText>
+                    </View>
+                    <AppIcon name="person-add" size={18} color={COLORS.blue} fixedColor />
+                  </TouchableOpacity>
+                ));
+              })()}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Invite Link Picker Modal (send within app) ── */}
+      <Modal visible={invitePickerOpen} transparent animationType="slide" onRequestClose={() => setInvitePickerOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setInvitePickerOpen(false)} />
+          <View style={[styles.contactPickerSheet, { backgroundColor: FG.glassBg, minHeight: 320 }]}>
+            <AppBg />
+            <View style={styles.attachHandle} />
+            <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Send Invite To…</AppText>
+
+            <View style={[styles.contactSearchWrap, bevel]}>
+              <AppIcon name="search-outline" size={16} color={COLORS.sub} />
+              <TextInput
+                style={[styles.contactSearchInput, { color: textColor }]}
+                placeholder="Search contacts…"
+                placeholderTextColor={COLORS.sub}
+                value={invitePickerQuery}
+                onChangeText={setInvitePickerQuery}
+              />
+              {invitePickerQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setInvitePickerQuery('')}>
+                  <AppIcon name="close-circle" size={16} color={COLORS.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ flexGrow: 1, minHeight: 200 }}
+              contentContainerStyle={styles.contactPickerContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {contactsLoading ? (
+                <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
+                  <ActivityIndicator size="large" color={COLORS.blue} />
+                  <AppText style={{ color: COLORS.sub, fontSize: 14 }}>Loading contacts...</AppText>
+                </View>
+              ) : (() => {
+                const memberIds = groupMembers.map(m => m.userId);
+                const available = (phoneContacts ?? [])
+                  .filter(c => c.userId && c.userId !== userId)
+                  .filter(c => !memberIds.includes(c.userId))
+                  .filter(c => !invitePickerQuery.trim() || c.displayName.toLowerCase().includes(invitePickerQuery.toLowerCase()) || c.phone.includes(invitePickerQuery));
+                if (available.length === 0) {
+                  return (
+                    <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
+                      <AppIcon name="people-outline" size={48} color={COLORS.sub} />
+                      <AppText style={{ color: textColor, fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
+                        {invitePickerQuery.trim() ? 'No matching contacts' : 'No contacts to invite'}
+                      </AppText>
+                    </View>
+                  );
+                }
+                return available.map(c => (
+                  <TouchableOpacity
+                    key={c.phone}
+                    style={[styles.contactPickerRow, bevel]}
+                    activeOpacity={0.75}
+                    onPress={() => handleSendInviteTo({ userId: c.userId, displayName: c.displayName })}
+                  >
+                    <Avatar
+                      initials={c.displayName.slice(0, 2).toUpperCase()}
+                      color={COLORS.blue}
+                      size={44}
+                      imageUrl={c.photoUri || c.firebasePhotoURL || null}
+                    />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <AppText style={[{ fontSize: 14, fontWeight: '600' }, { color: textColor }]}>{c.displayName}</AppText>
+                      <AppText style={{ fontSize: 12, color: COLORS.sub, marginTop: 2 }}>{c.phone}</AppText>
+                    </View>
+                    <AppIcon name="send-outline" size={18} color={COLORS.blue} fixedColor />
+                  </TouchableOpacity>
+                ));
+              })()}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* ── Received Contact Action Modal ── */}
       <Modal
         visible={contactActionCard !== null}
@@ -3128,6 +3689,66 @@ export default function ChatScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── Group Invite Preview Modal (WhatsApp-style) ── */}
+      <Modal
+        visible={invitePreview !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setInvitePreview(null)}
+      >
+        <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setInvitePreview(null)} />
+        <View style={[styles.invitePreviewSheet, { backgroundColor: FG.glassBg }]}>
+          <AppBg />
+          {/* Close button */}
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 16, left: 16, zIndex: 10 }}
+            onPress={() => setInvitePreview(null)}
+          >
+            <AppIcon name="close" size={22} color={FG.secondary} />
+          </TouchableOpacity>
+
+          {loadingInvitePreview ? (
+            <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+              <ActivityIndicator size="large" color={COLORS.blue} />
+              <AppText style={{ color: COLORS.sub, marginTop: 12, fontSize: 14 }}>Loading group info...</AppText>
+            </View>
+          ) : invitePreviewData ? (
+            <View style={{ alignItems: 'center', paddingTop: 24, paddingHorizontal: 24 }}>
+              {/* Group Avatar */}
+              <Avatar
+                initials={getInitials(invitePreviewData.groupName)}
+                color={COLORS.blue}
+                size={80}
+                imageUrl={invitePreviewData.groupPhotoURL}
+              />
+              {/* Group Name */}
+              <AppText style={{ color: textColor, fontSize: 20, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
+                {invitePreviewData.groupName}
+              </AppText>
+              {/* Created by + date */}
+              <AppText style={{ color: COLORS.sub, fontSize: 13, marginTop: 8, textAlign: 'center' }}>
+                Created by {invitePreviewData.createdBy}, {invitePreviewData.createdAt}
+              </AppText>
+              {/* Member count */}
+              <AppText style={{ color: COLORS.sub, fontSize: 13, marginTop: 4 }}>
+                {invitePreviewData.memberCount} {invitePreviewData.memberCount === 1 ? 'member' : 'members'}
+              </AppText>
+
+              {/* Join / Open button */}
+              <TouchableOpacity
+                style={[styles.invitePreviewJoinBtn, invitePreviewData.isAlreadyMember && { backgroundColor: COLORS.sub }]}
+                activeOpacity={0.8}
+                onPress={handleJoinFromPreview}
+              >
+                <AppText style={styles.invitePreviewJoinText}>
+                  {invitePreviewData.isAlreadyMember ? 'Open group' : 'Join group'}
+                </AppText>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
+
       {/* ── Location Sharing Menu ── */}
       <Modal
         visible={showLocationMenu}
@@ -3299,19 +3920,70 @@ export default function ChatScreen() {
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.profileScroll}>
               {/* Avatar + name */}
               <View style={styles.profileAvatarWrap}>
+                {isGroup ? (
+                  <TouchableOpacity activeOpacity={0.8} onPress={handleChangeGroupPhoto}>
+                    <Avatar 
+                      initials={getInitials(displayName)} 
+                      color={COLORS.blue} 
+                      size={80}
+                      imageUrl={groupPhotoURL || headerPhoto}
+                    />
+                    <View style={{ position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' }}>
+                      <AppIcon name="camera" size={14} color="#fff" fixedColor />
+                    </View>
+                  </TouchableOpacity>
+                ) : (
                   <Avatar 
                     initials={getInitials(displayName)} 
                     color={COLORS.blue} 
                     size={80}
                     imageUrl={headerPhoto}
                   />
+                )}
                 </View>
                 <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>
                   {displayName}
                 </AppText>
                 <AppText style={[styles.profileStatus, { color: isOnline ? COLORS.blue : FG.secondary }]}>
-                  {isGroup ? `Group · ${messages.length} messages` : (presenceText || 'Tap here for info')}
+                  {isGroup ? `Group · ${groupMembers.length} members` : (presenceText || 'Tap here for info')}
                 </AppText>
+
+                {/* Group Bio / Description */}
+                {isGroup && (
+                  <View style={{ width: '100%', marginTop: 12, marginBottom: 4 }}>
+                    {editingBio ? (
+                      <View style={[{ borderRadius: RADIUS.lg, padding: 12 }, bevel]}>
+                        <TextInput
+                          style={{ fontSize: 14, color: textColor, minHeight: 60, textAlignVertical: 'top' }}
+                          placeholder="Add group description..."
+                          placeholderTextColor={COLORS.sub}
+                          value={bioInput}
+                          onChangeText={setBioInput}
+                          multiline
+                          autoFocus
+                        />
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
+                          <TouchableOpacity onPress={() => { setEditingBio(false); setBioInput(groupBio); }}>
+                            <AppText style={{ color: COLORS.sub, fontSize: 13, fontWeight: '600' }}>Cancel</AppText>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={handleSaveGroupBio}>
+                            <AppText style={{ color: COLORS.blue, fontSize: 13, fontWeight: '700' }}>Save</AppText>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => { setBioInput(groupBio); setEditingBio(true); }}
+                        style={[{ borderRadius: RADIUS.lg, padding: 12 }, bevel]}
+                      >
+                        <AppText style={{ fontSize: 14, color: groupBio ? textColor : COLORS.sub }}>
+                          {groupBio || 'Add group description...'}
+                        </AppText>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
 
                 {/* Action buttons */}
                 <View style={styles.profileActions}>
@@ -3342,6 +4014,24 @@ export default function ChatScreen() {
                     <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
                       PARTICIPANTS ({groupMembers.length})
                     </AppText>
+                    <View style={{ flexDirection: 'row', gap: 16, marginBottom: 12 }}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => setAddMemberPickerOpen(true)}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                      >
+                        <AppIcon name="person-add-outline" size={18} color={COLORS.blue} fixedColor />
+                        <AppText style={{ color: COLORS.blue, fontSize: 13, fontWeight: '600' }}>Add</AppText>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={handleShareInviteLink}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                      >
+                        <AppIcon name="link-outline" size={18} color={COLORS.blue} fixedColor />
+                        <AppText style={{ color: COLORS.blue, fontSize: 13, fontWeight: '600' }}>Invite</AppText>
+                      </TouchableOpacity>
+                    </View>
                     {loadingMembers ? (
                       <View style={[styles.profileMemberLoadingBox, bevel]}>
                         <ActivityIndicator size="small" color={COLORS.blue} />
@@ -3351,10 +4041,10 @@ export default function ChatScreen() {
                       </View>
                     ) : groupMembers.length > 0 ? (
                       groupMembers.map((member) => {
-                        const statusEmoji = 
-                          member.status === 'online' ? '🟢' : 
-                          member.status === 'away' ? '🟡' : '⚫';
-                        const statusText = 
+                        const statusColor = 
+                          member.status === 'online' ? '#4CAF50' : 
+                          member.status === 'away' ? '#FFC107' : COLORS.sub;
+                        const statusLabel = 
                           member.status === 'online' ? 'Online' : 
                           member.status === 'away' ? 'Away' : 'Offline';
                         
@@ -3368,17 +4058,30 @@ export default function ChatScreen() {
                               color={COLORS.blue} 
                               size={42}
                               imageUrl={member.photoURL}
-                              status={member.status}
                             />
                             <View style={{ flex: 1 }}>
                               <AppText style={[styles.profileMemberName, { color: textColor, fontFamily }]}>
                                 {member.displayName}
                                 {member.userId === userId && <AppText style={[styles.profileMemberYou, { color: FG.secondary }]}> (You)</AppText>}
+                                {member.userId === groupCreatedBy && <AppText style={{ color: COLORS.blue, fontSize: 12, fontWeight: '700' }}> • Admin</AppText>}
                               </AppText>
-                              <AppText style={[styles.profileMemberStatus, { color: FG.secondary }]}>
-                                {statusEmoji} {statusText}
-                              </AppText>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor }} />
+                                <AppText style={[styles.profileMemberStatus, { color: FG.secondary }]}>
+                                  {statusLabel}
+                                </AppText>
+                              </View>
                             </View>
+                            {/* Remove button — only visible to group creator, not on self */}
+                            {groupCreatedBy === userId && member.userId !== userId && (
+                              <TouchableOpacity
+                                activeOpacity={0.7}
+                                onPress={() => handleRemoveMember(member)}
+                                style={{ padding: 6 }}
+                              >
+                                <AppIcon name="remove-circle-outline" size={22} color="#e53935" fixedColor />
+                              </TouchableOpacity>
+                            )}
                           </View>
                         );
                       })
@@ -3409,6 +4112,9 @@ export default function ChatScreen() {
                     ) : pastMembers.length > 0 ? (
                       pastMembers.map((member) => {
                         const leftDateText = formatLeftDate(member.leftAt);
+                        const reasonText = member.reason && member.reason !== 'Left'
+                          ? member.reason
+                          : `Left • ${leftDateText}`;
                         
                         return (
                           <View 
@@ -3427,7 +4133,7 @@ export default function ChatScreen() {
                                 {member.displayName}
                               </AppText>
                               <AppText style={[styles.profileMemberStatus, { color: FG.secondary }]}>
-                                {leftDateText}
+                                {reasonText}
                               </AppText>
                             </View>
                             <AppIcon name="exit-outline" size={18} color={FG.secondary} />
@@ -3722,6 +4428,11 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   bubbleIn: { borderBottomLeftRadius: 4, ...SHADOW.card },
+  groupSenderName: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
   bubbleTextIn: { 
     fontSize: 14, 
     color: '#fff', 
@@ -4704,5 +5415,106 @@ const styles = StyleSheet.create({
   contactActionButtonTitle: {
     fontSize: 15,
     fontWeight: '600',
+  },
+
+  // ── Group Invite Bubble Styles ────────────────────────────────────────────
+  groupInviteBubbleIn: {
+    backgroundColor: '#fff',
+    borderRadius: RADIUS.lg,
+    borderWidth: 1.5,
+    borderColor: COLORS.blue,
+    padding: 14,
+    maxWidth: '80%',
+    minWidth: 220,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  groupInviteBubbleOut: {
+    backgroundColor: COLORS.blue,
+    borderRadius: RADIUS.lg,
+    padding: 14,
+    maxWidth: '80%',
+    minWidth: 220,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  groupInviteIconWrap: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(30,156,240,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupInviteTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.sub,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  groupInviteName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginTop: 2,
+  },
+  groupInviteButtonWrap: {
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.blue,
+    borderRadius: RADIUS.md,
+    alignSelf: 'flex-start',
+  },
+  groupInviteButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  groupInviteTime: {
+    fontSize: 11,
+    color: '#666',
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+  },
+  groupInviteTimeWithTick: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  // ── Group Invite Preview Modal ────────────────────────────────────────────
+  invitePreviewSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    minHeight: 340,
+    paddingBottom: 40,
+    overflow: 'hidden',
+  },
+  invitePreviewJoinBtn: {
+    marginTop: 24,
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: RADIUS.lg,
+    backgroundColor: '#25D366',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  invitePreviewJoinText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

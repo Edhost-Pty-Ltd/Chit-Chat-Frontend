@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Platform, View, ActivityIndicator } from 'react-native';
+import { Platform, View, ActivityIndicator, Linking, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
@@ -142,6 +142,70 @@ function NotificationTapHandler() {
   return null;
 }
 
+// ── Invite link handler — joins group when app opens via chitchat.app/join/... link
+function InviteLinkHandler() {
+  const { user } = useHooksAuth();
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const handleUrl = async (url: string | null) => {
+      if (!url) return;
+      const match = url.match(/chitchat\.app\/join\/([a-zA-Z0-9]+)/);
+      if (!match) return;
+      const inviteCode = match[1];
+      console.log('[InviteLinkHandler] Invite code:', inviteCode);
+
+      try {
+        const { collection, query, where, getDocs, doc, updateDoc, arrayUnion } = await import('firebase/firestore');
+        const { db } = await import('./src/config/firebase');
+
+        // Find the chat with this invite code
+        const q = query(collection(db, 'chats'), where('inviteCode', '==', inviteCode));
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          Alert.alert('Invalid Link', 'This invite link is no longer valid.');
+          return;
+        }
+        const chatDoc = snap.docs[0];
+        const chatData = chatDoc.data();
+        const members: string[] = chatData.members ?? [];
+
+        if (members.includes(user.uid)) {
+          // Already a member — just navigate
+          navigateToChatWhenReady(chatDoc.id);
+          return;
+        }
+
+        // Add user to group
+        await updateDoc(doc(db, 'chats', chatDoc.id), {
+          members: arrayUnion(user.uid),
+        });
+
+        // Send system message
+        const { sendGroupAddMessage } = await import('./src/hooks/useChatActions');
+        const userName = user.displayName || 'Someone';
+        await sendGroupAddMessage(chatDoc.id, user.uid, user.uid, userName, userName);
+
+        Alert.alert('Joined!', `You joined "${chatData.groupName || 'the group'}".`);
+        navigateToChatWhenReady(chatDoc.id);
+      } catch (err) {
+        console.error('[InviteLinkHandler] Error joining group:', err);
+        Alert.alert('Error', 'Failed to join the group.');
+      }
+    };
+
+    // Handle app opened via link
+    Linking.getInitialURL().then(handleUrl);
+
+    // Handle link while app is running
+    const sub = Linking.addEventListener('url', (event) => handleUrl(event.url));
+    return () => sub.remove();
+  }, [user?.uid]);
+
+  return null;
+}
+
 export default function App() {
   // Load Google Fonts used by the Appearance settings font presets.
   const [fontsLoaded] = useRoboto({
@@ -236,6 +300,7 @@ export default function App() {
                     <FloatingCallManager />
                     <GroupCallNotificationManager />
                     <CallHost />
+                    <InviteLinkHandler />
                     <BiometricGate />
                   </NavigationContainer>
                 </ActiveCallProvider>
