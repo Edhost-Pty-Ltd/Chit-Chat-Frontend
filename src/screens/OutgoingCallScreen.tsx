@@ -51,6 +51,7 @@ export default function OutgoingCallScreen() {
     callerName,
     chatId,
     memberCount,
+    initials: calleeInitials,
   } = route.params;
 
   // Guards against firing terminal actions more than once. Using refs (not
@@ -239,6 +240,7 @@ export default function OutgoingCallScreen() {
     <RingingCallScreen
       otherParty={otherParty}
       callType={callType}
+      initials={calleeInitials}
       onEndCall={handleCancel}
     />
   );

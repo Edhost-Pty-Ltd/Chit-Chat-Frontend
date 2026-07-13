@@ -912,10 +912,11 @@ export default function ChatScreen() {
         
         console.log('[ChatScreen] Blocked status - by me:', iBlockedThem, ', by them:', theyBlockedMe);
       } catch (error) {
-        console.error('[ChatScreen] Error checking blocked status:', error);
-        setIsBlocked(false);
-        setBlockedByMe(false);
-        setBlockedByThem(false);
+        // Expected while offline (Firestore throws when a doc isn't cached
+        // and there's no connection) — warn instead of error so it doesn't
+        // trigger the intrusive red error overlay in dev, and keep whatever
+        // blocked state was last known rather than resetting it.
+        console.warn('[ChatScreen] Error checking blocked status (likely offline):', error);
       } finally {
         setCheckingBlockedStatus(false);
       }
@@ -943,7 +944,8 @@ export default function ChatScreen() {
             setBlockedByThem(theyBlockedMe);
             setIsBlocked(iBlockedThem || theyBlockedMe);
           } catch (error) {
-            console.error('[ChatScreen] Error re-checking blocked status:', error);
+            // Expected while offline — see note in the mount-time check above.
+            console.warn('[ChatScreen] Error re-checking blocked status (likely offline):', error);
           }
         })();
       }

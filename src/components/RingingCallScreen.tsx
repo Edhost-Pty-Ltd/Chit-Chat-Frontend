@@ -12,12 +12,14 @@ import type { CallParticipant } from '../types/call';
 interface RingingCallScreenProps {
   otherParty: CallParticipant;
   callType: 'audio' | 'video';
+  /** Optional override for avatar initials (e.g. from signup username when contact is unsaved) */
+  initials?: string;
   onEndCall: () => void;
 }
 
-export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCallScreenProps) {
+export function RingingCallScreen({ otherParty, callType, initials, onEndCall }: RingingCallScreenProps) {
   const { fontFamily } = useTypography();
-  
+
   // Animated values for pulsing rings
   const pulse1 = useRef(new Animated.Value(0)).current;
   const pulse2 = useRef(new Animated.Value(0)).current;
@@ -58,12 +60,36 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
   }, []);
 
   const getInitials = (name: string) => {
-    const parts = name.trim().split(/\s+/);
+    if (!name || !name.trim()) return '?';
+    
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    
     if (parts.length >= 2) {
-      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      const first = parts[0][0];
+      const last = parts[parts.length - 1][0];
+      if (/[a-zA-Z]/.test(first) && /[a-zA-Z]/.test(last)) {
+        return (first + last).toUpperCase();
+      }
     }
-    return name.slice(0, 2).toUpperCase();
+    if (parts.length === 1) {
+      const first = parts[0][0];
+      if (/[a-zA-Z]/.test(first)) {
+        return first.toUpperCase();
+      }
+    }
+    
+    const match = name.match(/[a-zA-Z]/);
+    if (match) return match[0].toUpperCase();
+    
+    const digits = name.replace(/\D/g, '');
+    if (digits.length >= 2) return digits.slice(-2);
+    if (digits.length === 1) return digits;
+    
+    return '?';
   };
+
+  // Use the explicit initials prop if provided (and not '?'), otherwise derive from displayName
+  const avatarInitials = (initials && initials !== '?') ? initials : getInitials(otherParty.displayName);
 
   return (
     <LinearGradient
@@ -99,7 +125,7 @@ export function RingingCallScreen({ otherParty, callType, onEndCall }: RingingCa
         <View style={styles.avatarContainer}>
           <Avatar
             imageUrl={otherParty.photoUrl}
-            initials={getInitials(otherParty.displayName)}
+            initials={avatarInitials}
             color={COLORS.blue}
             size={120}
           />

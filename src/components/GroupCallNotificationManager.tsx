@@ -10,6 +10,8 @@ import { db } from '../config/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useGroupCallNotifications } from '../hooks/useGroupCallNotifications';
 import { useGroupCall } from '../hooks/useGroupCall';
+import { useContacts } from '../hooks/useContacts';
+import { usePhoneBook } from '../hooks/usePhoneBook';
 import { useActiveCall } from '../context/ActiveCallContext';
 import GroupCallNotification from './GroupCallNotification';
 import { RootStackParamList } from '../types';
@@ -21,10 +23,14 @@ export default function GroupCallNotificationManager() {
   const { user } = useAuth();
   const { notifications, dismissNotification } = useGroupCallNotifications(user?.uid || null);
   const { joinGroupCall } = useGroupCall();
+  const { contacts } = useContacts();
+  const { resolveName } = usePhoneBook();
   const { startCall: startActiveCall } = useActiveCall();
   const [currentNotification, setCurrentNotification] = useState<typeof notifications[0] | null>(null);
   // Pre-fetched member count for the current incoming call — distinguishes 1-on-1 from group.
   const [callMemberCount, setCallMemberCount] = useState(2);
+  // Resolved caller phone from Firebase (for unsaved contacts)
+  const [callerPhone, setCallerPhone] = useState<string | null>(null);
 
   // Show the most recent notification and pre-fetch its chat member count.
   useEffect(() => {
@@ -42,11 +48,30 @@ export default function GroupCallNotificationManager() {
           }
         })
         .catch(() => setCallMemberCount(2));
+
+      // Check if the caller is saved in contacts; if not, fetch their phone from Firebase
+      const callerContact = contacts.find((c) => c.userId === notif.initiatorId);
+      if (callerContact) {
+        // Saved contact — no need for phone, name resolution happens via resolveName
+        setCallerPhone(null);
+      } else {
+        // Unsaved contact — fetch their phone number from Firebase for display
+        getDoc(doc(db, 'users', notif.initiatorId))
+          .then((snap) => {
+            if (snap.exists()) {
+              setCallerPhone(snap.data().phone || null);
+            } else {
+              setCallerPhone(null);
+            }
+          })
+          .catch(() => setCallerPhone(null));
+      }
     } else {
       setCurrentNotification(null);
       setCallMemberCount(2);
+      setCallerPhone(null);
     }
-  }, [notifications]);
+  }, [notifications, contacts]);
 
   const handleJoin = async () => {
     if (!currentNotification || !user?.uid) return;
@@ -168,10 +193,51 @@ export default function GroupCallNotificationManager() {
     return null;
   }
 
+  // Resolve the caller's display name and avatar initials:
+  // - Saved contact: use phone-book name for both
+  // - Unsaved contact: phone number for display, signup username (initiatorName) for initials
+  const callerContact = contacts.find((c) => c.userId === currentNotification.initiatorId);
+  let resolvedCallerName: string | undefined;
+  let callerInitials: string | undefined;
+
+  if (callerContact) {
+    // Saved contact — use phone-book name
+    resolvedCallerName = resolveName(callerContact.phone, callerContact.displayName);
+  } else if (callerPhone) {
+    // Unsaved contact — show formatted phone number, initials from signup username
+    const digits = callerPhone.replace(/\D/g, '');
+    if (digits.startsWith('27') && digits.length === 11) {
+      resolvedCallerName = `+${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+    } else if (digits.length > 6) {
+      resolvedCallerName = `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
+    } else {
+      resolvedCallerName = callerPhone;
+    }
+    // Initials come from the signup username (initiatorName)
+    const initiatorName = currentNotification.initiatorName || '';
+    const nameParts = initiatorName.trim().split(/\s+/).filter(Boolean);
+    if (nameParts.length >= 2 && /[a-zA-Z]/.test(nameParts[0][0]) && /[a-zA-Z]/.test(nameParts[nameParts.length - 1][0])) {
+      callerInitials = (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase();
+    } else if (nameParts.length >= 1 && /[a-zA-Z]/.test(nameParts[0][0])) {
+      callerInitials = nameParts[0][0].toUpperCase();
+    } else {
+      // Try any letter in the string
+      const letterMatch = initiatorName.match(/[a-zA-Z]/);
+      if (letterMatch) {
+        callerInitials = letterMatch[0].toUpperCase();
+      } else {
+        const digits = initiatorName.replace(/\D/g, '');
+        callerInitials = digits.length >= 2 ? digits.slice(-2) : (digits || '?');
+      }
+    }
+  }
+
   return (
     <GroupCallNotification
       notification={currentNotification}
       memberCount={callMemberCount}
+      resolvedCallerName={resolvedCallerName}
+      callerInitials={callerInitials}
       onJoin={handleJoin}
       onDismiss={handleDismiss}
     />

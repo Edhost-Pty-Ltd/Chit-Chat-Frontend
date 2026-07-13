@@ -48,7 +48,7 @@ export function useChats(userId: string | null) {
     loadLocalChats(userId).then((cached) => {
       if (cancelled) return;
       if (cached.length > 0) {
-        setChats(cached);
+        setChats([...cached].sort(sortByRecentActivity));
         setLoading(false);
       }
     });
@@ -88,6 +88,11 @@ export function useChats(userId: string | null) {
             lastMessageReadBy:      lm?.readBy      ?? [],
           };
         });
+
+        // Newest activity first (WhatsApp-style): a chat with a new message
+        // jumps to the top. Chats without a last message (never messaged) sort
+        // to the bottom.
+        result.sort(sortByRecentActivity);
 
         // Ignore an empty snapshot that only came from the (cold) local cache.
         // On a slow network the SDK fires an empty fromCache snapshot before the
@@ -129,4 +134,11 @@ function getUnreadCount(
 ): number {
   if (!unreadCounts) return 0;
   return unreadCounts[userId] ?? 0;
+}
+
+/** Sort chats by most recent last-message time, newest first. */
+function sortByRecentActivity(a: ChatPreview, b: ChatPreview): number {
+  const ta = a.timestamp?.getTime() ?? 0;
+  const tb = b.timestamp?.getTime() ?? 0;
+  return tb - ta;
 }

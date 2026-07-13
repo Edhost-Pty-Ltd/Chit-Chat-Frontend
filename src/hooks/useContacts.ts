@@ -8,8 +8,14 @@ import { getContactsAsync, requestPermissionsAsync, Fields } from 'expo-contacts
 import {
   collection, query, where, getDocs,
 } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../config/firebase';
 import { normalizePhone, chunkArray } from '../utils/phoneUtils';
+
+// Local cache so the resolved contact list (names, phones, userIds) survives
+// offline / slow-network cold starts instead of starting empty until the
+// device contacts + Firestore cross-reference finish loading.
+const CACHE_KEY = 'local_app_contacts';
 
 export interface AppContact {
   userId:      string;       // Firestore user ID (empty string if not a ChitChat user)
@@ -26,6 +32,25 @@ export function useContacts() {
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
+
+  // ── Seed from local cache immediately ─────────────────────────
+  // Shows the previously-resolved contact list right away on cold start /
+  // offline, instead of leaving chat names blank until permissions + the
+  // Firestore cross-reference finish (which requires a network round-trip).
+  useEffect(() => {
+    AsyncStorage.getItem(CACHE_KEY).then((raw) => {
+      if (!raw) return;
+      try {
+        const cached: AppContact[] = JSON.parse(raw);
+        if (cached.length > 0) {
+          setContacts(cached);
+          setLoading(false);
+        }
+      } catch {
+        // ignore malformed cache
+      }
+    });
+  }, []);
 
   useEffect(() => {
     loadContacts();
@@ -128,6 +153,7 @@ export function useContacts() {
 
       console.log('[useContacts] Loaded', appContacts.length, 'ChitChat contacts');
       setContacts(appContacts);
+      AsyncStorage.setItem(CACHE_KEY, JSON.stringify(appContacts)).catch(() => {});
     } catch (err: any) {
       console.error('[useContacts] Failed to load contacts:', err);
       setError(err.message ?? 'Failed to load contacts');
@@ -138,4 +164,3 @@ export function useContacts() {
 
   return { contacts, loading, error, hasPermission, reload: loadContacts };
 }
-

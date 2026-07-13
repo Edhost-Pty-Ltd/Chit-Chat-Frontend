@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { doc, getDoc } from 'firebase/firestore';
+import NetInfo from '@react-native-community/netinfo';
 import { db } from '../config/firebase';
 import { Avatar, BottomNav } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
@@ -24,6 +25,7 @@ import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
 import { useFocusEffect } from '@react-navigation/native';
 import { markMissedCallsAsViewed } from '../hooks/useMissedCalls';
+import { loadLocalUserProfiles, saveLocalUserProfiles } from '../hooks/useLocalUserProfiles';
 
 type CallTab = 'All' | 'Missed';
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -61,14 +63,55 @@ function formatTimestamp(date: Date): string {
   }
 }
 
-// Get initials from display name
+// Get initials from a display name. Usernames are always alphabetical.
 function getInitials(name: string): string {
+  if (!name || !name.trim()) return '?';
+  
+  // Split on whitespace and take first letter of first + last word
   const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  // Single-word name → first letter only (initial, not first two letters).
-  if (parts.length === 1) return parts[0][0].toUpperCase();
-  // Multi-word name → first letter of the first and last words.
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  
+  if (parts.length >= 2) {
+    const first = parts[0][0];
+    const last = parts[parts.length - 1][0];
+    // Only use if they're actual letters
+    if (/[a-zA-Z]/.test(first) && /[a-zA-Z]/.test(last)) {
+      return (first + last).toUpperCase();
+    }
+  }
+  if (parts.length === 1) {
+    const first = parts[0][0];
+    if (/[a-zA-Z]/.test(first)) {
+      return first.toUpperCase();
+    }
+  }
+  
+  // Try to find any letter in the string
+  const match = name.match(/[a-zA-Z]/);
+  if (match) return match[0].toUpperCase();
+  
+  // No letters at all — try last 2 digits (phone number)
+  const digits = name.replace(/\D/g, '');
+  if (digits.length >= 2) return digits.slice(-2);
+  if (digits.length === 1) return digits;
+  
+  return '?';
+}
+
+// Format E.164 phone number for display (e.g. +27 82 123 4567)
+function formatSAPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  // South African +27 numbers: +27 XX XXX XXXX
+  if (digits.startsWith('27') && digits.length === 11) {
+    return `+${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  // Generic international: +CC XXX XXX XXXX
+  if (digits.length > 6) {
+    if (digits.length <= 3) return `+${digits}`;
+    if (digits.length <= 6) return `+${digits.slice(0, 2)} ${digits.slice(2)}`;
+    return `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
+  }
+  // Short numbers — return as-is with + prefix
+  return phone.startsWith('+') ? phone : `+${phone}`;
 }
 
 function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'outgoing'; status: string }) {
@@ -81,6 +124,7 @@ function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'out
 function CallInfoSheet({
   call,
   resolvedName,
+  resolvedInitials,
   resolvedPhone,
   resolvedPhoto,
   visible,
@@ -91,6 +135,7 @@ function CallInfoSheet({
 }: {
   call: CallHistoryItem | null;
   resolvedName: string;
+  resolvedInitials: string;
   resolvedPhone: string;
   resolvedPhoto: string | null;
   visible: boolean;
@@ -120,7 +165,7 @@ function CallInfoSheet({
         {/* Contact info header */}
         <View style={styles.infoHeader}>
           <Avatar 
-            initials={getInitials(resolvedName)} 
+            initials={resolvedInitials} 
             color={COLORS.blue} 
             size={64} 
             imageUrl={resolvedPhoto}
@@ -128,7 +173,7 @@ function CallInfoSheet({
           <View style={styles.infoMeta}>
             <AppText style={[styles.infoName, { color: textColor, fontFamily }]}>{resolvedName}</AppText>
             <AppText style={styles.infoNum}>
-              {resolvedPhone || 'No number saved'}
+              {resolvedPhone ? formatSAPhone(resolvedPhone) : 'No number saved'}
             </AppText>
           </View>
         </View>
@@ -344,12 +389,37 @@ export default function CallsScreen() {
   }, [contacts]);
 
   // For unsaved contacts, we fetch their Firebase profile displayName (the name
-  // they used when signing up) so we can show proper initials instead of phone numbers.
-  const [userIdToFirebaseName, setUserIdToFirebaseName] = useState<Map<string, string>>(new Map());
+  // they used when signing up) and phone number so we can:
+  //  - Show proper initials on the avatar (from signup username)
+  //  - Display the phone number as the name label
+  const [userIdToFirebaseProfile, setUserIdToFirebaseProfile] = useState<Map<string, { displayName: string; phone: string }>>(new Map());
 
-  // Fetch Firebase display names for call participants who are NOT in saved contacts
+  // Seed from the shared local profile cache (also populated by ChatsScreen) so
+  // unsaved contacts' names/phones show immediately offline / on a cold start,
+  // instead of blank until the Firestore lookup below completes.
   useEffect(() => {
-    const fetchUnsavedUserNames = async () => {
+    loadLocalUserProfiles().then((cached) => {
+      if (cached.size > 0) {
+        setUserIdToFirebaseProfile((prev) => new Map([...cached, ...prev]));
+      }
+    });
+  }, []);
+
+  // Persist saved contacts' userId → phone to the shared cache so their names
+  // still resolve offline via the device phone book (there is no Firestore
+  // cache on React Native, so an offline lookup by userId would otherwise fail).
+  useEffect(() => {
+    if (!contacts.length) return;
+    const profiles = new Map<string, { displayName: string; phone: string }>();
+    for (const c of contacts) {
+      if (c.userId && c.phone) profiles.set(c.userId, { displayName: c.displayName, phone: c.phone });
+    }
+    if (profiles.size > 0) saveLocalUserProfiles(profiles).catch(() => {});
+  }, [contacts]);
+
+  // Fetch Firebase profiles for call participants who are NOT in saved contacts
+  useEffect(() => {
+    const fetchUnsavedUserProfiles = async () => {
       // Find userIds in call history that are NOT in saved contacts
       const unsavedUserIds = callHistory
         .map((c) => c.otherParty.userId)
@@ -359,23 +429,22 @@ export default function CallsScreen() {
       const uniqueUnsaved = [...new Set(unsavedUserIds)];
       if (uniqueUnsaved.length === 0) return;
 
-      // Fetch display names from Firebase for each unsaved user
-      const newNames = new Map<string, string>();
+      // Only fetch for users we haven't cached yet
+      const toFetch = uniqueUnsaved.filter((uid) => !userIdToFirebaseProfile.has(uid));
+      if (toFetch.length === 0) return;
+
+      // Fetch profiles from Firebase for each unsaved user
+      const newProfiles = new Map<string, { displayName: string; phone: string }>();
       await Promise.all(
-        uniqueUnsaved.map(async (uid) => {
-          // Skip if we already have this user's name cached
-          if (userIdToFirebaseName.has(uid)) {
-            newNames.set(uid, userIdToFirebaseName.get(uid)!);
-            return;
-          }
+        toFetch.map(async (uid) => {
           try {
             const userDoc = await getDoc(doc(db, 'users', uid));
             if (userDoc.exists()) {
               const data = userDoc.data();
-              // Use the displayName field (what they entered at signup)
-              if (data.displayName) {
-                newNames.set(uid, data.displayName);
-              }
+              newProfiles.set(uid, {
+                displayName: data.displayName || '',
+                phone: data.phone || '',
+              });
             }
           } catch (err) {
             console.warn('[CallsScreen] Failed to fetch user profile:', uid, err);
@@ -383,18 +452,22 @@ export default function CallsScreen() {
         })
       );
 
-      // Merge with existing cached names
-      if (newNames.size > 0) {
-        setUserIdToFirebaseName((prev) => {
+      // Merge with existing cached profiles
+      if (newProfiles.size > 0) {
+        setUserIdToFirebaseProfile((prev) => {
           const merged = new Map(prev);
-          newNames.forEach((name, uid) => merged.set(uid, name));
+          newProfiles.forEach((profile, uid) => merged.set(uid, profile));
           return merged;
         });
+        // Persist to the shared local cache for instant offline resolution.
+        saveLocalUserProfiles(newProfiles).catch(() => {});
       }
     };
 
-    fetchUnsavedUserNames();
-  }, [callHistory, userIdToPhone, userIdToFirebaseName]);
+    fetchUnsavedUserProfiles();
+    // Only re-run when call history or saved contacts change (not the cache itself)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callHistory, userIdToPhone]);
 
   /** Resolve a profile photo for a call participant: saved contact photo → the
    *  photo stored on the call record → null (fall back to initials). */
@@ -406,27 +479,64 @@ export default function CallsScreen() {
     [userIdToPhoto]
   );
 
-  /** Resolve a display name for a call participant:
-   *  1. Saved contact name (from phone book)
-   *  2. Firebase signup name (for unsaved contacts)
-   *  3. Fallback to whatever was stored in the call record (phone number)
+  /** Resolve the DISPLAY NAME shown in the call row/info sheet:
+   *  1. Saved contact → contact displayName (from useContacts)
+   *  2. Unsaved contact → formatted phone number
+   *  3. Fallback → whatever was stored in the call record
    */
   const resolveCallerName = useCallback(
     (userId: string, fallbackName: string): string => {
-      const phone = userIdToPhone.get(userId);
-      if (phone) {
-        // Saved contact — use phone-book resolved name
-        return resolveName(phone, phone);
+      // Check if this is a saved contact — use their displayName directly
+      const savedContact = contacts.find((c) => c.userId === userId);
+      if (savedContact) {
+        return savedContact.displayName;
       }
-      // Not a saved contact — try Firebase signup name
-      const firebaseName = userIdToFirebaseName.get(userId);
-      if (firebaseName) {
-        return firebaseName;
+      // Otherwise resolve via the cached phone number.
+      const firebaseProfile = userIdToFirebaseProfile.get(userId);
+      if (firebaseProfile?.phone) {
+        // Prefer the device phone book name (works offline); resolveName
+        // returns the phone number itself when the contact isn't saved.
+        const deviceName = resolveName(firebaseProfile.phone);
+        if (deviceName && deviceName !== firebaseProfile.phone) return deviceName;
+        return formatSAPhone(firebaseProfile.phone);
       }
-      // Fall back to whatever was stored in the call record
+      // Fallback to whatever was stored in the call record
       return fallbackName;
     },
-    [userIdToPhone, userIdToFirebaseName, resolveName]
+    [contacts, userIdToFirebaseProfile, resolveName]
+  );
+
+  /** Resolve INITIALS for the avatar:
+   *  1. Saved contact → initials from contact's displayName (from useContacts)
+   *  2. Unsaved contact → initials from their signup username (Firebase)
+   *  3. Fallback → initials from whatever was stored in the call record
+   */
+  const resolveCallerInitials = useCallback(
+    (userId: string, fallbackName: string): string => {
+      // Check if this is a saved contact — use their displayName from useContacts directly
+      const savedContact = contacts.find((c) => c.userId === userId);
+      if (savedContact) {
+        return getInitials(savedContact.displayName);
+      }
+      // Prefer the device phone book name (offline-capable) for initials.
+      const firebaseProfile = userIdToFirebaseProfile.get(userId);
+      if (firebaseProfile?.phone) {
+        const deviceName = resolveName(firebaseProfile.phone);
+        if (deviceName && deviceName !== firebaseProfile.phone) return getInitials(deviceName);
+      }
+      // Otherwise fall back to their Firebase signup username.
+      if (firebaseProfile?.displayName) {
+        return getInitials(firebaseProfile.displayName);
+      }
+      // Fallback to initials from whatever was stored in the call record
+      if (fallbackName && fallbackName.trim()) {
+        const initials = getInitials(fallbackName);
+        if (initials !== '?') return initials;
+      }
+      // Absolute last resort
+      return getInitials(userId || 'U');
+    },
+    [contacts, userIdToFirebaseProfile, resolveName]
   );
   
   const [tab, setTab] = useState<CallTab>('All');
@@ -439,9 +549,17 @@ export default function CallsScreen() {
   const selectedCallName = selectedCall
     ? resolveCallerName(selectedCall.otherParty.userId, selectedCall.otherParty.displayName)
     : '';
+  // Resolved initials for the info sheet avatar.
+  const selectedCallInitials = selectedCall
+    ? resolveCallerInitials(selectedCall.otherParty.userId, selectedCall.otherParty.displayName)
+    : '';
   // Resolved phone number for the selected call (shown under the name in the sheet).
+  // For saved contacts: from the device contacts map.
+  // For unsaved contacts: from Firebase profile.
   const selectedCallPhone = selectedCall
-    ? (userIdToPhone.get(selectedCall.otherParty.userId) ?? '')
+    ? (userIdToPhone.get(selectedCall.otherParty.userId)
+        ?? userIdToFirebaseProfile.get(selectedCall.otherParty.userId)?.phone
+        ?? '')
     : '';
   // Resolved profile photo for the selected call (saved contact photo → record photo).
   const selectedCallPhoto = selectedCall
@@ -463,6 +581,16 @@ export default function CallsScreen() {
     callType: 'audio' | 'video',
   ) => {
     if (!user) { Alert.alert('Error', 'You must be logged in to make calls'); return; }
+
+    // Calls need a live connection (signaling + LiveKit media). Fail fast with
+    // a clear message instead of hanging on the block/privacy/token chain
+    // below, which would otherwise leave the "Starting call..." spinner stuck
+    // for a long time before eventually erroring out.
+    const net = await NetInfo.fetch();
+    if (net.isConnected === false) {
+      Alert.alert('No connection', "You're offline. Calls require an internet connection.");
+      return;
+    }
 
     // Block check (either direction blocks the call)
     try {
@@ -502,6 +630,9 @@ export default function CallsScreen() {
     );
 
     if (result) {
+      // Compute avatar initials for the callee (signup username for unsaved contacts)
+      const calleeInitials = resolveCallerInitials(calleeUserId, displayName);
+
       // OutgoingCallScreen owns everything from here.
       navigation.navigate('OutgoingCall', {
         callId: result.callId,
@@ -512,6 +643,7 @@ export default function CallsScreen() {
         callerName,
         chatId,
         memberCount: 2,
+        initials: calleeInitials,
       });
     } else {
       Alert.alert('Call Failed', 'Unable to start call. Please try again.');
@@ -603,6 +735,7 @@ export default function CallsScreen() {
   const renderCall = ({ item }: { item: CallHistoryItem }) => {
     const isMissed = item.status === 'missed';
     const resolvedName = resolveCallerName(item.otherParty.userId, item.otherParty.displayName);
+    const resolvedInitials = resolveCallerInitials(item.otherParty.userId, item.otherParty.displayName);
     const resolvedPhoto = resolveCallerPhoto(item.otherParty.userId, item.otherParty.photoUrl);
     const statusLabel = item.status === 'completed' && item.duration
       ? formatDuration(item.duration)
@@ -618,7 +751,7 @@ export default function CallsScreen() {
         activeOpacity={0.7}
       >
         <Avatar 
-          initials={getInitials(resolvedName)} 
+          initials={resolvedInitials} 
           color={COLORS.blue} 
           size={48} 
           imageUrl={resolvedPhoto}
@@ -675,6 +808,7 @@ export default function CallsScreen() {
       <CallInfoSheet
         call={selectedCall}
         resolvedName={selectedCallName}
+        resolvedInitials={selectedCallInitials}
         resolvedPhone={selectedCallPhone}
         resolvedPhoto={selectedCallPhoto}
         visible={infoOpen}
