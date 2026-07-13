@@ -833,6 +833,17 @@ export default function ChatsScreen() {
           </View>
         );
       }
+      if (item.lastMessageImageUrl) {
+        const prefix = getSenderPrefix();
+        return (
+          <View style={styles.voiceNotePreview}>
+            {prefix ? <Text style={styles.chatPreview}>{prefix}</Text> : null}
+            <Image source={{ uri: item.lastMessageImageUrl }} style={{ width: 20, height: 20, borderRadius: 3, marginRight: 4 }} />
+            <Ionicons name="camera" size={14} color={COLORS.sub} style={{ marginRight: 3 }} />
+            <Text style={styles.chatPreview}>Photo</Text>
+          </View>
+        );
+      }
       return <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMessage}</Text>;
     };
 
@@ -869,17 +880,27 @@ export default function ChatsScreen() {
             {item.lastSenderId === userId && (
               <AppIcon
                 name={
-                  (item.lastMessageReadBy ?? []).some(id => id !== userId)
-                    ? 'checkmark-done'
-                    : (item.lastMessageDeliveredTo ?? []).some(id => id !== userId)
-                      ? 'checkmark-done'
-                      : 'checkmark'
+                  (() => {
+                    const readBy = (item.lastMessageReadBy ?? []).filter(id => id !== userId);
+                    const deliveredTo = (item.lastMessageDeliveredTo ?? []).filter(id => id !== userId);
+                    const otherCount = item.members.filter(id => id !== userId).length;
+                    const isRead = isGroup 
+                      ? (otherCount > 0 && readBy.length >= otherCount)
+                      : readBy.length > 0;
+                    const isDelivered = deliveredTo.length > 0;
+                    return isRead ? 'checkmark-done' : isDelivered ? 'checkmark-done' : 'checkmark';
+                  })()
                 }
                 size={14}
                 color={
-                  (item.lastMessageReadBy ?? []).some(id => id !== userId)
-                    ? COLORS.blue
-                    : COLORS.sub
+                  (() => {
+                    const readBy = (item.lastMessageReadBy ?? []).filter(id => id !== userId);
+                    const otherCount = item.members.filter(id => id !== userId).length;
+                    const isRead = isGroup
+                      ? (otherCount > 0 && readBy.length >= otherCount)
+                      : readBy.length > 0;
+                    return isRead ? COLORS.blue : COLORS.sub;
+                  })()
                 }
                 fixedColor
                 style={{ marginRight: 4 }}

@@ -19,6 +19,7 @@ export interface ChatPreview {
   lastSenderId: string;
   timestamp:    Date | null;
   unreadCount:  number;
+  lastMessageImageUrl?: string | null;
   /** UIDs that have delivered the last message. Optional to survive older cached rows. */
   lastMessageDeliveredTo?: string[];
   /** UIDs that have read the last message. Optional to survive older cached rows. */
@@ -82,6 +83,7 @@ export function useChats(userId: string | null) {
               ? (lm.timestamp as Timestamp).toDate()
               : null,
             unreadCount: getUnreadCount(d.unreadCounts, userId),
+            lastMessageImageUrl: lm?.imageUrl ?? null,
             lastMessageDeliveredTo: lm?.deliveredTo ?? [],
             lastMessageReadBy:      lm?.readBy      ?? [],
           };

@@ -93,6 +93,8 @@ interface GroupMember {
   displayName: string;
   photoURL: string | null;
   status: 'online' | 'away' | 'offline';
+  firebaseDisplayName?: string;  // The username they signed up with
+  phone?: string;                // Their phone number
 }
 
 // ── Past Member Interface ──────────────────────────────────────────────────────
@@ -302,24 +304,33 @@ export default function ChatScreen() {
   // ── Messages — real-time Firestore stream ───────────────────────
   const { messages, loading, sendMessage, markAsRead, loadOlder, hasMore, loadingOlder } = useMessages(chatId, userId);
 
+  // ── Group rejoin timestamp (hide messages before this) ──────────
+  const [memberJoinedAt, setMemberJoinedAt] = useState<Date | null>(null);
+
   // ── Filter out blocked messages for recipient ───────────────────
   // If I receive a message that was sent while I was blocked, don't show it
   // Exception: In group chats, show all messages regardless of block status
   const filteredMessages = useMemo(() => {
-    // In group chats, show all messages (blocking doesn't affect group messages)
-    if (isGroup) {
-      return messages;
+    let filtered = messages;
+    
+    // In group chats, filter out messages from before the user's join time
+    if (isGroup && memberJoinedAt) {
+      filtered = filtered.filter(msg => {
+        if (!msg.timestamp) return true; // keep messages without timestamp (pending)
+        return msg.timestamp >= memberJoinedAt;
+      });
     }
     
     // In 1-on-1 chats, filter out blocked messages for recipient
-    return messages.filter(msg => {
-      // If message has blockedMessage flag and I'm the recipient, hide it
-      if (msg.blockedMessage && msg.senderId !== userId) {
-        return false;
-      }
-      return true;
-    });
-  }, [messages, userId, isGroup]);
+    if (!isGroup) {
+      filtered = filtered.filter(msg => {
+        if (msg.blockedMessage && msg.senderId !== userId) return false;
+        return true;
+      });
+    }
+    
+    return filtered;
+  }, [messages, userId, isGroup, memberJoinedAt]);
 
   // ── Group messages by date with separators ──────────────────────
   // This creates a flat list of messages with date separator items inserted
@@ -390,15 +401,34 @@ export default function ChatScreen() {
   // ── Phone book name resolver (saved contact name, else phone number) ──
   const { resolveName } = usePhoneBook();
 
-  /** Resolve a senderId to the name shown in reply previews / reply bubbles. */
+  /** Resolve a senderId to name and phone for group sender labels. */
+  const resolveSenderInfo = (senderId: string): { name: string; phone: string } => {
+    if (senderId === userId) return { name: 'You', phone: '' };
+    if (!isGroup) return { name: displayName, phone: '' };
+    // Check group members (has Firebase displayName + phone)
+    const member = groupMembers.find((m) => m.userId === senderId);
+    // Check contacts
+    const contact = phoneContacts.find((c) => c.userId === senderId);
+    
+    // Name priority: contact name (phone book) > Firebase signup name > phone number
+    const contactName = contact?.displayName || '';
+    const firebaseName = member?.firebaseDisplayName || '';
+    const phone = member?.phone || contact?.phone || '';
+    
+    // Use contact name if saved, otherwise Firebase displayName
+    const name = contactName || firebaseName || '';
+    
+    if (name) return { name, phone };
+    if (phone) return { name: phone, phone: '' };
+    return { name: senderId.slice(0, 8) + '…', phone: '' };
+  };
+
+  /** Resolve a senderId to a single display name (for replies, typing, etc.) */
   const resolveSenderName = (senderId: string): string => {
     if (senderId === userId) return 'You';
-    // For 1-on-1 chats the other person's name is already phone-book-resolved
-    // and available as the `displayName` route param.
     if (!isGroup) return displayName;
-    // For group chats, look up from the already-resolved groupMembers list.
-    const member = groupMembers.find((m) => m.userId === senderId);
-    return member?.displayName ?? displayName;
+    const info = resolveSenderInfo(senderId);
+    return info.name;
   };
 
   // ── Presence: watch other user's status (write presence moved to App level) ─
@@ -485,7 +515,6 @@ export default function ChatScreen() {
   const [groupBio, setGroupBio] = useState<string>('');
   const [editingBio, setEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState<string>('');
-
   // Resolve typing user display names (depends on groupMembers)
   const typingNames = useMemo(() => {
     return typingUsers.map(({ userId: uid }) => {
@@ -528,6 +557,7 @@ export default function ChatScreen() {
   // ── Image viewer state ──────────────────────────────────────────
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
+  const [viewerMenuOpen, setViewerMenuOpen] = useState(false);
 
   // ── Selected message state (for long-press actions) ────────────
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
@@ -562,6 +592,9 @@ export default function ChatScreen() {
   // ── Invite link picker state (send link within app) ─────────────
   const [invitePickerOpen, setInvitePickerOpen] = useState(false);
   const [invitePickerQuery, setInvitePickerQuery] = useState('');
+
+  // ── Shared media gallery state ──────────────────────────────────
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false);
 
   // ── Group invite preview modal state ────────────────────────────
   const [invitePreview, setInvitePreview] = useState<{
@@ -622,6 +655,60 @@ export default function ChatScreen() {
       isMounted = false;
     };
   }, [chatId]);
+
+  // ── Eagerly load group members for sender name resolution ────────
+  useEffect(() => {
+    if (!isGroup || !chatId || groupMembers.length > 0) return;
+    
+    const fetchMembersEagerly = async () => {
+      try {
+        const chatRef = doc(db, 'chats', chatId);
+        const chatSnap = await getDoc(chatRef);
+        if (!chatSnap.exists()) return;
+        const chatData = chatSnap.data();
+        const memberIds = chatData.members as string[] || [];
+        setGroupCreatedBy(chatData.createdBy ?? null);
+        setGroupPhotoURL(chatData.groupPhotoURL ?? null);
+        setGroupBio(chatData.groupBio ?? '');
+        
+        // Load user's join timestamp for message filtering
+        const joinedAtMap = chatData.memberJoinedAt || {};
+        if (userId && joinedAtMap[userId]) {
+          const ts = joinedAtMap[userId];
+          setMemberJoinedAt(ts.toDate ? ts.toDate() : new Date(ts));
+        }
+        if (memberIds.length === 0) return;
+
+        const memberPromises = memberIds.map(async (memberId) => {
+          try {
+            const userRef = doc(db, 'users', memberId);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+              const userData = userSnap.data();
+              // Priority: phone book name > Firebase displayName > phone number
+              const phoneBookName = resolveName(userData.phone, '');
+              const firebaseName = userData.displayName || '';
+              const resolvedName = phoneBookName || firebaseName || userData.phone || 'Unknown';
+              return {
+                userId: memberId,
+                displayName: resolvedName,
+                photoURL: userData.photoURL || null,
+                status: userData.status || 'offline',
+                firebaseDisplayName: firebaseName,
+                phone: userData.phone || '',
+              } as GroupMember;
+            }
+            return { userId: memberId, displayName: 'Unknown', photoURL: null, status: 'offline' } as GroupMember;
+          } catch { return { userId: memberId, displayName: 'Unknown', photoURL: null, status: 'offline' } as GroupMember; }
+        });
+        const members = await Promise.all(memberPromises);
+        setGroupMembers(members);
+      } catch (err) {
+        console.error('[ChatScreen] Eager group members fetch failed:', err);
+      }
+    };
+    fetchMembersEagerly();
+  }, [isGroup, chatId]);
 
   // ── Fetch group members when profile modal opens ────────────────
   useEffect(() => {
@@ -1183,6 +1270,7 @@ export default function ChatScreen() {
           type: messageToForward.type,
           timestamp: serverTimestamp(),
           readBy: [userId],
+          forwarded: true,
         };
 
         // Copy relevant fields based on message type
@@ -1990,8 +2078,11 @@ export default function ChatScreen() {
         Alert.alert('Already a member', `${contact.displayName} is already in this group.`);
         return;
       }
-      // Update members array
-      await updateDoc(chatRef, { members: [...currentMembers, contact.userId] });
+      // Update members array and record join timestamp
+      await updateDoc(chatRef, { 
+        members: [...currentMembers, contact.userId],
+        [`memberJoinedAt.${contact.userId}`]: serverTimestamp(),
+      });
       // Send system message
       const adderName = user?.displayName || 'Someone';
       await sendGroupAddMessage(chatId, userId, contact.userId, adderName, contact.displayName);
@@ -2181,12 +2272,13 @@ export default function ChatScreen() {
       // Add user to members
       await updateDoc(doc(db, 'chats', chatDoc.id), {
         members: [...members, userId],
+        [`memberJoinedAt.${userId}`]: serverTimestamp(),
       });
-      const { sendGroupAddMessage } = await import('../hooks/useChatActions');
+      const { sendGroupJoinLinkMessage } = await import('../hooks/useChatActions');
       const userName = user?.displayName || 'Someone';
-      await sendGroupAddMessage(chatDoc.id, userId, userId, userName, userName);
+      await sendGroupJoinLinkMessage(chatDoc.id, userId, userName);
       await updateDoc(doc(db, 'chats', chatDoc.id), {
-        'lastMessage.text': `${userName} joined`,
+        'lastMessage.text': `${userName} joined via invite link`,
         'lastMessage.senderId': 'system',
         'lastMessage.timestamp': serverTimestamp(),
       });
@@ -2268,10 +2360,55 @@ export default function ChatScreen() {
     // Also detect system messages by text pattern (in case type field is missing from cache)
     const isSystemMsg = item.type === 'system' || 
       item.senderId === 'system' ||
-      (item.text && /^(GROUP_ADD|GROUP_REMOVE|GROUP_LEAVE|BLOCK|UNBLOCK|NUMBER_CHANGE):/.test(item.text));
+      (item.text && /^(GROUP_ADD|GROUP_REMOVE|GROUP_LEAVE|GROUP_JOIN_LINK|BLOCK|UNBLOCK|NUMBER_CHANGE):/.test(item.text));
     
     if (isSystemMsg) {
-      const displayText = parseSystemMessage(item.text || '', userId);
+      // Parse system message with local name resolution
+      const displayText = (() => {
+        const text = item.text || '';
+        if (!text || !userId) return text;
+        
+        // GROUP_ADD:adderId:addedId:adderName:addedName
+        if (text.startsWith('GROUP_ADD:')) {
+          const parts = text.split(':');
+          if (parts.length !== 5) return parseSystemMessage(text, userId);
+          const [, adderId, addedId] = parts;
+          if (userId === adderId && userId === addedId) return 'You joined the group';
+          if (userId === adderId) return `You added ${resolveSenderName(addedId)}`;
+          if (userId === addedId) return `${resolveSenderName(adderId)} added you`;
+          return `${resolveSenderName(adderId)} added ${resolveSenderName(addedId)}`;
+        }
+        
+        // GROUP_REMOVE:removerId:removedId:removerName:removedName
+        if (text.startsWith('GROUP_REMOVE:')) {
+          const parts = text.split(':');
+          if (parts.length !== 5) return parseSystemMessage(text, userId);
+          const [, removerId, removedId] = parts;
+          if (userId === removerId) return `You removed ${resolveSenderName(removedId)}`;
+          if (userId === removedId) return `${resolveSenderName(removerId)} removed you`;
+          return `${resolveSenderName(removerId)} removed ${resolveSenderName(removedId)}`;
+        }
+        
+        // GROUP_LEAVE:leaverId:leaverName
+        if (text.startsWith('GROUP_LEAVE:')) {
+          const parts = text.split(':');
+          if (parts.length !== 3) return parseSystemMessage(text, userId);
+          const [, leaverId] = parts;
+          if (userId === leaverId) return 'You left the group';
+          return `${resolveSenderName(leaverId)} left`;
+        }
+        
+        // GROUP_JOIN_LINK:joinerId:joinerName
+        if (text.startsWith('GROUP_JOIN_LINK:')) {
+          const parts = text.split(':');
+          if (parts.length !== 3) return parseSystemMessage(text, userId);
+          const [, joinerId] = parts;
+          if (userId === joinerId) return 'You joined using invite link';
+          return `${resolveSenderName(joinerId)} joined using invite link`;
+        }
+        
+        return parseSystemMessage(text, userId);
+      })();
       return (
         <View style={styles.systemMessageContainer}>
           <View style={[styles.systemMessageBubble, { backgroundColor: FG.glassBg }]}>
@@ -2429,10 +2566,21 @@ export default function ChatScreen() {
             </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
-              {isGroup && (
-                <AppText fixedColor style={[styles.groupSenderName, { color: getSenderNameColor(item.senderId) }]}>
-                  {resolveSenderName(item.senderId)}
-                </AppText>
+              {isGroup && (() => {
+                const info = resolveSenderInfo(item.senderId);
+                const nameColor = getSenderNameColor(item.senderId);
+                return (
+                  <View style={styles.groupSenderRow}>
+                    <AppText fixedColor style={[styles.groupSenderName, { color: nameColor }]}>{info.name}</AppText>
+                    {info.phone ? <AppText fixedColor style={styles.groupSenderPhone}>{info.phone}</AppText> : null}
+                  </View>
+                );
+              })()}
+              {item.forwarded && (
+                <View style={styles.forwardedLabel}>
+                  <AppIcon name="arrow-redo" size={11} color="rgba(255,255,255,0.6)" fixedColor />
+                  <AppText fixedColor style={styles.forwardedText}>Forwarded</AppText>
+                </View>
               )}
               <TouchableOpacity 
                 activeOpacity={0.9}
@@ -2453,10 +2601,21 @@ export default function ChatScreen() {
             </LinearGradient>
           ) : (
             <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
-              {isGroup && (
-                <AppText fixedColor style={[styles.groupSenderName, { color: getSenderNameColor(item.senderId) }]}>
-                  {resolveSenderName(item.senderId)}
-                </AppText>
+              {isGroup && (() => {
+                const info = resolveSenderInfo(item.senderId);
+                const nameColor = getSenderNameColor(item.senderId);
+                return (
+                  <View style={styles.groupSenderRow}>
+                    <AppText fixedColor style={[styles.groupSenderName, { color: nameColor }]}>{info.name}</AppText>
+                    {info.phone ? <AppText fixedColor style={styles.groupSenderPhone}>{info.phone}</AppText> : null}
+                  </View>
+                );
+              })()}
+              {item.forwarded && (
+                <View style={styles.forwardedLabel}>
+                  <AppIcon name="arrow-redo" size={11} color="rgba(255,255,255,0.6)" fixedColor />
+                  <AppText fixedColor style={styles.forwardedText}>Forwarded</AppText>
+                </View>
               )}
               {item.replyTo && (
                 <TouchableOpacity 
@@ -2631,6 +2790,12 @@ export default function ChatScreen() {
             </TouchableOpacity>
           ) : item.type === 'image' && item.imageUrl ? (
             <View style={[styles.bubble, styles.bubbleOut, styles.imageBubble]}>
+              {item.forwarded && (
+                <View style={[styles.forwardedLabel, { paddingHorizontal: 8, paddingTop: 4 }]}>
+                  <AppIcon name="arrow-redo" size={11} color={COLORS.sub} fixedColor />
+                  <AppText style={[styles.forwardedText, { color: COLORS.sub }]}>Forwarded</AppText>
+                </View>
+              )}
               <TouchableOpacity 
                 activeOpacity={0.9}
                 onPress={() => {
@@ -2656,6 +2821,12 @@ export default function ChatScreen() {
             </View>
           ) : (
             <View style={[styles.bubble, styles.bubbleOut]}>
+              {item.forwarded && (
+                <View style={styles.forwardedLabel}>
+                  <AppIcon name="arrow-redo" size={11} color={COLORS.sub} fixedColor />
+                  <AppText style={[styles.forwardedText, { color: COLORS.sub }]}>Forwarded</AppText>
+                </View>
+              )}
               {item.replyTo && (
                 <TouchableOpacity 
                   style={[styles.replyBubble, { backgroundColor: 'rgba(30,156,240,0.08)' }]}
@@ -3252,7 +3423,7 @@ export default function ChatScreen() {
             )}
 
             {/* Mic / Send button */}
-            {input.trim() ? (
+            {input.trim() || isUploading ? (
               <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
                 <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
                   <AppIcon name="send" size={19} color="#fff" fixedColor />
@@ -3264,7 +3435,7 @@ export default function ChatScreen() {
                   colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
                   style={styles.sendBtnInner}
                 >
-                  <AppIcon name="mic" size={19} color="#fff" fixedColor />
+                  <AppIcon name={isRecording ? 'stop' : 'mic'} size={19} color="#fff" fixedColor />
                 </LinearGradient>
               </View>
             )}
@@ -3687,6 +3858,52 @@ export default function ChatScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── Full Media Gallery Modal ── */}
+      <Modal
+        visible={mediaGalleryOpen}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setMediaGalleryOpen(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 }}>
+            <TouchableOpacity onPress={() => setMediaGalleryOpen(false)} style={{ padding: 4 }}>
+              <AppIcon name="arrow-back" size={24} color="#fff" fixedColor />
+            </TouchableOpacity>
+            <AppText style={{ color: '#fff', fontSize: 18, fontWeight: '700', marginLeft: 16 }}>
+              Media ({messages.filter(m => m.type === 'image' && m.imageUrl).length})
+            </AppText>
+          </View>
+          {/* Grid */}
+          <ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', gap: 2, padding: 2 }}>
+            {messages
+              .filter(m => m.type === 'image' && m.imageUrl)
+              .reverse()
+              .map((m) => {
+                const size = (Dimensions.get('window').width - 8) / 3;
+                return (
+                  <TouchableOpacity
+                    key={m.messageId}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setMediaGalleryOpen(false);
+                      setViewerImageUrl(m.imageUrl!);
+                      setViewerVisible(true);
+                    }}
+                  >
+                    <Image
+                      source={{ uri: m.imageUrl! }}
+                      style={{ width: size, height: size }}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
       {/* ── Group Invite Preview Modal (WhatsApp-style) ── */}
       <Modal
         visible={invitePreview !== null}
@@ -3865,13 +4082,13 @@ export default function ChatScreen() {
           visible 
           transparent 
           animationType="fade" 
-          onRequestClose={() => setViewerVisible(false)}
+          onRequestClose={() => { setViewerVisible(false); setViewerMenuOpen(false); }}
         >
           <View style={styles.imageViewerContainer}>
             <TouchableOpacity 
               style={styles.imageViewerBackdrop}
               activeOpacity={1}
-              onPress={() => setViewerVisible(false)}
+              onPress={() => { setViewerMenuOpen(false); }}
             >
               <Image
                 source={{ uri: viewerImageUrl }}
@@ -3879,12 +4096,82 @@ export default function ChatScreen() {
                 resizeMode="contain"
               />
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.imageViewerCloseBtn}
-              onPress={() => setViewerVisible(false)}
-            >
-              <AppIcon name="close" size={32} color="#fff" fixedColor />
-            </TouchableOpacity>
+
+            {/* Top bar */}
+            <View style={styles.imageViewerTopBar}>
+              <TouchableOpacity onPress={() => { setViewerVisible(false); setViewerMenuOpen(false); }} style={{ padding: 8 }}>
+                <AppIcon name="arrow-back" size={24} color="#fff" fixedColor />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }} />
+              {/* Forward button */}
+              <TouchableOpacity
+                style={{ padding: 8 }}
+                onPress={() => {
+                  setViewerVisible(false);
+                  setViewerMenuOpen(false);
+                  // Find the message with this image and forward it
+                  const imgMsg = messages.find(m => m.imageUrl === viewerImageUrl);
+                  if (imgMsg) {
+                    setMessageToForward(imgMsg);
+                    setForwardModalVisible(true);
+                  }
+                }}
+              >
+                <AppIcon name="arrow-redo-outline" size={22} color="#fff" fixedColor />
+              </TouchableOpacity>
+              {/* 3-dot menu */}
+              <TouchableOpacity style={{ padding: 8 }} onPress={() => setViewerMenuOpen(!viewerMenuOpen)}>
+                <AppIcon name="ellipsis-vertical" size={22} color="#fff" fixedColor />
+              </TouchableOpacity>
+            </View>
+
+            {/* Dropdown menu */}
+            {viewerMenuOpen && (
+              <View style={styles.imageViewerMenu}>
+                <TouchableOpacity
+                  style={styles.imageViewerMenuItem}
+                  onPress={async () => {
+                    setViewerMenuOpen(false);
+                    try {
+                      await import('react-native').then(({ Share, Platform }) => {
+                        if (Platform.OS === 'ios') {
+                          Share.share({ url: viewerImageUrl! });
+                        } else {
+                          Share.share({ message: viewerImageUrl! });
+                        }
+                      });
+                    } catch (err) {
+                      console.error('[ImageViewer] Share failed:', err);
+                    }
+                  }}
+                >
+                  <AppIcon name="share-social-outline" size={20} color="#fff" fixedColor />
+                  <AppText style={styles.imageViewerMenuText}>Share</AppText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.imageViewerMenuItem}
+                  onPress={() => {
+                    setViewerMenuOpen(false);
+                    setViewerVisible(false);
+                    setProfileModalOpen(false); // Close profile modal too
+                    // Scroll to the message in chat
+                    setTimeout(() => {
+                      const imgMsg = messages.find(m => m.imageUrl === viewerImageUrl);
+                      if (imgMsg) {
+                        const index = filteredMessages.findIndex(m => m.messageId === imgMsg.messageId);
+                        if (index !== -1 && listRef.current) {
+                          listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+                          setHighlightedMessageId(imgMsg.messageId);
+                        }
+                      }
+                    }, 300);
+                  }}
+                >
+                  <AppIcon name="chatbubble-outline" size={20} color="#fff" fixedColor />
+                  <AppText style={styles.imageViewerMenuText}>Show in chat</AppText>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </Modal>
       )}
@@ -4153,29 +4440,41 @@ export default function ChatScreen() {
                 <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
                   SHARED MEDIA
                 </AppText>
-                {messages.filter(m => m.type === 'image').length > 0 ? (
-                  <TouchableOpacity 
-                    style={[styles.profileMediaRow, bevel]}
-                    activeOpacity={0.8}
-                  >
-                    <AppText style={[styles.profileMediaLabel, { color: textColor }]}>
-                      Shared media
-                    </AppText>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <AppText style={[styles.profileMediaCount, { color: FG.secondary }]}>
-                        {messages.filter(m => m.type === 'image').length} photos
-                      </AppText>
-                      <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
+                {(() => {
+                  const mediaMessages = messages.filter(m => m.type === 'image' && m.imageUrl);
+                  if (mediaMessages.length === 0) {
+                    return (
+                      <View style={[styles.infoMediaBox, bevel]}>
+                        <AppIcon name="images-outline" size={28} color={FG.secondary} />
+                        <AppText style={[styles.infoMediaEmpty, { color: FG.secondary }]}>
+                          No media shared yet
+                        </AppText>
+                      </View>
+                    );
+                  }
+                  const allMedia = [...mediaMessages].reverse(); // newest first
+                  const imageWidth = (Dimensions.get('window').width - 80) / 3; // 3 columns with gaps
+                  return (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                      {allMedia.map((m) => (
+                        <TouchableOpacity
+                          key={m.messageId}
+                          activeOpacity={0.85}
+                          onPress={() => {
+                            setViewerImageUrl(m.imageUrl!);
+                            setViewerVisible(true);
+                          }}
+                        >
+                          <Image
+                            source={{ uri: m.imageUrl! }}
+                            style={{ width: imageWidth, height: imageWidth, borderRadius: 6 }}
+                            resizeMode="cover"
+                          />
+                        </TouchableOpacity>
+                      ))}
                     </View>
-                  </TouchableOpacity>
-                ) : (
-                  <View style={[styles.infoMediaBox, bevel]}>
-                    <AppIcon name="images-outline" size={28} color={FG.secondary} />
-                    <AppText style={[styles.infoMediaEmpty, { color: FG.secondary }]}>
-                      No media shared yet
-                    </AppText>
-                  </View>
-                )}
+                  );
+                })()}
 
                 {/* Privacy section for group chats - Leave Group */}
                 {isGroup && (
@@ -4430,6 +4729,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 2,
+  },
+  groupSenderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+    gap: 12,
+  },
+  groupSenderPhone: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  forwardedLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  forwardedText: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: 'rgba(255,255,255,0.6)',
   },
   bubbleTextIn: { 
     fontSize: 14, 
@@ -4726,6 +5047,40 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  imageViewerTopBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 50,
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  imageViewerMenu: {
+    position: 'absolute',
+    top: 100,
+    right: 16,
+    backgroundColor: 'rgba(30,30,30,0.95)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    minWidth: 180,
+    ...SHADOW.card,
+  },
+  imageViewerMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  imageViewerMenuText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
   },
 
   // ── Profile Modal ──────────────────────────────────────────────────────────

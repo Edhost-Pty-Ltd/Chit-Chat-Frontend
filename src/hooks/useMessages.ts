@@ -32,6 +32,7 @@ export interface FireMessage {
   groupName?: string | null;      // For group-invite messages
   groupId?: string | null;        // For group-invite messages
   inviteCode?: string | null;     // For group-invite messages
+  forwarded?: boolean;            // Whether this message was forwarded
   callType?: 'audio' | 'video';
   callDuration?: number | null;  // in seconds
   callStatus?: 'completed' | 'missed' | 'rejected' | 'busy' | 'failed';
@@ -155,6 +156,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
               groupName: d.groupName ?? null,
               groupId: d.groupId ?? null,
               inviteCode: d.inviteCode ?? null,
+              forwarded: d.forwarded ?? false,
             };
           });
           // No client-side expiry filter here — we keep all messages Firestore

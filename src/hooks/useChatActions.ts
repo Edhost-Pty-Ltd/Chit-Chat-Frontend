@@ -155,6 +155,7 @@ export async function sendMessage(
       'lastMessage.text':        trimmed,
       'lastMessage.senderId':    senderId,
       'lastMessage.timestamp':   serverTimestamp(),
+      'lastMessage.imageUrl':    null,
       'lastMessage.readBy':      [senderId],
       'lastMessage.deliveredTo': [],
       ...unreadUpdates,
@@ -303,6 +304,7 @@ export async function sendImageMessage(
       'lastMessage.text': '📷 Photo',
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
+      'lastMessage.imageUrl': imageUrl,
       'lastMessage.readBy': [senderId],
       'lastMessage.deliveredTo': [],
       ...unreadUpdates,
@@ -805,6 +807,23 @@ export async function sendGroupAddMessage(
   addedName: string,
 ) {
   const text = `GROUP_ADD:${adderId}:${addedId}:${adderName}:${addedName}`;
+  await addDoc(collection(db, 'chats', chatId, 'messages'), {
+    senderId: 'system',
+    text,
+    type: 'system',
+    timestamp: serverTimestamp(),
+    readBy: [],
+    deliveredTo: [],
+  });
+}
+
+/** Send a system message when a user joins a group via invite link */
+export async function sendGroupJoinLinkMessage(
+  chatId: string,
+  joinerId: string,
+  joinerName: string,
+) {
+  const text = `GROUP_JOIN_LINK:${joinerId}:${joinerName}`;
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
     senderId: 'system',
     text,

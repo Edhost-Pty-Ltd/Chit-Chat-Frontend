@@ -1,9 +1,10 @@
 // ─── FileMessageBubble ──────────────────────────────────────────────────────
 // Renders a file attachment message with icon, filename, and file size display.
+// For image files, shows an actual image preview instead of just an icon.
 // Supports downloading/opening files when tapped.
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Linking, Alert, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, GRADIENTS, SHADOW, RADIUS } from '../types/theme';
@@ -64,6 +65,7 @@ export function FileMessageBubble({
   const iconName = getFileIcon(mimeType);
   const extension = getFileExtension(fileName);
   const sizeText = formatFileSize(fileSize);
+  const isImage = mimeType?.startsWith('image/');
 
   const handlePress = async () => {
     try {
@@ -77,7 +79,6 @@ export function FileMessageBubble({
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Copy Link', onPress: () => {
-              // In a real app, you'd use Clipboard API here
               Alert.alert('Link Ready', 'File link copied!');
             }},
           ]
@@ -96,6 +97,28 @@ export function FileMessageBubble({
     : 'rgba(255,255,255,0.25)';
   const fileNameColor = isOutgoing ? COLORS.text : '#ffffff';
   const metaColor = isOutgoing ? COLORS.sub : 'rgba(255,255,255,0.80)';
+
+  // For image files, show a full image preview
+  if (isImage) {
+    const imageContent = (
+      <TouchableOpacity onPress={handlePress} activeOpacity={0.85}>
+        <Image
+          source={{ uri: fileUrl }}
+          style={styles.imagePreview}
+          resizeMode="cover"
+        />
+      </TouchableOpacity>
+    );
+
+    if (isOutgoing) {
+      return <View style={[styles.bubble, styles.bubbleOut, styles.imageBubble]}>{imageContent}</View>;
+    }
+    return (
+      <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
+        {imageContent}
+      </LinearGradient>
+    );
+  }
 
   const content = (
     <TouchableOpacity
@@ -194,5 +217,13 @@ const styles = StyleSheet.create({
   fileSize: {
     fontSize: 11,
     fontWeight: '500',
+  },
+  imagePreview: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+  },
+  imageBubble: {
+    padding: 4,
   },
 });
