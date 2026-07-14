@@ -96,6 +96,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       });
     }
 
+    // Set up notification category with Reply and Mark as Read actions
+    await Notifications.setNotificationCategoryAsync('message', [
+      {
+        identifier: 'reply',
+        buttonTitle: 'Reply',
+        textInput: {
+          submitButtonTitle: 'Send',
+          placeholder: 'Type a reply...',
+        },
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'markRead',
+        buttonTitle: 'Mark as Read',
+        options: { opensAppToForeground: false },
+      },
+    ]);
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     
@@ -137,6 +155,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               title: notif.title,
               body: notif.body,
               sound: true,
+              categoryIdentifier: 'message',
               data: { 
                 contactId: notif.contactId,
                 chatId: notif.chatId,
@@ -160,6 +179,60 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   // MUST be after pushNotification is defined — it is passed directly
   // so the hook never needs to call useNotifications() itself.
   useNotificationSync(user?.uid ?? null, pushNotification);
+
+  // ── Handle notification action responses (Reply / Mark as Read) ───
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
+      const actionId = response.actionIdentifier;
+      const data = response.notification.request.content.data;
+      const chatId = data?.chatId as string | undefined;
+
+      if (actionId === 'markRead') {
+        // Mark all notifications for this chat as read
+        if (chatId) {
+          setNotifications((prev) =>
+            prev.map((n) => n.chatId === chatId ? { ...n, read: true } : n)
+          );
+          // Also mark in Firestore
+          if (user?.uid) {
+            try {
+              const { markChatAsRead } = await import('../hooks/useChatActions');
+              await markChatAsRead(chatId, user.uid);
+            } catch (err) {
+              console.error('[Notifications] Failed to mark as read:', err);
+            }
+          }
+        }
+      } else if (actionId === 'reply') {
+        // Send a reply message
+        const replyText = response.userText;
+        if (replyText && chatId && user?.uid) {
+          try {
+            const { collection, addDoc, serverTimestamp, doc, updateDoc } = await import('firebase/firestore');
+            const { db } = await import('../config/firebase');
+            await addDoc(collection(db, 'chats', chatId, 'messages'), {
+              senderId: user.uid,
+              text: replyText,
+              type: 'text',
+              timestamp: serverTimestamp(),
+              readBy: [user.uid],
+              deliveredTo: [],
+            });
+            await updateDoc(doc(db, 'chats', chatId), {
+              'lastMessage.text': replyText,
+              'lastMessage.senderId': user.uid,
+              'lastMessage.timestamp': serverTimestamp(),
+              'lastMessage.imageUrl': null,
+            });
+          } catch (err) {
+            console.error('[Notifications] Failed to send reply:', err);
+          }
+        }
+      }
+    });
+
+    return () => subscription.remove();
+  }, [user?.uid]);
 
   const dismissToast = useCallback(() => {
     if (toastTimer.current) clearTimeout(toastTimer.current);

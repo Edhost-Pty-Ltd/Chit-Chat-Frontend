@@ -157,7 +157,7 @@ function InviteLinkHandler() {
       console.log('[InviteLinkHandler] Invite code:', inviteCode);
 
       try {
-        const { collection, query, where, getDocs, doc, updateDoc, arrayUnion } = await import('firebase/firestore');
+        const { collection, query, where, getDocs, doc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore');
         const { db } = await import('./src/config/firebase');
 
         // Find the chat with this invite code
@@ -180,12 +180,12 @@ function InviteLinkHandler() {
         // Add user to group
         await updateDoc(doc(db, 'chats', chatDoc.id), {
           members: arrayUnion(user.uid),
+          [`memberJoinedAt.${user.uid}`]: serverTimestamp(),
         });
 
-        // Send system message
-        const { sendGroupAddMessage } = await import('./src/hooks/useChatActions');
+        const { sendGroupJoinLinkMessage } = await import('./src/hooks/useChatActions');
         const userName = user.displayName || 'Someone';
-        await sendGroupAddMessage(chatDoc.id, user.uid, user.uid, userName, userName);
+        await sendGroupJoinLinkMessage(chatDoc.id, user.uid, userName);
 
         Alert.alert('Joined!', `You joined "${chatData.groupName || 'the group'}".`);
         navigateToChatWhenReady(chatDoc.id);

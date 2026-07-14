@@ -88,6 +88,17 @@ export function parseSystemMessage(messageText: string, currentUserId: string | 
     return `${leaverName} left`;
   }
 
+  // Parse GROUP_JOIN_LINK messages: someone joined via invite link
+  if (messageText.startsWith('GROUP_JOIN_LINK:')) {
+    const parts = messageText.split(':');
+    if (parts.length !== 3) return messageText;
+    const [, joinerId, joinerName] = parts;
+    if (currentUserId === joinerId) {
+      return 'You joined using invite link';
+    }
+    return `${joinerName} joined using invite link`;
+  }
+
   // Parse NUMBER_CHANGE messages: someone changed their phone number
   if (messageText.startsWith('NUMBER_CHANGE:')) {
     const parts = messageText.split(':');
@@ -97,6 +108,12 @@ export function parseSystemMessage(messageText: string, currentUserId: string | 
       return `You changed your number to ${newNumber}`;
     }
     return `${userName} changed their number to ${newNumber}`;
+  }
+
+  // Handle legacy plain-text join messages (before GROUP_JOIN_LINK format was added)
+  if (messageText === 'Someone joined' || messageText.match(/^.+ joined$/)) {
+    return messageText.replace('Someone joined', 'Someone joined using invite link')
+      .replace(/ joined$/, ' joined using invite link');
   }
 
   // Return original text for other system messages

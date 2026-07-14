@@ -1,9 +1,10 @@
 // ─── FileMessageBubble ──────────────────────────────────────────────────────
 // Renders a file attachment message with icon, filename, and file size display.
+// For image files, shows an actual image preview instead of just an icon.
 // Supports downloading/opening files when tapped.
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Linking, Alert, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, GRADIENTS, SHADOW, RADIUS } from '../types/theme';
@@ -14,6 +15,7 @@ export interface FileMessageBubbleProps {
   fileUrl: string;
   mimeType?: string;
   isOutgoing: boolean;
+  caption?: string | null;
 }
 
 // Format file size to human-readable format
@@ -60,10 +62,12 @@ export function FileMessageBubble({
   fileUrl,
   mimeType,
   isOutgoing,
+  caption,
 }: FileMessageBubbleProps) {
   const iconName = getFileIcon(mimeType);
   const extension = getFileExtension(fileName);
   const sizeText = formatFileSize(fileSize);
+  const isImage = mimeType?.startsWith('image/');
 
   const handlePress = async () => {
     try {
@@ -77,7 +81,6 @@ export function FileMessageBubble({
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Copy Link', onPress: () => {
-              // In a real app, you'd use Clipboard API here
               Alert.alert('Link Ready', 'File link copied!');
             }},
           ]
@@ -96,40 +99,73 @@ export function FileMessageBubble({
     : 'rgba(255,255,255,0.25)';
   const fileNameColor = isOutgoing ? COLORS.text : '#ffffff';
   const metaColor = isOutgoing ? COLORS.sub : 'rgba(255,255,255,0.80)';
+  const captionColor = isOutgoing ? COLORS.text : '#ffffff';
+
+  // For image files, show a full image preview
+  if (isImage) {
+    const imageContent = (
+      <>
+        <TouchableOpacity onPress={handlePress} activeOpacity={0.85}>
+          <Image
+            source={{ uri: fileUrl }}
+            style={styles.imagePreview}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
+        {caption && (
+          <Text style={[styles.caption, { color: captionColor }]}>{caption}</Text>
+        )}
+      </>
+    );
+
+    if (isOutgoing) {
+      return <View style={[styles.bubble, styles.bubbleOut, styles.imageBubble]}>{imageContent}</View>;
+    }
+    return (
+      <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn, styles.imageBubble]}>
+        {imageContent}
+      </LinearGradient>
+    );
+  }
 
   const content = (
-    <TouchableOpacity
-      style={styles.fileRow}
-      onPress={handlePress}
-      activeOpacity={0.7}
-    >
-      {/* File icon */}
-      <View style={[styles.fileIcon, { backgroundColor: iconBgColor }]}>
-        <Ionicons name={iconName} size={24} color={iconColor} />
-        <Text style={[styles.fileExt, { color: iconColor }]}>{extension}</Text>
-      </View>
+    <>
+      <TouchableOpacity
+        style={styles.fileRow}
+        onPress={handlePress}
+        activeOpacity={0.7}
+      >
+        {/* File icon */}
+        <View style={[styles.fileIcon, { backgroundColor: iconBgColor }]}>
+          <Ionicons name={iconName} size={24} color={iconColor} />
+          <Text style={[styles.fileExt, { color: iconColor }]}>{extension}</Text>
+        </View>
 
-      {/* File info */}
-      <View style={styles.fileInfo}>
-        <Text 
-          style={[styles.fileName, { color: fileNameColor }]}
-          numberOfLines={2}
-          ellipsizeMode="middle"
-        >
-          {fileName}
-        </Text>
-        <Text style={[styles.fileSize, { color: metaColor }]}>
-          {sizeText}
-        </Text>
-      </View>
+        {/* File info */}
+        <View style={styles.fileInfo}>
+          <Text 
+            style={[styles.fileName, { color: fileNameColor }]}
+            numberOfLines={2}
+            ellipsizeMode="middle"
+          >
+            {fileName}
+          </Text>
+          <Text style={[styles.fileSize, { color: metaColor }]}>
+            {sizeText}
+          </Text>
+        </View>
 
-      {/* Download indicator */}
-      <Ionicons 
-        name="download-outline" 
-        size={20} 
-        color={metaColor} 
-      />
-    </TouchableOpacity>
+        {/* Download indicator */}
+        <Ionicons 
+          name="download-outline" 
+          size={20} 
+          color={metaColor} 
+        />
+      </TouchableOpacity>
+      {caption && (
+        <Text style={[styles.caption, { color: captionColor }]}>{caption}</Text>
+      )}
+    </>
   );
 
   if (isOutgoing) {
@@ -194,5 +230,20 @@ const styles = StyleSheet.create({
   fileSize: {
     fontSize: 11,
     fontWeight: '500',
+  },
+  imagePreview: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+  },
+  imageBubble: {
+    padding: 4,
+  },
+  caption: {
+    fontSize: 14,
+    lineHeight: 18,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
 });
