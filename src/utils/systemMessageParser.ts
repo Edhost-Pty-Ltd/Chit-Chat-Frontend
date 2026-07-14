@@ -110,6 +110,12 @@ export function parseSystemMessage(messageText: string, currentUserId: string | 
     return `${userName} changed their number to ${newNumber}`;
   }
 
+  // Handle legacy plain-text join messages (before GROUP_JOIN_LINK format was added)
+  if (messageText === 'Someone joined' || messageText.match(/^.+ joined$/)) {
+    return messageText.replace('Someone joined', 'Someone joined using invite link')
+      .replace(/ joined$/, ' joined using invite link');
+  }
+
   // Return original text for other system messages
   return messageText;
 }

@@ -46,7 +46,8 @@ export function LocationMessageBubble({
   const { FG } = useForeground();
   const [isLive, setIsLive] = useState(isLiveLocation);
   const [timeRemaining, setTimeRemaining] = useState<string>('');
-
+  const [mapLoading, setMapLoading] = useState(true);
+  const [mapError, setMapError] = useState(false);
   // Check if live location has expired
   useEffect(() => {
     if (!isLiveLocation || !liveLocationExpiry) return;
@@ -78,24 +79,32 @@ export function LocationMessageBubble({
     return () => clearInterval(interval);
   }, [isLiveLocation, liveLocationExpiry]);
 
-  // Generate static map image URL using Google Maps Static API
-  const getStaticMapUrl = () => {
+  // Generate static map image URLs - returns multiple tiles to form the map
+  const getMapTiles = () => {
     const { latitude, longitude } = location;
     const zoom = 15;
-    const width = 600;
-    const height = 360;
-    const scale = 2; // For retina displays
     
-    // Using Google Maps Static API
-    // Note: You'll need to add your API key in production
-    const apiKey = 'YOUR_GOOGLE_MAPS_API_KEY'; // Replace with actual key
+    // Calculate tile coordinates
+    const n = Math.pow(2, zoom);
+    const tileX = Math.floor((longitude + 180) / 360 * n);
+    const latRad = latitude * Math.PI / 180;
+    const tileY = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
     
-    // For now, using MapQuest static map (no key required for basic usage)
-    return `https://www.mapquestapi.com/staticmap/v5/map?locations=${latitude},${longitude}&size=${width},${height}&zoom=${zoom}&defaultMarker=marker-sm-blue`;
-    
-    // Alternative: Google Maps (requires API key)
-    // return `https://maps.googleapis.com/maps/api/staticmap?center=${latitude},${longitude}&zoom=${zoom}&size=${width}x${height}&scale=${scale}&markers=color:blue%7C${latitude},${longitude}&key=${apiKey}`;
+    // Get a 3x2 grid of tiles centered on the location
+    const tiles = [];
+    for (let dy = -1; dy <= 0; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        tiles.push({
+          url: `https://tile.openstreetmap.org/${zoom}/${tileX + dx}/${tileY + dy}.png`,
+          x: dx + 1,
+          y: dy + 1,
+        });
+      }
+    }
+    return tiles;
   };
+  
+  const mapTiles = getMapTiles();
 
   // Open location in maps app
   const openInMaps = () => {
@@ -142,22 +151,56 @@ export function LocationMessageBubble({
         </View>
       )}
 
-      {/* Map preview with actual map image */}
+      {/* Map preview with OSM tiles */}
       <TouchableOpacity 
         style={styles.mapPreview}
         onPress={openInMaps}
         activeOpacity={0.8}
       >
-        <Image
-          source={{ uri: getStaticMapUrl() }}
-          style={styles.mapImage}
-          resizeMode="cover"
-        />
-        
-        {/* Location pin overlay */}
-        <View style={styles.pinOverlay}>
-          <AppIcon name="location-sharp" size={32} color={COLORS.missed} />
+        {/* Map tiles grid */}
+        <View style={styles.tilesContainer}>
+          {mapTiles.map((tile, index) => (
+            <Image
+              key={index}
+              source={{ 
+                uri: tile.url,
+                headers: {
+                  'User-Agent': 'ChitChat-App/1.0',
+                },
+              }}
+              style={[
+                styles.mapTile,
+                { left: tile.x * 85, top: tile.y * 85 }
+              ]}
+              resizeMode="cover"
+              onError={() => setMapError(true)}
+              onLoad={() => setMapLoading(false)}
+            />
+          ))}
         </View>
+        
+        {/* Loading placeholder */}
+        {mapLoading && !mapError && (
+          <View style={styles.mapPlaceholder}>
+            <AppIcon name="location-sharp" size={48} color={COLORS.sub} />
+            <AppText style={styles.loadingText}>Loading map...</AppText>
+          </View>
+        )}
+        
+        {/* Error fallback */}
+        {mapError && (
+          <View style={styles.mapPlaceholder}>
+            <AppIcon name="location-sharp" size={48} color={COLORS.blue} />
+            <AppText style={styles.tapToOpenText}>Tap to open in Maps</AppText>
+          </View>
+        )}
+        
+        {/* Location pin overlay - centered */}
+        {!mapError && (
+          <View style={styles.pinOverlay}>
+            <AppIcon name="location-sharp" size={32} color={COLORS.missed} />
+          </View>
+        )}
         
         {/* Coordinates overlay */}
         <View style={styles.coordsOverlay}>
@@ -247,10 +290,46 @@ const styles = StyleSheet.create({
     height: 180,
     backgroundColor: COLORS.bg2,
     position: 'relative',
+    overflow: 'hidden',
+  },
+  tilesContainer: {
+    position: 'absolute',
+    width: 255, // 3 tiles * 85px
+    height: 170, // 2 tiles * 85px
+    left: '50%',
+    top: '50%',
+    marginLeft: -127.5,
+    marginTop: -85,
+  },
+  mapTile: {
+    position: 'absolute',
+    width: 90,
+    height: 90,
   },
   mapImage: {
     width: '100%',
     height: '100%',
+  },
+  mapPlaceholder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.bg2,
+    zIndex: 1,
+  },
+  loadingText: {
+    fontSize: 12,
+    color: COLORS.sub,
+    marginTop: 8,
+  },
+  tapToOpenText: {
+    fontSize: 12,
+    color: COLORS.blue,
+    marginTop: 8,
   },
   pinOverlay: {
     position: 'absolute',

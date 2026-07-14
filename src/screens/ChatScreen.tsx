@@ -3,8 +3,8 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View, FlatList, TouchableOpacity, ScrollView,
   StyleSheet, TextInput, KeyboardAvoidingView, Platform,
-  ActivityIndicator, PanResponder, Linking, Modal, Alert,
-  GestureResponderEvent, PanResponderGestureState, Image, Dimensions,
+  ActivityIndicator, Linking, Modal, Alert,
+  Image, Dimensions,
   Animated,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -12,6 +12,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Contacts from 'expo-contacts/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NotificationTestPanel } from '../components/NotificationTestPanel';
 
@@ -75,7 +76,6 @@ type NavProp = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
 type RoutePropType = RouteProp<RootStackParamList, 'Chat'>;
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const CANCEL_THRESHOLD_DP = 50;
 const MAX_UPLOAD_RETRIES = 3;
 const PERMISSION_MESSAGE_DURATION_MS = 3000;
 const MUTE_STORAGE_KEY_PREFIX = 'chat_mute_';
@@ -459,6 +459,9 @@ export default function ChatScreen() {
 
   // ── Firebase signup name for unsaved contacts (used for avatar initials on calls) ──
   const [otherUserSignupName, setOtherUserSignupName] = useState<string | null>(null);
+  const [otherUserPhone, setOtherUserPhone] = useState<string | null>(null);
+  const isOtherUserSaved = !isGroup && otherUserId ? phoneContacts.some((c) => c.userId === otherUserId) : true;
+  
   useEffect(() => {
     if (isGroup || !otherUserId) return;
     // Check if the contact is saved in the phone book
@@ -466,14 +469,18 @@ export default function ChatScreen() {
     if (isSaved) {
       // Saved contact — initials come from the phone-book name, no fetch needed
       setOtherUserSignupName(null);
+      setOtherUserPhone(null);
       return;
     }
-    // Unsaved contact — fetch their Firebase profile for the signup username
+    // Unsaved contact — fetch their Firebase profile for the signup username and phone
     getDoc(doc(db, 'users', otherUserId)).then((snap) => {
       if (snap.exists()) {
         const data = snap.data();
         if (data.displayName) {
           setOtherUserSignupName(data.displayName);
+        }
+        if (data.phone) {
+          setOtherUserPhone(data.phone);
         }
       }
     }).catch((err) => {
@@ -494,6 +501,24 @@ export default function ChatScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [muted, setMuted] = useState(false);
   const [selectedDuration, setSelectedDuration] = useState(15);
+
+  // ── Media preview state (before sending) ────────────────────────
+  const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
+  const [mediaPreviewUri, setMediaPreviewUri] = useState<string | null>(null);
+  const [mediaPreviewCaption, setMediaPreviewCaption] = useState('');
+  const [pendingMediaAssets, setPendingMediaAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
+
+  // ── File preview state (before sending) ──────────────────────────
+  const [filePreviewOpen, setFilePreviewOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<DocumentPicker.DocumentPickerAsset[]>([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [filePreviewCaption, setFilePreviewCaption] = useState('');
+
+  // ── Save contact modal state ────────────────────────────────────
+  const [saveContactModalOpen, setSaveContactModalOpen] = useState(false);
+  const [saveContactName, setSaveContactName] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
 
   // ── Search state ────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false);
@@ -574,7 +599,7 @@ export default function ChatScreen() {
   const [messageInfoVisible, setMessageInfoVisible] = useState(false);
   const [messageForInfo, setMessageForInfo] = useState<FireMessage | null>(null);
 
-  // ── Contact picker state (share contact via 3-dot menu) ─────────
+  // ── Contact picker state (share contact via attachment menu) ─────────
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [contactQuery, setContactQuery] = useState('');
 
@@ -1428,40 +1453,32 @@ export default function ChatScreen() {
   // ── Video call handler ──────────────────────────────────────────────────────
   const handleVideoCall = useCallback(() => startCall('video'), [startCall]);
 
-  // ── PanResponder for mic button ─────────────────────────────────
-  const micPanResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-
-    onPanResponderGrant: (_evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-      isCancelledRef.current = false;
-      recorder.startRecording();
-    },
-
-    onPanResponderMove: (_evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
-      const distance = Math.sqrt(gestureState.dx * gestureState.dx + gestureState.dy * gestureState.dy);
-      if (distance >= CANCEL_THRESHOLD_DP && !isCancelledRef.current) {
-        isCancelledRef.current = true;
-        recorder.cancelRecording();
-      }
-    },
-
-    onPanResponderRelease: async (_evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-      if (isCancelledRef.current) return;
-
+  // ── Voice recording tap handler (WhatsApp-style) ─────────────────
+  const handleMicTap = useCallback(async () => {
+    if (isRecording) {
+      // Stop recording and send
       const result = await recorder.stopRecording();
       if (result) {
         handleVoiceUploadAndSend(result);
       }
-    },
+    } else {
+      // Start recording
+      isCancelledRef.current = false;
+      await recorder.startRecording();
+    }
+  }, [isRecording, recorder, handleVoiceUploadAndSend]);
 
-    onPanResponderTerminate: () => {
-      if (!isCancelledRef.current) {
-        isCancelledRef.current = true;
-        recorder.cancelRecording();
-      }
-    },
-  }), [recorder, handleVoiceUploadAndSend]);
+  const handleVoiceDelete = useCallback(async () => {
+    isCancelledRef.current = true;
+    await recorder.cancelRecording();
+  }, [recorder]);
+
+  const handleVoiceSend = useCallback(async () => {
+    const result = await recorder.stopRecording();
+    if (result) {
+      handleVoiceUploadAndSend(result);
+    }
+  }, [recorder, handleVoiceUploadAndSend]);
 
   // ── Dismiss permission message ──────────────────────────────────
   const dismissPermissionMessage = useCallback(() => {
@@ -1578,67 +1595,100 @@ export default function ChatScreen() {
 
   const openGallery = async () => {
     try {
-      // Request media library permission first
-      const { granted } = mediaLibraryPermission ?? await requestMediaLibraryPermission();
-      if (!granted) {
-        Alert.alert('Permission needed', 'Allow photo access to select images from your gallery.');
-        return;
+      // On Android 13+, expo-image-picker handles permissions automatically
+      // We use its permission request instead of expo-media-library
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        // Check if it's "limited" access on iOS (still usable)
+        if (permissionResult.accessPrivileges === 'limited') {
+          // Limited access is okay, proceed
+        } else {
+          Alert.alert(
+            'Permission needed', 
+            'Allow photo access to select images from your gallery.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() }
+            ]
+          );
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsMultipleSelection: true, // Enable multiple selection
+        allowsMultipleSelection: true,
         quality: 0.85,
       });
       
       if (!result.canceled && result.assets.length > 0 && userId) {
         setShowAttach(false);
-        setUploadingImage(true);
-        setImageUploadProgress(0);
-        
-        // Upload images sequentially
-        for (let i = 0; i < result.assets.length; i++) {
-          const imageUri = result.assets[i].uri;
-          console.log(`[ChatScreen] Uploading image ${i + 1}/${result.assets.length}`);
-          
-          try {
-            // Reset progress for each image
-            setImageUploadProgress(0);
-            
-            const compressedUri = await compressImage(imageUri);
-            
-            const uploadResult = await sendImageMessage(
-              chatId,
-              userId,
-              compressedUri,
-              (progress) => {
-                setImageUploadProgress(progress);
-                console.log(`[ChatScreen] Image ${i + 1} upload progress:`, progress);
-              }
-            );
-            
-            if (!uploadResult.success) {
-              console.error(`[ChatScreen] Image ${i + 1} upload failed`);
-              Alert.alert('Upload Failed', `Image ${i + 1} could not be sent. Continuing with others...`);
-            } else {
-              console.log(`[ChatScreen] Image ${i + 1} uploaded successfully`);
-            }
-          } catch (error) {
-            console.error(`[ChatScreen] Image ${i + 1} upload error:`, error);
-            Alert.alert('Error', `Failed to upload image ${i + 1}. Continuing with others...`);
-          }
-        }
-        
-        console.log('[ChatScreen] All images processed');
-        setUploadingImage(false);
-        setImageUploadProgress(0);
+        // Show preview modal instead of sending directly
+        setPendingMediaAssets(result.assets);
+        setCurrentMediaIndex(0);
+        setMediaPreviewUri(result.assets[0].uri);
+        setMediaPreviewCaption('');
+        setMediaPreviewOpen(true);
       }
     } catch (error) {
       console.error('[ChatScreen] Gallery error:', error);
-      setUploadingImage(false);
-      setImageUploadProgress(0);
-      Alert.alert('Error', 'Failed to select or upload images.');
+      Alert.alert('Error', 'Failed to select images.');
     }
+  };
+
+  // Send media after preview confirmation
+  const handleSendMedia = async () => {
+    if (!userId || pendingMediaAssets.length === 0) return;
+    
+    setMediaPreviewOpen(false);
+    setUploadingImage(true);
+    setImageUploadProgress(0);
+    
+    const caption = mediaPreviewCaption.trim();
+    
+    // Upload images sequentially
+    for (let i = 0; i < pendingMediaAssets.length; i++) {
+      const imageUri = pendingMediaAssets[i].uri;
+      console.log(`[ChatScreen] Uploading image ${i + 1}/${pendingMediaAssets.length}`);
+      
+      try {
+        setImageUploadProgress(0);
+        const compressedUri = await compressImage(imageUri);
+        
+        const uploadResult = await sendImageMessage(
+          chatId,
+          userId,
+          compressedUri,
+          (progress) => {
+            setImageUploadProgress(progress);
+          },
+          // Send caption only with the first image
+          i === 0 ? caption : undefined
+        );
+        
+        if (!uploadResult.success) {
+          console.error(`[ChatScreen] Image ${i + 1} upload failed`);
+          Alert.alert('Upload Failed', `Image ${i + 1} could not be sent.`);
+        }
+      } catch (error) {
+        console.error(`[ChatScreen] Image ${i + 1} upload error:`, error);
+        Alert.alert('Error', `Failed to upload image ${i + 1}.`);
+      }
+    }
+    
+    setUploadingImage(false);
+    setImageUploadProgress(0);
+    setPendingMediaAssets([]);
+    setMediaPreviewCaption('');
+  };
+
+  const handleCancelMediaPreview = () => {
+    setMediaPreviewOpen(false);
+    setPendingMediaAssets([]);
+    setMediaPreviewUri(null);
+    setMediaPreviewCaption('');
+    setCurrentMediaIndex(0);
   };
 
   const openDocuments = async () => {
@@ -1650,52 +1700,108 @@ export default function ChatScreen() {
       
       if (!result.canceled && result.assets.length > 0 && userId) {
         setShowAttach(false);
-        setUploadingImage(true);
-        setImageUploadProgress(0);
-        
-        for (let i = 0; i < result.assets.length; i++) {
-          const file = result.assets[i];
-          console.log(`[ChatScreen] Uploading file ${i + 1}/${result.assets.length}:`, file.name, file.mimeType);
-          
-          try {
-            // Reset progress for each file
-            setImageUploadProgress(0);
-            
-            const uploadResult = await sendFileMessage(
-              chatId,
-              userId,
-              file.uri,
-              file.name,
-              file.size || 0,
-              file.mimeType || 'application/octet-stream',
-              (progress) => {
-                setImageUploadProgress(progress);
-                console.log(`[ChatScreen] File ${i + 1} upload progress:`, progress);
-              }
-            );
-            
-            if (!uploadResult.success) {
-              console.error(`[ChatScreen] File ${i + 1} upload failed`);
-              Alert.alert('Upload Failed', `${file.name} could not be sent. Continuing with others...`);
-            } else {
-              console.log(`[ChatScreen] File ${i + 1} uploaded successfully`);
-            }
-          } catch (error) {
-            console.error(`[ChatScreen] File ${i + 1} upload error:`, error);
-            Alert.alert('Error', `Failed to upload ${file.name}. Continuing with others...`);
-          }
-        }
-        
-        console.log('[ChatScreen] All files processed');
-        setUploadingImage(false);
-        setImageUploadProgress(0);
+        // Show preview modal instead of sending directly
+        setPendingFiles(result.assets);
+        setCurrentFileIndex(0);
+        setFilePreviewOpen(true);
       }
     } catch (error) {
       console.error('[ChatScreen] Document picker error:', error);
-      setUploadingImage(false);
-      setImageUploadProgress(0);
       Alert.alert('Error', 'Failed to select files.');
     }
+  };
+
+  // Send files after preview confirmation
+  const handleSendFiles = async () => {
+    if (!userId || pendingFiles.length === 0) return;
+    
+    setFilePreviewOpen(false);
+    setUploadingImage(true);
+    setImageUploadProgress(0);
+    
+    const caption = filePreviewCaption.trim();
+    
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      console.log(`[ChatScreen] Uploading file ${i + 1}/${pendingFiles.length}:`, file.name, file.mimeType);
+      
+      try {
+        // Reset progress for each file
+        setImageUploadProgress(0);
+        
+        const uploadResult = await sendFileMessage(
+          chatId,
+          userId,
+          file.uri,
+          file.name,
+          file.size || 0,
+          file.mimeType || 'application/octet-stream',
+          (progress) => {
+            setImageUploadProgress(progress);
+            console.log(`[ChatScreen] File ${i + 1} upload progress:`, progress);
+          },
+          // Send caption only with the first file
+          i === 0 ? caption : undefined
+        );
+        
+        if (!uploadResult.success) {
+          console.error(`[ChatScreen] File ${i + 1} upload failed`);
+          Alert.alert('Upload Failed', `${file.name} could not be sent. Continuing with others...`);
+        } else {
+          console.log(`[ChatScreen] File ${i + 1} uploaded successfully`);
+        }
+      } catch (error) {
+        console.error(`[ChatScreen] File ${i + 1} upload error:`, error);
+        Alert.alert('Error', `Failed to upload ${file.name}. Continuing with others...`);
+      }
+    }
+    
+    console.log('[ChatScreen] All files processed');
+    setUploadingImage(false);
+    setImageUploadProgress(0);
+    setPendingFiles([]);
+    setFilePreviewCaption('');
+  };
+
+  const handleCancelFilePreview = () => {
+    setFilePreviewOpen(false);
+    setPendingFiles([]);
+    setCurrentFileIndex(0);
+    setFilePreviewCaption('');
+  };
+
+  const handleRemoveFile = (index: number) => {
+    const newFiles = pendingFiles.filter((_, i) => i !== index);
+    if (newFiles.length === 0) {
+      handleCancelFilePreview();
+    } else {
+      setPendingFiles(newFiles);
+      if (currentFileIndex >= newFiles.length) {
+        setCurrentFileIndex(newFiles.length - 1);
+      }
+    }
+  };
+
+  // Helper to get file icon based on mime type
+  const getFileIcon = (mimeType?: string): string => {
+    if (!mimeType) return 'document-outline';
+    if (mimeType.startsWith('image/')) return 'image-outline';
+    if (mimeType.startsWith('video/')) return 'videocam-outline';
+    if (mimeType.startsWith('audio/')) return 'musical-notes-outline';
+    if (mimeType.includes('pdf')) return 'document-text-outline';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'document-text-outline';
+    if (mimeType.includes('sheet') || mimeType.includes('excel')) return 'grid-outline';
+    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'easel-outline';
+    if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('archive')) return 'archive-outline';
+    return 'document-outline';
+  };
+
+  // Helper to format file size
+  const formatFileSize = (bytes?: number): string => {
+    if (!bytes) return 'Unknown size';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const openAudioPicker = async () => {
@@ -1975,6 +2081,83 @@ export default function ChatScreen() {
     }
   }, [userId, otherUserId, isGroup, displayName]);
 
+  // ── Save contact to phone handler ───────────────────────────────
+  const handleOpenSaveContactModal = useCallback(() => {
+    if (!otherUserPhone || isGroup) return;
+    setSaveContactName(displayName); // Pre-fill with current display name
+    setSaveContactModalOpen(true);
+  }, [otherUserPhone, displayName, isGroup]);
+
+  const handleSaveContact = useCallback(async () => {
+    if (!otherUserPhone || !saveContactName.trim()) {
+      Alert.alert('Error', 'Please enter a name for the contact.');
+      return;
+    }
+    
+    setSavingContact(true);
+    
+    try {
+      // Request write permission for contacts
+      const { status } = await Contacts.requestPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please grant contacts permission to save this contact.',
+          [{ text: 'OK' }]
+        );
+        setSavingContact(false);
+        return;
+      }
+      
+      // Parse the name
+      const nameParts = saveContactName.trim().split(' ');
+      const firstName = nameParts[0];
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
+      // Create the contact object for legacy API
+      const contact = {
+        contactType: Contacts.ContactTypes.Person,
+        name: saveContactName.trim(),
+        firstName,
+        lastName,
+        phoneNumbers: [{
+          number: otherUserPhone,
+          label: 'mobile',
+        }],
+      } as Contacts.Contact;
+      
+      // Add the contact to the phone
+      const contactId = await Contacts.addContactAsync(contact);
+      
+      setSavingContact(false);
+      setSaveContactModalOpen(false);
+      
+      if (contactId) {
+        Alert.alert('Contact Saved', `${saveContactName.trim()} has been added to your contacts.`);
+      } else {
+        Alert.alert('Error', 'Failed to save contact. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('[ChatScreen] Error saving contact:', error);
+      setSavingContact(false);
+      
+      // Fallback: Show the contact info for manual save
+      Alert.alert(
+        'Save Contact',
+        `Could not save automatically.\n\nName: ${saveContactName.trim()}\nPhone: ${otherUserPhone}\n\nPlease add this contact manually.`,
+        [
+          { text: 'OK' },
+          { 
+            text: 'Open Dialer', 
+            onPress: () => Linking.openURL(`tel:${otherUserPhone}`) 
+          }
+        ]
+      );
+      setSaveContactModalOpen(false);
+    }
+  }, [otherUserPhone, saveContactName]);
+
   // ── Leave group handler ─────────────────────────────────────────
   const handleLeaveGroup = useCallback(async () => {
     if (!userId || !chatId || !isGroup) {
@@ -2248,6 +2431,7 @@ export default function ChatScreen() {
 
   const handleJoinFromPreview = useCallback(async () => {
     if (!invitePreview || !userId) return;
+    console.log('[ChatScreen] handleJoinFromPreview called with inviteCode:', invitePreview.inviteCode);
     try {
       const q2 = query(collection(db, 'chats'), where('inviteCode', '==', invitePreview.inviteCode));
       const snap = await getDocs(q2);
@@ -2276,9 +2460,11 @@ export default function ChatScreen() {
         members: [...members, userId],
         [`memberJoinedAt.${userId}`]: serverTimestamp(),
       });
+      console.log('[ChatScreen] Sending GROUP_JOIN_LINK message...');
       const { sendGroupJoinLinkMessage } = await import('../hooks/useChatActions');
       const userName = user?.displayName || 'Someone';
       await sendGroupJoinLinkMessage(chatDoc.id, userId, userName);
+      console.log('[ChatScreen] GROUP_JOIN_LINK message sent');
       await updateDoc(doc(db, 'chats', chatDoc.id), {
         'lastMessage.text': `${userName} joined via invite link`,
         'lastMessage.senderId': 'system',
@@ -2511,6 +2697,7 @@ export default function ChatScreen() {
               fileUrl={item.fileUrl!}
               mimeType={item.mimeType ?? undefined}
               isOutgoing={false}
+              caption={item.text}
             />
           ) : item.type === 'location' && item.location ? (
             <LocationMessageBubble
@@ -2597,7 +2784,11 @@ export default function ChatScreen() {
                   resizeMode="cover"
                 />
               </TouchableOpacity>
-              <View style={styles.imageTimeOverlay}>
+              {/* Caption text */}
+              {item.text && (
+                <AppText fixedColor style={[styles.bubbleTextIn, styles.imageCaptionText]}>{item.text}</AppText>
+              )}
+              <View style={item.text ? styles.imageCaptionTimeRow : styles.imageTimeOverlay}>
                 <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
               </View>
             </LinearGradient>
@@ -2731,6 +2922,7 @@ export default function ChatScreen() {
               fileUrl={item.fileUrl!}
               mimeType={item.mimeType ?? undefined}
               isOutgoing={true}
+              caption={item.text}
             />
           ) : item.type === 'location' && item.location ? (
             <LocationMessageBubble
@@ -2811,7 +3003,11 @@ export default function ChatScreen() {
                   resizeMode="cover"
                 />
               </TouchableOpacity>
-              <View style={styles.imageTimeOverlay}>
+              {/* Caption text */}
+              {item.text && (
+                <AppText style={[styles.bubbleTextOut, styles.imageCaptionText, { color: textColor, fontFamily }]}>{item.text}</AppText>
+              )}
+              <View style={item.text ? styles.imageCaptionTimeRow : styles.imageTimeOverlay}>
                 <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
                 <AppIcon
                   name={tickIcon.icon}
@@ -3368,14 +3564,11 @@ export default function ChatScreen() {
                     </LinearGradient>
                   </TouchableOpacity>
                 ) : (
-                  <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
-                    <LinearGradient
-                      colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
-                      style={styles.sendBtnInner}
-                    >
+                  <TouchableOpacity onPress={handleMicTap} activeOpacity={0.85} style={styles.sendBtn}>
+                    <LinearGradient colors={['#7dd3fc', '#38bdf8']} style={styles.sendBtnInner}>
                       <AppIcon name="mic" size={19} color="#fff" fixedColor />
                     </LinearGradient>
-                  </View>
+                  </TouchableOpacity>
                 )}
               </View>
             </View>
@@ -3383,12 +3576,34 @@ export default function ChatScreen() {
             /* Normal Input Bar */
             <View style={styles.inputBar}>
             {isRecording ? (
-              <View style={styles.recordingOverlayContainer}>
-                <VoiceRecordingOverlay
-                  durationMs={recorder.state.durationMs}
-                  isWarning={recorder.state.isWarning}
-                  onCancel={() => recorder.cancelRecording()}
-                />
+              <View style={styles.voiceRecordingBar}>
+                {/* Delete button */}
+                <TouchableOpacity onPress={handleVoiceDelete} style={styles.voiceDeleteBtn}>
+                  <AppIcon name="trash-outline" size={22} color="#e53935" fixedColor />
+                </TouchableOpacity>
+                
+                {/* Waveform + Timer */}
+                <View style={styles.voiceRecordingCenter}>
+                  <View style={styles.voiceWaveform}>
+                    {Array.from({ length: 24 }).map((_, i) => (
+                      <View
+                        key={i}
+                        style={[
+                          styles.voiceWaveBar,
+                          { height: 6 + Math.random() * 18, opacity: 0.5 + Math.random() * 0.5 },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                  <AppText style={styles.voiceTimerText}>
+                    {Math.floor((recorder.state.durationMs || 0) / 60000)}:{String(Math.floor(((recorder.state.durationMs || 0) % 60000) / 1000)).padStart(2, '0')}
+                  </AppText>
+                </View>
+
+                {/* Send button (green) */}
+                <TouchableOpacity onPress={handleVoiceSend} activeOpacity={0.85} style={styles.voiceSendBtn}>
+                  <AppIcon name="send" size={20} color="#fff" fixedColor />
+                </TouchableOpacity>
               </View>
             ) : (
               <>
@@ -3424,22 +3639,21 @@ export default function ChatScreen() {
               </>
             )}
 
-            {/* Mic / Send button */}
-            {input.trim() || isUploading ? (
-              <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
-                <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
-                  <AppIcon name="send" size={19} color="#fff" fixedColor />
-                </LinearGradient>
-              </TouchableOpacity>
-            ) : (
-              <View {...micPanResponder.panHandlers} style={styles.sendBtn}>
-                <LinearGradient
-                  colors={isRecording ? ['#ef4444', '#dc2626'] : ['#7dd3fc', '#38bdf8']}
-                  style={styles.sendBtnInner}
-                >
-                  <AppIcon name={isRecording ? 'stop' : 'mic'} size={19} color="#fff" fixedColor />
-                </LinearGradient>
-              </View>
+            {/* Mic / Send button — only when NOT recording */}
+            {!isRecording && (
+              input.trim() || isUploading ? (
+                <TouchableOpacity onPress={() => handleSend()} activeOpacity={0.85} style={styles.sendBtn}>
+                  <LinearGradient colors={GRADIENTS.primary} style={styles.sendBtnInner}>
+                    <AppIcon name="send" size={19} color="#fff" fixedColor />
+                  </LinearGradient>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={handleMicTap} activeOpacity={0.85} style={styles.sendBtn}>
+                  <LinearGradient colors={['#7dd3fc', '#38bdf8']} style={styles.sendBtnInner}>
+                    <AppIcon name="mic" size={19} color="#fff" fixedColor />
+                  </LinearGradient>
+                </TouchableOpacity>
+              )
             )}
           </View>
           )}
@@ -3461,9 +3675,11 @@ export default function ChatScreen() {
           <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share</AppText>
           <View style={styles.attachGrid}>
             {[
+              { icon: 'images-outline'   as const, label: 'Gallery',  action: openGallery },
               { icon: 'document-outline' as const, label: 'Files',    action: openDocuments },
               { icon: 'camera-outline'   as const, label: 'Camera',   action: () => { setShowAttach(false); openCamera(); } },
               { icon: 'location-outline' as const, label: 'Location', action: handleOpenLocationMenu },
+              { icon: 'person-outline'   as const, label: 'Contact',  action: () => { setShowAttach(false); setContactQuery(''); setContactPickerOpen(true); } },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={[styles.attachItem, bevel]}
                 onPress={item.action} activeOpacity={0.8}>
@@ -3723,7 +3939,7 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Contact Picker Modal ── */}
+      {/* ── Contact Picker Modal (share a contact card in current chat) ── */}
       <Modal visible={contactPickerOpen} transparent animationType="slide" onRequestClose={() => setContactPickerOpen(false)}>
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -3734,7 +3950,7 @@ export default function ChatScreen() {
             <AppBg />
             <View style={styles.attachHandle} />
             <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>
-              {isGroup ? 'Share Contact' : `Send ${displayName}'s contact to…`}
+              Share Contact
             </AppText>
 
             {/* Search */}
@@ -3776,7 +3992,7 @@ export default function ChatScreen() {
                     Please grant contacts permission in your device settings to share contacts
                   </AppText>
                 </View>
-              ) : !phoneContacts || phoneContacts.filter(c => c.userId && c.userId !== userId && c.userId !== otherUserId).length === 0 ? (
+              ) : !phoneContacts || phoneContacts.filter(c => c.userId && c.userId !== userId).length === 0 ? (
                 <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
                   <AppIcon name="people-outline" size={48} color={COLORS.sub} />
                   <AppText style={{ color: textColor, fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
@@ -3790,7 +4006,6 @@ export default function ChatScreen() {
                 <>
                   {phoneContacts
                     .filter(c => c.userId && c.userId !== userId)       // must be a ChitChat user and not self
-                    .filter(c => c.userId !== otherUserId)               // don't share the recipient back to themselves
                     .filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery))
                     .map((c) => (
                       <TouchableOpacity
@@ -3799,33 +4014,22 @@ export default function ChatScreen() {
                         activeOpacity={0.75}
                         onPress={async () => {
                           setContactPickerOpen(false);
-                          if (!userId || !otherUserId) return;
+                          if (!userId || !chatId) return;
                           try {
-                            // Fetch the CURRENT chat partner's phone (the contact we want to share)
-                            const partnerSnap = await getDoc(doc(db, 'users', otherUserId));
-                            const partnerPhone = partnerSnap.exists() ? (partnerSnap.data().phone as string | undefined) : undefined;
-                            if (!partnerPhone) {
-                              console.error('[ShareContact] Could not resolve chat partner phone number');
-                              return;
-                            }
-
-                            // Find or create the chat between me (sender) and the picked recipient
-                            const recipientChatId = await getOrCreateDirectChat(userId, c.userId);
-
-                            // Write the CURRENT chat partner's contact card into the recipient chat
-                            await addDoc(collection(db, 'chats', recipientChatId, 'messages'), {
+                            // Send the selected contact's card to the current chat
+                            await addDoc(collection(db, 'chats', chatId, 'messages'), {
                               senderId: userId,
                               type: 'contact',
-                              contactName: displayName,     // current chat partner's name
-                              contactPhone: partnerPhone,   // current chat partner's phone
-                              contactUserId: otherUserId,   // current chat partner's Firestore userId
+                              contactName: c.displayName,     // selected contact's name
+                              contactPhone: c.phone,          // selected contact's phone
+                              contactUserId: c.userId,        // selected contact's Firestore userId
                               text: null,
                               timestamp: serverTimestamp(),
                               readBy: [userId],
                               deliveredTo: [],
                             });
-                            await updateDoc(doc(db, 'chats', recipientChatId), {
-                              'lastMessage.text': `👤 ${displayName}`,
+                            await updateDoc(doc(db, 'chats', chatId), {
+                              'lastMessage.text': `👤 ${c.displayName}`,
                               'lastMessage.senderId': userId,
                               'lastMessage.timestamp': serverTimestamp(),
                             });
@@ -3847,7 +4051,7 @@ export default function ChatScreen() {
                         <AppIcon name="share-outline" size={18} color={COLORS.blue} fixedColor />
                       </TouchableOpacity>
                     ))}
-                  {phoneContacts.filter(c => c.userId && c.userId !== userId).filter(c => c.userId !== otherUserId).filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery)).length === 0 && contactQuery.trim() && (
+                  {phoneContacts.filter(c => c.userId && c.userId !== userId).filter(c => !contactQuery.trim() || c.displayName.toLowerCase().includes(contactQuery.toLowerCase()) || c.phone.includes(contactQuery)).length === 0 && contactQuery.trim() && (
                     <View style={{ alignItems: 'center', paddingTop: 40, gap: 10 }}>
                       <AppIcon name="search-outline" size={44} color={COLORS.sub} />
                       <AppText style={{ color: COLORS.sub, fontSize: 14 }}>No contacts match "{contactQuery}"</AppText>
@@ -4231,6 +4435,12 @@ export default function ChatScreen() {
                 <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>
                   {displayName}
                 </AppText>
+                {/* Phone number - show for individual chats */}
+                {!isGroup && (
+                  <AppText style={[styles.profilePhone, { color: FG.secondary }]}>
+                    {otherUserPhone || phoneContacts.find(c => c.userId === otherUserId)?.phone || ''}
+                  </AppText>
+                )}
                 <AppText style={[styles.profileStatus, { color: isOnline ? COLORS.blue : FG.secondary }]}>
                   {isGroup ? `Group · ${groupMembers.length} members` : (presenceText || 'Tap here for info')}
                 </AppText>
@@ -4552,6 +4762,36 @@ export default function ChatScreen() {
                   </>
                 )}
 
+                {/* Contact section - Only show for individual chats with unsaved contacts */}
+                {!isGroup && !isOtherUserSaved && otherUserPhone && (
+                  <>
+                    <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>
+                      CONTACT
+                    </AppText>
+                    
+                    {/* Phone number display */}
+                    <View style={[styles.profileInfoRow, bevel]}>
+                      <AppIcon name="call-outline" size={20} color={COLORS.blue} fixedColor />
+                      <View style={{ flex: 1 }}>
+                        <AppText style={[styles.profileInfoLabel, { color: FG.secondary }]}>Phone</AppText>
+                        <AppText style={[styles.profileInfoValue, { color: textColor }]}>{otherUserPhone}</AppText>
+                      </View>
+                    </View>
+                    
+                    {/* Save Contact Button */}
+                    <TouchableOpacity 
+                      style={[styles.profileSaveBtn, bevel]}
+                      onPress={handleOpenSaveContactModal}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="person-add-outline" size={20} color={COLORS.blue} fixedColor />
+                      <AppText style={[styles.profileSaveText, { color: COLORS.blue }]}>
+                        Save to Contacts
+                      </AppText>
+                    </TouchableOpacity>
+                  </>
+                )}
+
                 {/* Privacy section - Only show for individual chats */}
                 {!isGroup && (
                   <>
@@ -4634,6 +4874,315 @@ export default function ChatScreen() {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* ── Media Preview Modal (before sending) ── */}
+      <Modal
+        visible={mediaPreviewOpen}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={handleCancelMediaPreview}
+      >
+        <View style={styles.mediaPreviewContainer}>
+          {/* Header */}
+          <View style={[styles.mediaPreviewHeader, { backgroundColor: 'rgba(0,0,0,0.8)' }]}>
+            <TouchableOpacity onPress={handleCancelMediaPreview} style={styles.mediaPreviewCloseBtn}>
+              <AppIcon name="close" size={28} color="#fff" fixedColor />
+            </TouchableOpacity>
+            <AppText style={styles.mediaPreviewTitle}>
+              {pendingMediaAssets.length > 1 
+                ? `${currentMediaIndex + 1} / ${pendingMediaAssets.length}` 
+                : 'Preview'}
+            </AppText>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Image preview */}
+          <View style={styles.mediaPreviewImageWrap}>
+            {mediaPreviewUri && (
+              <Image
+                source={{ uri: mediaPreviewUri }}
+                style={styles.mediaPreviewImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+
+          {/* Thumbnail strip for multiple images */}
+          {pendingMediaAssets.length > 1 && (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.mediaPreviewThumbnails}
+              contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+            >
+              {pendingMediaAssets.map((asset, index) => (
+                <TouchableOpacity
+                  key={index}
+                  onPress={() => {
+                    setCurrentMediaIndex(index);
+                    setMediaPreviewUri(asset.uri);
+                  }}
+                  style={[
+                    styles.mediaPreviewThumb,
+                    currentMediaIndex === index && styles.mediaPreviewThumbActive
+                  ]}
+                >
+                  <Image
+                    source={{ uri: asset.uri }}
+                    style={styles.mediaPreviewThumbImage}
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Caption input and send button */}
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.mediaPreviewFooter}
+          >
+            <View style={styles.mediaPreviewInputRow}>
+              <View style={styles.mediaPreviewInputWrap}>
+                <TextInput
+                  style={styles.mediaPreviewInput}
+                  placeholder="Add a caption..."
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                  value={mediaPreviewCaption}
+                  onChangeText={setMediaPreviewCaption}
+                  multiline
+                  maxLength={500}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.mediaPreviewSendBtn}
+                onPress={handleSendMedia}
+                activeOpacity={0.8}
+              >
+                <AppIcon name="send" size={24} color="#fff" fixedColor />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* ── File Preview Modal (before sending) ── */}
+      <Modal
+        visible={filePreviewOpen}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={handleCancelFilePreview}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.filePreviewContainer}
+        >
+          {/* Header */}
+          <View style={styles.filePreviewHeader}>
+            <TouchableOpacity onPress={handleCancelFilePreview} style={styles.filePreviewCloseBtn}>
+              <AppIcon name="close" size={28} color="#fff" fixedColor />
+            </TouchableOpacity>
+            <AppText style={styles.filePreviewTitle}>
+              {pendingFiles.length > 1 
+                ? `${currentFileIndex + 1} / ${pendingFiles.length}` 
+                : 'Preview'}
+            </AppText>
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Main content area */}
+          {pendingFiles.length > 0 && (() => {
+            const currentFile = pendingFiles[currentFileIndex];
+            const isImage = currentFile?.mimeType?.startsWith('image/');
+            
+            if (isImage) {
+              // Full screen image preview
+              return (
+                <View style={styles.filePreviewImageWrap}>
+                  <Image
+                    source={{ uri: currentFile.uri }}
+                    style={styles.filePreviewFullImage}
+                    resizeMode="contain"
+                  />
+                </View>
+              );
+            }
+            
+            // Non-image file preview
+            return (
+              <View style={styles.filePreviewDocWrap}>
+                <View style={styles.filePreviewDocIcon}>
+                  <AppIcon 
+                    name={getFileIcon(currentFile?.mimeType) as any} 
+                    size={64} 
+                    color={COLORS.blue} 
+                    fixedColor 
+                  />
+                </View>
+                <AppText style={styles.filePreviewDocName} numberOfLines={3}>
+                  {currentFile?.name}
+                </AppText>
+                <AppText style={styles.filePreviewDocSize}>
+                  {formatFileSize(currentFile?.size)}
+                </AppText>
+              </View>
+            );
+          })()}
+
+          {/* Thumbnail strip for multiple files */}
+          {pendingFiles.length > 1 && (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.filePreviewThumbnails}
+              contentContainerStyle={{ paddingHorizontal: 12, gap: 8 }}
+            >
+              {pendingFiles.map((file, index) => {
+                const isImage = file.mimeType?.startsWith('image/');
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    onPress={() => setCurrentFileIndex(index)}
+                    style={[
+                      styles.filePreviewThumb,
+                      currentFileIndex === index && styles.filePreviewThumbActive
+                    ]}
+                  >
+                    {isImage ? (
+                      <Image
+                        source={{ uri: file.uri }}
+                        style={styles.filePreviewThumbImage}
+                      />
+                    ) : (
+                      <View style={styles.filePreviewThumbDoc}>
+                        <AppIcon 
+                          name={getFileIcon(file.mimeType) as any} 
+                          size={24} 
+                          color={COLORS.blue} 
+                          fixedColor 
+                        />
+                      </View>
+                    )}
+                    {/* Remove button on thumbnail */}
+                    <TouchableOpacity 
+                      onPress={() => handleRemoveFile(index)}
+                      style={styles.filePreviewThumbRemove}
+                    >
+                      <View style={styles.filePreviewThumbRemoveBg}>
+                        <AppIcon name="close" size={12} color="#fff" fixedColor />
+                      </View>
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* Caption input and send button */}
+          <View style={styles.filePreviewFooter}>
+            <View style={styles.filePreviewInputRow}>
+              <View style={styles.filePreviewInputWrap}>
+                <TextInput
+                  style={styles.filePreviewInput}
+                  placeholder="Add a caption..."
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                  value={filePreviewCaption}
+                  onChangeText={setFilePreviewCaption}
+                  multiline
+                  maxLength={500}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.filePreviewSendCircle}
+                onPress={handleSendFiles}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={GRADIENTS.primary} style={styles.filePreviewSendCircleInner}>
+                  <AppIcon name="send" size={20} color="#fff" fixedColor />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Save Contact Modal ── */}
+      <Modal
+        visible={saveContactModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSaveContactModalOpen(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.saveContactOverlay}
+        >
+          <TouchableOpacity 
+            style={styles.saveContactBackdrop} 
+            activeOpacity={1} 
+            onPress={() => setSaveContactModalOpen(false)} 
+          />
+          <View style={[styles.saveContactCard, { backgroundColor: FG.glassBg }]}>
+            <AppBg />
+            
+            {/* Header */}
+            <View style={styles.saveContactHeader}>
+              <AppText style={[styles.saveContactTitle, { color: textColor, fontFamily }]}>
+                Save Contact
+              </AppText>
+              <TouchableOpacity onPress={() => setSaveContactModalOpen(false)}>
+                <AppIcon name="close" size={22} color={FG.secondary} />
+              </TouchableOpacity>
+            </View>
+            
+            {/* Phone number display */}
+            <View style={[styles.saveContactPhoneRow, bevel]}>
+              <AppIcon name="call-outline" size={20} color={COLORS.blue} fixedColor />
+              <AppText style={[styles.saveContactPhone, { color: textColor }]}>
+                {otherUserPhone}
+              </AppText>
+            </View>
+            
+            {/* Name input */}
+            <View style={[styles.saveContactInputWrap, bevel]}>
+              <AppIcon name="person-outline" size={20} color={COLORS.sub} />
+              <TextInput
+                style={[styles.saveContactInput, { color: textColor }]}
+                placeholder="Enter contact name"
+                placeholderTextColor={COLORS.sub}
+                value={saveContactName}
+                onChangeText={setSaveContactName}
+                autoFocus
+                autoCapitalize="words"
+              />
+              {saveContactName.length > 0 && (
+                <TouchableOpacity onPress={() => setSaveContactName('')}>
+                  <AppIcon name="close-circle" size={18} color={COLORS.sub} />
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {/* Save button */}
+            <TouchableOpacity
+              style={[
+                styles.saveContactBtn,
+                (!saveContactName.trim() || savingContact) && styles.saveContactBtnDisabled
+              ]}
+              onPress={handleSaveContact}
+              disabled={!saveContactName.trim() || savingContact}
+              activeOpacity={0.8}
+            >
+              {savingContact ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <AppIcon name="checkmark" size={20} color="#fff" fixedColor />
+                  <AppText style={styles.saveContactBtnText}>Save Contact</AppText>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Forward Modal ── */}
@@ -4753,6 +5302,53 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontStyle: 'italic',
     color: 'rgba(255,255,255,0.6)',
+  },
+
+  // ── Voice Recording Bar (WhatsApp-style) ──────────────────────────────────
+  voiceRecordingBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 8,
+  },
+  voiceDeleteBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceRecordingCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  voiceWaveform: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    height: 32,
+  },
+  voiceWaveBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: COLORS.blue,
+  },
+  voiceTimerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.blue,
+    minWidth: 36,
+  },
+  voiceSendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#25D366',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bubbleTextIn: { 
     fontSize: 14, 
@@ -4875,6 +5471,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
+  },
+  // Caption styles for images with text
+  imageCaptionText: {
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  imageCaptionTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 3,
+    paddingHorizontal: 10,
+    paddingBottom: 6,
   },
 
   inputBar: {
@@ -5120,6 +5730,7 @@ const styles = StyleSheet.create({
   },
   profileAvatarWrap: { marginTop: 8, marginBottom: 4 },
   profileName: { fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  profilePhone: { fontSize: 14, textAlign: 'center', marginTop: 4 },
   profileStatus: { fontSize: 13, textAlign: 'center', marginBottom: 8 },
   profileActions: {
     flexDirection: 'row',
@@ -5391,6 +6002,404 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  // ── Save Contact in Profile Modal ─────────────────────────────────────────
+  profileInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  profileInfoLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  profileInfoValue: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  profileSaveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 8,
+  },
+  profileSaveText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // ── Media Preview Modal ────────────────────────────────────────────────────
+  mediaPreviewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  mediaPreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 50,
+    paddingBottom: 12,
+  },
+  mediaPreviewCloseBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaPreviewTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  mediaPreviewImageWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaPreviewThumbnails: {
+    maxHeight: 80,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+  },
+  mediaPreviewThumb: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  mediaPreviewThumbActive: {
+    borderColor: COLORS.blue,
+  },
+  mediaPreviewThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaPreviewFooter: {
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingBottom: 30,
+  },
+  mediaPreviewInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  mediaPreviewInputWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxHeight: 100,
+  },
+  mediaPreviewInput: {
+    color: '#fff',
+    fontSize: 15,
+    maxHeight: 80,
+  },
+  mediaPreviewSendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── File Preview Modal ────────────────────────────────────────────────────
+  filePreviewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  filePreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 50,
+    paddingBottom: 12,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+  },
+  filePreviewCloseBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filePreviewTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Full screen image preview
+  filePreviewImageWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filePreviewFullImage: {
+    width: '100%',
+    height: '100%',
+  },
+  // Non-image document preview (centered)
+  filePreviewDocWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  filePreviewDocIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  filePreviewDocName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  filePreviewDocSize: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+  },
+  // Thumbnail strip for multiple files
+  filePreviewThumbnails: {
+    maxHeight: 80,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+  },
+  filePreviewThumb: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    position: 'relative',
+  },
+  filePreviewThumbActive: {
+    borderColor: COLORS.blue,
+  },
+  filePreviewThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  filePreviewThumbDoc: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filePreviewThumbRemove: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+  },
+  filePreviewThumbRemoveBg: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#e53935',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Footer with caption input
+  filePreviewFooter: {
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingBottom: 30,
+  },
+  filePreviewInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  filePreviewInputWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxHeight: 100,
+  },
+  filePreviewInput: {
+    color: '#fff',
+    fontSize: 15,
+    maxHeight: 80,
+  },
+  filePreviewSendCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  filePreviewSendCircleInner: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Legacy styles (kept for compatibility)
+  filePreviewList: {
+    flex: 1,
+  },
+  filePreviewListContent: {
+    padding: 16,
+    gap: 12,
+  },
+  filePreviewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 14,
+    width: '100%',
+  },
+  filePreviewIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filePreviewInfo: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  filePreviewName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  filePreviewSize: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  filePreviewRemoveBtn: {
+    padding: 8,
+  },
+  filePreviewSendBtn: {
+    borderRadius: 28,
+    overflow: 'hidden',
+  },
+  filePreviewSendBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    gap: 10,
+  },
+  filePreviewSendText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // ── Save Contact Modal ────────────────────────────────────────────────────
+  saveContactOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  saveContactBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  saveContactCard: {
+    width: '85%',
+    maxWidth: 340,
+    borderRadius: RADIUS.xl,
+    padding: 20,
+    overflow: 'hidden',
+  },
+  saveContactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  saveContactTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  saveContactPhoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  saveContactPhone: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  saveContactInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 20,
+  },
+  saveContactInput: {
+    flex: 1,
+    fontSize: 15,
+    padding: 0,
+  },
+  saveContactBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.blue,
+    borderRadius: RADIUS.lg,
+    paddingVertical: 14,
+  },
+  saveContactBtnDisabled: {
+    opacity: 0.5,
+  },
+  saveContactBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 
   // ── Block Contact in Profile Modal ────────────────────────────────────────

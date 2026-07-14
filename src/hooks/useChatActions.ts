@@ -253,6 +253,7 @@ export async function sendImageMessage(
   senderId: string,
   imageUri: string,
   onProgress?: (progress: number) => void,
+  caption?: string,
 ): Promise<{ success: boolean; messageId: string }> {
   try {
     console.log('[sendImageMessage] Starting upload...');
@@ -286,7 +287,7 @@ export async function sendImageMessage(
     batch.set(msgRef, {
       messageId: msgRef.id,
       senderId,
-      text: null,
+      text: caption || null,
       type: 'image',
       imageUrl,
       timestamp: serverTimestamp(),
@@ -300,8 +301,9 @@ export async function sendImageMessage(
       otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
     );
     
+    const lastMessageText = caption ? `📷 ${caption}` : '📷 Photo';
     batch.update(chatRef, {
-      'lastMessage.text': '📷 Photo',
+      'lastMessage.text': lastMessageText,
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
       'lastMessage.imageUrl': imageUrl,
@@ -411,6 +413,7 @@ export async function sendFileMessage(
   fileSize: number,
   mimeType: string,
   onProgress?: (progress: number) => void,
+  caption?: string,
 ): Promise<{ success: boolean; messageId: string }> {
   try {
     console.log('[sendFileMessage] Starting upload...');
@@ -441,7 +444,7 @@ export async function sendFileMessage(
     batch.set(msgRef, {
       messageId: msgRef.id,
       senderId,
-      text: null,
+      text: caption || null,
       type: 'file',
       fileUrl,
       fileName,
@@ -453,13 +456,16 @@ export async function sendFileMessage(
       deliveredTo: [],
     });
     
+    // Update chat - show caption in preview if available
+    const lastMessageText = caption ? `📎 ${caption}` : `📎 ${fileName}`;
+    
     // Update chat
     const unreadUpdates = Object.fromEntries(
       otherMembers.map((id) => [`unreadCounts.${id}`, increment(1)])
     );
     
     batch.update(chatRef, {
-      'lastMessage.text': `📎 ${fileName}`,
+      'lastMessage.text': lastMessageText,
       'lastMessage.senderId': senderId,
       'lastMessage.timestamp': serverTimestamp(),
       'lastMessage.readBy': [senderId],
@@ -806,6 +812,7 @@ export async function sendGroupAddMessage(
   adderName: string,
   addedName: string,
 ) {
+  console.log('[useChatActions] sendGroupAddMessage called:', { chatId, adderId, addedId, adderName, addedName });
   const text = `GROUP_ADD:${adderId}:${addedId}:${adderName}:${addedName}`;
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
     senderId: 'system',
@@ -815,6 +822,7 @@ export async function sendGroupAddMessage(
     readBy: [],
     deliveredTo: [],
   });
+  console.log('[useChatActions] GROUP_ADD message created');
 }
 
 /** Send a system message when a user joins a group via invite link */
@@ -823,6 +831,7 @@ export async function sendGroupJoinLinkMessage(
   joinerId: string,
   joinerName: string,
 ) {
+  console.log('[useChatActions] sendGroupJoinLinkMessage called:', { chatId, joinerId, joinerName });
   const text = `GROUP_JOIN_LINK:${joinerId}:${joinerName}`;
   await addDoc(collection(db, 'chats', chatId, 'messages'), {
     senderId: 'system',
@@ -832,6 +841,7 @@ export async function sendGroupJoinLinkMessage(
     readBy: [],
     deliveredTo: [],
   });
+  console.log('[useChatActions] GROUP_JOIN_LINK message created');
 }
 
 /** Send a system message when a member is removed from a group */
