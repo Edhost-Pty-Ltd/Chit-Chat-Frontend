@@ -22,6 +22,7 @@ import { useGroupCall } from '../hooks/useGroupCall';
 import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
+import { formatE164 } from '../utils/phoneUtils';
 import { fetchUserPrivacySettings } from '../hooks/usePrivacySettings';
 import { useFocusEffect } from '@react-navigation/native';
 import { markMissedCallsAsViewed } from '../hooks/useMissedCalls';
@@ -97,23 +98,6 @@ function getInitials(name: string): string {
   return '?';
 }
 
-// Format E.164 phone number for display (e.g. +27 82 123 4567)
-function formatSAPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  // South African +27 numbers: +27 XX XXX XXXX
-  if (digits.startsWith('27') && digits.length === 11) {
-    return `+${digits.slice(0, 2)} ${digits.slice(2, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
-  }
-  // Generic international: +CC XXX XXX XXXX
-  if (digits.length > 6) {
-    if (digits.length <= 3) return `+${digits}`;
-    if (digits.length <= 6) return `+${digits.slice(0, 2)} ${digits.slice(2)}`;
-    return `+${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
-  }
-  // Short numbers — return as-is with + prefix
-  return phone.startsWith('+') ? phone : `+${phone}`;
-}
-
 function CallDirectionIcon({ direction, status }: { direction: 'incoming' | 'outgoing'; status: string }) {
   if (status === 'missed')     return <AppIcon name="call"              size={14} color={COLORS.missed} fixedColor />;
   if (direction === 'outgoing') return <AppIcon name="arrow-up-outline"  size={14} color={COLORS.green}  fixedColor />;
@@ -173,7 +157,7 @@ function CallInfoSheet({
           <View style={styles.infoMeta}>
             <AppText style={[styles.infoName, { color: textColor, fontFamily }]}>{resolvedName}</AppText>
             <AppText style={styles.infoNum}>
-              {resolvedPhone ? formatSAPhone(resolvedPhone) : 'No number saved'}
+              {resolvedPhone ? formatE164(resolvedPhone) : 'No number saved'}
             </AppText>
           </View>
         </View>
@@ -498,7 +482,7 @@ export default function CallsScreen() {
         // returns the phone number itself when the contact isn't saved.
         const deviceName = resolveName(firebaseProfile.phone);
         if (deviceName && deviceName !== firebaseProfile.phone) return deviceName;
-        return formatSAPhone(firebaseProfile.phone);
+        return formatE164(firebaseProfile.phone);
       }
       // Fallback to whatever was stored in the call record
       return fallbackName;

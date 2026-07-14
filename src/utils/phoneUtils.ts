@@ -22,6 +22,20 @@ export function normalizePhone(raw: string, defaultCountryCode = '27'): string {
 }
 
 /**
+ * Display a phone number in full E.164 form (e.g. +27821234567).
+ * Numbers are already normalized to E.164 elsewhere, so this just guarantees a
+ * leading "+" and keeps every digit — never truncating or mis-grouping across
+ * country codes. Returns '' for empty input.
+ */
+export function formatE164(phone: string): string {
+  if (!phone) return '';
+  const trimmed = phone.trim();
+  if (trimmed.startsWith('+')) return trimmed;
+  const digits = trimmed.replace(/\D/g, '');
+  return digits ? `+${digits}` : '';
+}
+
+/**
  * Split an array into chunks of at most size `n`.
  */
 export function chunkArray<T>(arr: T[], n: number): T[][] {

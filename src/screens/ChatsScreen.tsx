@@ -20,6 +20,7 @@ import { getOrCreateDirectChat } from '../hooks/useChatActions';
 import { resolveDisplayName } from '../utils/resolveDisplayName';
 import { loadLocalUserProfiles, saveLocalUserProfiles } from '../hooks/useLocalUserProfiles';
 import { usePhoneBook } from '../hooks/usePhoneBook';
+import { formatE164 } from '../utils/phoneUtils';
 import { db } from '../config/firebase';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
@@ -53,13 +54,6 @@ function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase();
-}
-
-function formatSAPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length <= 3) return digits;
-  if (digits.length <= 6) return `${digits.slice(0, 3)} ${digits.slice(3)}`;
-  return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 9)}`;
 }
 
 // ─── Chat Avatar ──────────────────────────────────────────────────────────────
@@ -363,7 +357,7 @@ function NewGroupSheet({
                   {c.displayName}
                 </AppText>
                 <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>
-                  {addable ? formatSAPhone(c.phone) : "Can't be added to groups"}
+                  {addable ? formatE164(c.phone) : "Can't be added to groups"}
                 </AppText>
               </View>
               {sel ? (
@@ -579,7 +573,7 @@ function SelectContactSheet({
               />
               <View style={styles.contactMeta}>
                 <AppText style={[styles.contactName, { color: textColor }]}>{c.displayName}</AppText>
-                <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>{formatSAPhone(c.phone)}</AppText>
+                <AppText style={[styles.contactSub, { color: FG.secondary }]} numberOfLines={1}>{formatE164(c.phone)}</AppText>
               </View>
             </TouchableOpacity>
           ))}
@@ -1070,7 +1064,10 @@ export default function ChatsScreen() {
       <TouchableOpacity 
         style={[styles.fab, bevel, { bottom: insets.bottom + 150 }, Platform.OS === 'web' && styles.fabWeb]} 
         activeOpacity={0.85}
-        onPress={() => setSheetOpen(true)}
+        // Re-sync contacts when opening the picker so people who registered
+        // after this screen loaded show up without a manual refresh. useContacts
+        // is a one-time fetch (not a live listener), so it needs this nudge.
+        onPress={() => { setSheetOpen(true); reloadContacts(); }}
       >
         <AppIcon name="add" size={28} color={COLORS.blue} fixedColor />
       </TouchableOpacity>
