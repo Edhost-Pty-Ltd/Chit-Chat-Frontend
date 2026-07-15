@@ -22,6 +22,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
+import { VideoTrimmer } from './VideoTrimmer';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -34,7 +35,9 @@ interface CreateStatusModalProps {
     caption: string | null,
     backgroundColor: string | null,
     textColor: string | null,
-    durationMs?: number
+    durationMs?: number,
+    trimStart?: number,
+    trimEnd?: number
   ) => Promise<void>;
 }
 
@@ -54,10 +57,12 @@ const TEXT_BG_COLORS = [
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusModalProps) {
-  const [mode, setMode] = useState<'select' | 'text' | 'media'>('select');
+  const [mode, setMode] = useState<'select' | 'text' | 'media' | 'trimVideo'>('select');
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
   const [mediaDuration, setMediaDuration] = useState<number>(5000); // Default 5s for images
+  const [videoTrimStart, setVideoTrimStart] = useState<number>(0);
+  const [videoTrimEnd, setVideoTrimEnd] = useState<number>(0);
   const [caption, setCaption] = useState('');
   const [textStatus, setTextStatus] = useState('');
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
@@ -78,6 +83,8 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
     setMode('select');
     setMediaUri(null);
     setMediaDuration(5000);
+    setVideoTrimStart(0);
+    setVideoTrimEnd(0);
     setCaption('');
     setTextStatus('');
     setSelectedColorIndex(0);
@@ -109,16 +116,16 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
         setMediaType(type);
         // Set duration: 5s for images, video duration in ms (capped at 30s)
         if (type === 'video' && asset.duration) {
-          setMediaDuration(Math.min(asset.duration, 30000));
+          const videoDurationMs = asset.duration;
+          setMediaDuration(videoDurationMs);
+          setVideoTrimStart(0);
+          setVideoTrimEnd(Math.min(videoDurationMs, 30000));
+          // Show trimmer modal for videos
+          setMode('trimVideo');
         } else {
           setMediaDuration(5000);
+          setMode('media');
         }
-        // Load video into player for preview
-        if (type === 'video') {
-          videoPlayer.replace(asset.uri);
-          videoPlayer.play();
-        }
-        setMode('media');
       }
     } catch (err) {
       console.error('[CreateStatusModal] Pick media error:', err);
@@ -150,6 +157,26 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
     }
   };
 
+  // ── Handle video trim ───────────────────────────────────────────────────────
+  const handleVideoTrim = (startMs: number, endMs: number) => {
+    setVideoTrimStart(startMs);
+    setVideoTrimEnd(endMs);
+    setMediaDuration(endMs - startMs);
+    // Load trimmed video into preview player
+    if (mediaUri) {
+      videoPlayer.replace(mediaUri);
+      videoPlayer.currentTime = startMs / 1000;
+      videoPlayer.play();
+    }
+    setMode('media');
+  };
+
+  const handleCancelTrim = () => {
+    // Go back to selection if user cancels trim
+    setMode('select');
+    setMediaUri(null);
+  };
+
   // ── Post status ─────────────────────────────────────────────────────────────
   const handlePost = async () => {
     if (uploading) return;
@@ -167,7 +194,24 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
         const color = TEXT_BG_COLORS[selectedColorIndex];
         await onCreate('text', null, textStatus.trim(), color.bg, color.text, 5000);
       } else if (mode === 'media' && mediaUri) {
-        await onCreate(mediaType, mediaUri, caption.trim() || null, null, null, mediaDuration);
+        console.log('[CreateStatusModal] Posting status:', {
+          mediaType,
+          videoDuration: mediaDuration,
+          trimStart: videoTrimStart,
+          trimEnd: videoTrimEnd,
+          willTrim: mediaType === 'video' && videoTrimStart !== undefined && videoTrimEnd !== undefined,
+        });
+        
+        await onCreate(
+          mediaType, 
+          mediaUri, 
+          caption.trim() || null, 
+          null, 
+          null, 
+          mediaDuration,
+          mediaType === 'video' ? videoTrimStart : undefined,
+          mediaType === 'video' ? videoTrimEnd : undefined
+        );
       }
 
       handleClose();
@@ -500,6 +544,17 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
           </>
         )}
       </View>
+
+      {/* Video Trimmer Modal */}
+      {mode === 'trimVideo' && mediaUri && (
+        <VideoTrimmer
+          visible={mode === 'trimVideo'}
+          videoUri={mediaUri}
+          videoDuration={mediaDuration}
+          onClose={handleCancelTrim}
+          onTrim={handleVideoTrim}
+        />
+      )}
     </Modal>
   );
 }

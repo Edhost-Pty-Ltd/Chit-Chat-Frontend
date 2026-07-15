@@ -1,6 +1,7 @@
 ﻿// ─── Shared Components ───────────────────────────────────────────────────────
 export * from './StatusViewer';
 export * from './CreateStatusModal';
+export * from './VideoTrimmer';
 export * from './VoiceMessageBubble';
 export * from './LocationMessageBubble';
 export * from './ForwardModal';

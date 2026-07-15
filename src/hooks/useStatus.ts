@@ -12,6 +12,7 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   where,
   Timestamp,
@@ -94,6 +95,10 @@ export function useStatus(currentUserId: string | null) {
               mediaType: data.mediaType,
               thumbnailUrl: data.thumbnailUrl || null,
               durationMs: data.durationMs || IMAGE_STATUS_DURATION_MS,
+              // Video trim metadata
+              trimStart: data.trimStart,
+              trimEnd: data.trimEnd,
+              needsTrimming: data.needsTrimming,
               caption: data.caption || null,
               backgroundColor: data.backgroundColor || null,
               textColor: data.textColor || null,
@@ -180,7 +185,9 @@ export function useStatus(currentUserId: string | null) {
       backgroundColor: string | null,
       textColor: string | null,
       userPhone: string | null = null,
-      durationMs?: number
+      durationMs?: number,
+      trimStart?: number,
+      trimEnd?: number
     ): Promise<string> => {
       if (!currentUserId) throw new Error('User not authenticated');
 
@@ -195,7 +202,6 @@ export function useStatus(currentUserId: string | null) {
           const fileName = `status_${currentUserId}_${timestamp}.${ext}`;
 
           // Use uploadFile which handles both file:// and content:// URIs
-          // (content:// URIs from Android gallery need expo-file-system to read)
           mediaUrl = await uploadFile(mediaUri, 'status', {
             userId: currentUserId,
             fileName,
@@ -238,10 +244,41 @@ export function useStatus(currentUserId: string | null) {
           expiresAt: Timestamp.fromDate(expiresAt),
           viewedBy: [],
           visibility: 'everyone',
+          // Trim metadata for videos (processed by Cloud Function via Storage trigger)
+          ...(mediaType === 'video' && trimStart !== undefined && trimEnd !== undefined ? {
+            trimStart,
+            trimEnd,
+            needsTrimming: true,
+          } : {}),
         };
+
+        console.log('[useStatus] Creating status with data:', {
+          mediaType,
+          hasTrimStart: trimStart !== undefined,
+          hasTrimEnd: trimEnd !== undefined,
+          trimStart,
+          trimEnd,
+          needsTrimming: mediaType === 'video' && trimStart !== undefined && trimEnd !== undefined,
+        });
+        console.log('[useStatus] Full statusData object keys:', Object.keys(statusData));
+        console.log('[useStatus] statusData.trimStart:', statusData.trimStart);
+        console.log('[useStatus] statusData.trimEnd:', statusData.trimEnd);
+        console.log('[useStatus] statusData.needsTrimming:', statusData.needsTrimming);
 
         const statusRef = await addDoc(collection(db, 'statuses'), statusData);
         console.log('[useStatus] Status created:', statusRef.id);
+        
+        // Verify what was actually written to Firestore
+        const savedDoc = await getDoc(statusRef);
+        const savedData = savedDoc.data();
+        console.log('[useStatus] Data read back from Firestore:', {
+          hasTrimStart: 'trimStart' in (savedData || {}),
+          hasTrimEnd: 'trimEnd' in (savedData || {}),
+          hasNeedsTrimming: 'needsTrimming' in (savedData || {}),
+          trimStart: savedData?.trimStart,
+          trimEnd: savedData?.trimEnd,
+          needsTrimming: savedData?.needsTrimming,
+        });
         return statusRef.id;
       } catch (err) {
         console.error('[useStatus] Create status error:', err);

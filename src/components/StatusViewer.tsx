@@ -107,9 +107,36 @@ export function StatusViewer({
   // ── Load video when current item changes ─────────────────────────────────
   useEffect(() => {
     if (!visible || !currentStatus) return;
+    
+    console.log('[StatusViewer] Loading status:', {
+      statusId: currentStatus.statusId,
+      mediaType: currentStatus.mediaType,
+      hasTrimStart: 'trimStart' in currentStatus,
+      hasTrimEnd: 'trimEnd' in currentStatus,
+      hasNeedsTrimming: 'needsTrimming' in currentStatus,
+      trimStart: currentStatus.trimStart,
+      trimEnd: currentStatus.trimEnd,
+      needsTrimming: currentStatus.needsTrimming,
+      allKeys: Object.keys(currentStatus),
+    });
+    
     if (isVideo && currentStatus.mediaUrl) {
       videoReadyRef.current = false;   // block premature playToEnd
       player.replace(currentStatus.mediaUrl);
+      
+      // If video has trim metadata, start at trimStart time
+      if (currentStatus.trimStart !== undefined && currentStatus.trimStart > 0) {
+        const startTimeSec = currentStatus.trimStart / 1000;
+        console.log('[StatusViewer] Video has trim metadata:', {
+          trimStart: currentStatus.trimStart,
+          trimEnd: currentStatus.trimEnd,
+          startTimeSec,
+        });
+        player.currentTime = startTimeSec; // Convert ms to seconds
+      } else {
+        console.log('[StatusViewer] Video has no trim metadata');
+      }
+      
       if (!isPaused) player.play();
     } else {
       try { player.pause(); } catch {}
@@ -118,11 +145,27 @@ export function StatusViewer({
   }, [currentStatus?.statusId, visible, isVideo]);
 
   // Video: update progress bar from timeUpdate; mark ready on first tick
+  // Also check if we've reached trimEnd and advance
   useEventListener(player, 'timeUpdate', ({ currentTime }: { currentTime: number }) => {
     if (!isVideo) return;
     if (currentTime > 0) videoReadyRef.current = true;  // video is genuinely playing
-    const dur = player.duration && player.duration > 0 ? player.duration : 30;
-    setProgress(Math.min(currentTime / dur, 1));
+    
+    // Check if video has trim metadata
+    const hasTrim = currentStatus.trimStart !== undefined && currentStatus.trimEnd !== undefined;
+    const trimStart = hasTrim ? (currentStatus.trimStart || 0) / 1000 : 0; // Convert ms to seconds
+    const trimEnd = hasTrim ? (currentStatus.trimEnd || player.duration) / 1000 : player.duration;
+    
+    // If we've reached or passed the trim end time, advance to next status
+    if (hasTrim && currentTime >= trimEnd) {
+      console.log('[StatusViewer] Reached trim end, advancing:', { currentTime, trimEnd });
+      goNext();
+      return;
+    }
+    
+    // Calculate progress based on trimmed duration
+    const effectiveDuration = hasTrim ? (trimEnd - trimStart) : (player.duration && player.duration > 0 ? player.duration : 30);
+    const effectiveCurrentTime = hasTrim ? (currentTime - trimStart) : currentTime;
+    setProgress(Math.min(effectiveCurrentTime / effectiveDuration, 1));
   });
 
   // Only advance on playToEnd once the video has actually played

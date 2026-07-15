@@ -14,6 +14,7 @@ import { BottomNav } from '../components';
 import { useAuth } from '../hooks/useAuth';
 import { useChats, ChatPreview } from '../hooks/useChats';
 import { useContacts, AppContact } from '../hooks/useContacts';
+import { useSyncContacts } from '../hooks/useSyncContacts';
 import { fetchUserPrivacySettings, isVisibleTo } from '../hooks/usePrivacySettings';
 import { useStatus } from '../hooks/useStatus';
 import { getOrCreateDirectChat } from '../hooks/useChatActions';
@@ -596,6 +597,10 @@ export default function ChatsScreen() {
   const { chats, loading: chatsLoading } = useChats(userId);
   const { contacts, loading: contactsLoading, reload: reloadContacts, hasPermission, error: contactsError } = useContacts();
   const { contactStatuses } = useStatus(userId);
+  
+  // Sync contact names to Firestore so Cloud Functions can personalize notifications
+  useSyncContacts(userId ?? undefined, contacts);
+  
   // Device phone book (phone → saved contact name). expo-contacts reads local
   // device data, so this works fully offline — unlike useContacts, which needs
   // a Firestore cross-reference. It's the reliable source for contact names.
