@@ -25,6 +25,7 @@ import { formatE164 } from '../utils/phoneUtils';
 import { db } from '../config/firebase';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
+import { FEATURE_FLAGS } from '../constants/featureFlags';
 
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 type NavProp   = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
@@ -1003,7 +1004,7 @@ export default function ChatsScreen() {
         <View style={styles.headerRow}>
           <AppText style={[styles.appName, { color: textColor, fontFamily }]}>ChitChat</AppText>
 
-          {!searchOpen && (
+          {FEATURE_FLAGS.chatSearch && !searchOpen && (
             <TouchableOpacity
                 style={iconButton}
                 onPress={openSearch}
@@ -1014,7 +1015,7 @@ export default function ChatsScreen() {
           )}
         </View>
 
-        {searchOpen && (
+        {FEATURE_FLAGS.chatSearch && searchOpen && (
           <Animated.View
             style={[
               styles.searchBubble,
