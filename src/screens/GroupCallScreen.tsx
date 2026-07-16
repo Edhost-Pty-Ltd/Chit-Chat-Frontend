@@ -291,7 +291,17 @@ function PipTile({
   return (
     <Animated.View style={[styles.pipTile, { transform: [{ scale: scaleAnim }] }]}>
       {hasVideo ? (
-        <VideoTrack trackRef={cameraTrack as any} style={StyleSheet.absoluteFill} objectFit="cover" />
+        // zOrder=1 makes this PiP a "media overlay" that renders ABOVE the
+        // full-screen main video (zOrder=0). Without it, overlapping Android
+        // SurfaceViews composite the PiP behind the main view, so it shows
+        // through as a transparent/black tile even with a live track.
+        <VideoTrack
+          trackRef={cameraTrack as any}
+          style={StyleSheet.absoluteFill}
+          objectFit="cover"
+          zOrder={1}
+          mirror={isLocal}
+        />
       ) : (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)' }]} />
       )}
@@ -348,6 +358,10 @@ function RoomView({
   // call history is saved correctly even if they disconnect before we hang up.
   const otherPartyRef = useRef<{ userId: string; displayName: string } | null>(null);
 
+  // The uid that started the call (from the groupCalls doc). Used to label the
+  // call history entry as incoming vs outgoing for THIS device.
+  const initiatorIdRef = useRef<string | null>(null);
+
   const [callDuration, setCallDuration] = useState(0);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -378,6 +392,11 @@ function RoomView({
 
         const data = snapshot.data();
         console.log('[GroupCallScreen] Call status update:', data?.status);
+
+        // Remember who started the call so history is labelled correctly.
+        if (data?.initiatorId) {
+          initiatorIdRef.current = data.initiatorId;
+        }
 
         // If server ended the call (e.g., because only 1 participant remained)
         if (data?.status === 'ended') {
@@ -562,12 +581,18 @@ function RoomView({
         const otherPartyName = otherParticipant
           ? nameFor(otherParticipant)
           : (captured?.displayName ?? groupName);
+        // Direction is per-device: outgoing if THIS user started the call,
+        // incoming otherwise. Previously this was hardcoded to 'outgoing', so
+        // the callee's history mislabelled received calls.
+        const direction: 'incoming' | 'outgoing' =
+          initiatorIdRef.current && initiatorIdRef.current !== userId ? 'incoming' : 'outgoing';
+
         await SignalingService.saveToCallHistory(
           userId,
           callId,
           { userId: otherPartyId, displayName: otherPartyName, photoUrl: null },
           audioOnly ? 'audio' : 'video',
-          'outgoing',
+          direction,
           durationSec > 0 ? 'completed' : 'missed',
           durationSec > 0 ? durationSec : null,
         );
@@ -830,7 +855,15 @@ function RoomView({
       {/* Main view */}
       <View style={styles.mainView}>
         {mainHasVideo ? (
-          <VideoTrack trackRef={mainCameraTrack as any} style={StyleSheet.absoluteFill} objectFit="cover" />
+          // zOrder=0 keeps the main feed in the background layer; the PiP tiles
+          // above use zOrder=1 so they composite on top instead of being hidden.
+          <VideoTrack
+            trackRef={mainCameraTrack as any}
+            style={StyleSheet.absoluteFill}
+            objectFit="cover"
+            zOrder={0}
+            mirror={localIsMain}
+          />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0a1a30' }]} />
         )}
@@ -1085,7 +1118,15 @@ function FloatingCallView({
     >
       <View style={styles.floatInner}>
         {hasVideo ? (
-          <VideoTrack trackRef={camTrack as any} style={StyleSheet.absoluteFill} objectFit="cover" />
+          // Floating widget sits above the rest of the app — use the overlay
+          // layer so its SurfaceView renders on top.
+          <VideoTrack
+            trackRef={camTrack as any}
+            style={StyleSheet.absoluteFill}
+            objectFit="cover"
+            zOrder={1}
+            mirror={target?.isLocal ?? false}
+          />
         ) : (
           <View style={styles.floatAvatarWrap}>
             <Avatar initials={getInitials(avatarName)} color={COLORS.blue} size={44} />

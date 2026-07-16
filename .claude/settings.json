@@ -1,4 +1,9 @@
 {
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:11434",
+    "ANTHROPIC_API_KEY": "local-dummy-key",
+    "ANTHROPIC_MODEL": "qwen2.5-coder:1.5b"
+  },
   "enabledPlugins": {
     "expo@claude-plugins-official": true
   }

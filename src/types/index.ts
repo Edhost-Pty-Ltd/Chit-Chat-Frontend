@@ -114,6 +114,11 @@ export interface FireStatus {
   thumbnailUrl?: string | null;
   durationMs?: number; // Duration for image (default 5000ms) and video playback
   
+  // Video trimming (client-side playback control)
+  trimStart?: number; // Start time in milliseconds
+  trimEnd?: number;   // End time in milliseconds
+  needsTrimming?: boolean; // Flag for trimming metadata
+  
   // Text status
   caption: string | null;
   backgroundColor: string | null; // For text-only status

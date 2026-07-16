@@ -159,12 +159,24 @@ export default function StatusScreen() {
     caption: string | null,
     backgroundColor: string | null,
     textColor: string | null,
-    durationMs?: number
+    durationMs?: number,
+    trimStart?: number,
+    trimEnd?: number
   ) => {
     if (!userId) return;
+    
     await createStatus(
-      displayName, photoURL, mediaType, mediaUri, caption, backgroundColor, textColor,
+      displayName, 
+      photoURL, 
+      mediaType, 
+      mediaUri, 
+      caption, 
+      backgroundColor, 
+      textColor,
       user?.phoneNumber ?? null,
+      durationMs,
+      trimStart,
+      trimEnd
     );
   };
 

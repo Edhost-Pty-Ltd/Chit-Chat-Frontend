@@ -369,16 +369,40 @@ async function getUserPushToken(userId: string): Promise<string | null> {
 }
 
 /**
- * Get user's display name or phone
+ * Get the display name for a user as seen by a specific recipient.
+ * Priority: recipient's saved contact name → user's phone number.
+ * This matches the app's naming standard where names come from the viewer's
+ * own phone book, not the user's self-set displayName.
+ * 
+ * @param userId - The user whose name to resolve
+ * @param recipientId - The person viewing the notification (whose contacts to check)
  */
-async function getUserDisplayName(userId: string): Promise<string> {
+async function getDisplayNameForRecipient(userId: string, recipientId: string): Promise<string> {
   try {
     const dbAdmin = getFirestore();
+    
+    // Check if recipient has saved this user as a contact
+    const savedContactDoc = await dbAdmin
+      .collection('users')
+      .doc(recipientId)
+      .collection('savedContacts')
+      .doc(userId)
+      .get();
+    
+    if (savedContactDoc.exists) {
+      const contactData = savedContactDoc.data();
+      if (contactData?.name) {
+        return contactData.name;
+      }
+    }
+    
+    // Fallback: get the user's phone number
     const userDoc = await dbAdmin.collection('users').doc(userId).get();
     if (!userDoc.exists) return 'Someone';
-    const data = userDoc.data();
-    return data?.displayName || data?.phone || 'Someone';
+    const userData = userDoc.data();
+    return userData?.phone || userData?.displayName || 'Someone';
   } catch (error) {
+    console.error('[getDisplayNameForRecipient] Error:', error);
     return 'Someone';
   }
 }
@@ -426,9 +450,6 @@ export const onMessageCreated = functionsV1.firestore
       const isGroup = chatData?.type === 'group';
       const groupName = chatData?.groupName;
 
-      // Get sender's name
-      const senderName = await getUserDisplayName(senderId);
-
       // Build notification messages for all recipients (excluding sender)
       const messages: ExpoPushMessage[] = [];
 
@@ -440,6 +461,9 @@ export const onMessageCreated = functionsV1.firestore
           console.log(`[onMessageCreated] No push token for user ${memberId}`);
           continue;
         }
+
+        // Get personalized sender name for this specific recipient
+        const senderName = await getDisplayNameForRecipient(senderId, memberId);
 
         // Determine notification content
         const title = isGroup ? (groupName || 'Group Chat') : senderName;
@@ -510,8 +534,8 @@ export const onCallCreated = functionsV1.firestore
     console.log(`[onCallCreated] New ${type} call ${callId} from ${callerId} to ${calleeId}`);
 
     try {
-      // Get caller's name
-      const callerName = caller?.displayName || await getUserDisplayName(callerId);
+      // Get personalized caller name for the callee
+      const callerName = await getDisplayNameForRecipient(callerId, calleeId);
 
       // Get callee's push token
       const pushToken = await getUserPushToken(calleeId);
@@ -566,7 +590,7 @@ export const onGroupCallCreated = functionsV1.firestore
       return null;
     }
 
-    const { initiatorId, participants, groupName, audioOnly } = callData;
+    const { initiatorId, participants, groupName, callType } = callData;
 
     if (!initiatorId || !participants || !Array.isArray(participants)) {
       console.log('[onGroupCallCreated] Missing initiator or participants');
@@ -576,12 +600,10 @@ export const onGroupCallCreated = functionsV1.firestore
     console.log(`[onGroupCallCreated] New group call ${callId} initiated by ${initiatorId}`);
 
     try {
-      // Get initiator's name
-      const initiatorName = await getUserDisplayName(initiatorId);
-
-      const isVideo = !audioOnly;
-      const title = `Group ${isVideo ? 'Video' : ''} Call`;
-      const body = `${initiatorName} started a call in ${groupName || 'a group'}`;
+      const isVideo = callType === 'video';
+      // Every call (1-on-1 and group) flows through the groupCalls collection,
+      // so distinguish them by participant count: 2 = one-on-one, >2 = group.
+      const isGroup = participants.length > 2;
 
       const messages: ExpoPushMessage[] = [];
 
@@ -593,6 +615,21 @@ export const onGroupCallCreated = functionsV1.firestore
         if (!pushToken) {
           console.log(`[onGroupCallCreated] No push token for participant ${participantId}`);
           continue;
+        }
+
+        // Get personalized initiator name for this specific recipient
+        // (their saved contact name, or the initiator's phone if not saved)
+        const initiatorName = await getDisplayNameForRecipient(initiatorId, participantId);
+
+        let title: string;
+        let body: string;
+        if (isGroup) {
+          title = isVideo ? 'Group Video Call' : 'Group Call';
+          const where = groupName ? ` in ${groupName}` : '';
+          body = `${initiatorName} started a group ${isVideo ? 'video ' : ''}call${where}`;
+        } else {
+          title = isVideo ? 'Incoming Video Call' : 'Incoming Call';
+          body = `${initiatorName} is ${isVideo ? 'video ' : ''}calling you`;
         }
 
         messages.push({
@@ -610,7 +647,7 @@ export const onGroupCallCreated = functionsV1.firestore
             initiatorId,
             initiatorName,
             groupName,
-            audioOnly,
+            callType,
           },
         });
       }
@@ -643,8 +680,8 @@ export const onCallUpdated = functionsV1.firestore
     console.log(`[onCallUpdated] Call ${callId} changed to ${after.status}`);
 
     try {
-      // Get caller's name (the one who initiated the call)
-      const callerName = await getUserDisplayName(callerId);
+      // Get personalized caller name for the callee
+      const callerName = await getDisplayNameForRecipient(callerId, calleeId);
 
       // Notify the callee about the missed call
       const pushToken = await getUserPushToken(calleeId);
@@ -683,3 +720,170 @@ export const onCallUpdated = functionsV1.firestore
 
     return null;
   });
+
+
+// ─── Video Trimming Callable Function ────────────────────────────────────────
+// Callable function that trims a video after it's been uploaded
+// Called by the client after uploading a video that needs trimming
+
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
+import * as ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import ffmpeg from 'fluent-ffmpeg';
+
+// Set FFmpeg path
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
+interface TrimVideoRequest {
+  statusId: string;
+  mediaUrl: string;
+  trimStart: number;  // milliseconds
+  trimEnd: number;    // milliseconds
+  userId: string;
+  idToken?: string;   // Firebase ID token for authentication
+}
+
+export const trimStatusVideo = functionsV1.https.onCall(async (data: TrimVideoRequest, context) => {
+  const { statusId, mediaUrl, trimStart, trimEnd, userId, idToken } = data;
+
+  // Verify authentication - either from context or ID token
+  let uid = context.auth?.uid;
+
+  if (!uid && idToken) {
+    try {
+      const decoded = await getAuth().verifyIdToken(idToken);
+      uid = decoded.uid;
+    } catch (err) {
+      console.error('[trimStatusVideo] ID token verification failed:', err);
+      throw new functionsV1.https.HttpsError('unauthenticated', 'Invalid ID token');
+    }
+  }
+
+  if (!uid) {
+    throw new functionsV1.https.HttpsError('unauthenticated', 'User must be authenticated');
+  }
+
+  if (uid !== userId) {
+    throw new functionsV1.https.HttpsError('permission-denied', 'User can only trim their own videos');
+  }
+
+  if (!statusId || !mediaUrl || trimStart === undefined || trimEnd === undefined) {
+    throw new functionsV1.https.HttpsError('invalid-argument', 'Missing required parameters');
+  }
+
+  console.log(`[trimStatusVideo] Processing status ${statusId} - trim ${trimStart}ms to ${trimEnd}ms`);
+
+  const tempDir = os.tmpdir();
+  const inputPath = path.join(tempDir, `input-${statusId}.mp4`);
+  const outputPath = path.join(tempDir, `output-${statusId}.mp4`);
+
+  try {
+    const bucket = getStorage().bucket();
+    const storagePath = storagePathFromUrl(mediaUrl);
+    
+    if (!storagePath) {
+      throw new functionsV1.https.HttpsError('invalid-argument', 'Could not extract storage path from URL');
+    }
+
+    // Download the video
+    console.log('[trimStatusVideo] Downloading video from Storage');
+    await bucket.file(storagePath).download({ destination: inputPath });
+
+    // Trim the video using FFmpeg
+    console.log('[trimStatusVideo] Trimming video with FFmpeg');
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(inputPath)
+        .setStartTime(trimStart / 1000) // Convert ms to seconds
+        .setDuration((trimEnd - trimStart) / 1000) // Duration in seconds
+        .output(outputPath)
+        .videoCodec('libx264')
+        .audioCodec('aac')
+        .on('end', () => {
+          console.log('[trimStatusVideo] FFmpeg processing complete');
+          resolve();
+        })
+        .on('error', (err: Error) => {
+          console.error('[trimStatusVideo] FFmpeg error:', err);
+          reject(err);
+        })
+        .run();
+    });
+
+    // Upload the trimmed video
+    console.log('[trimStatusVideo] Uploading trimmed video');
+    const trimmedFileName = `status_${userId}_${Date.now()}_trimmed.mp4`;
+    const trimmedPath = `status/${userId}/${trimmedFileName}`;
+    
+    await bucket.upload(outputPath, {
+      destination: trimmedPath,
+      metadata: {
+        contentType: 'video/mp4',
+        metadata: {
+          userId,
+          statusId,
+          originalFile: storagePath,
+        },
+      },
+    });
+
+    // Get the download URL
+    const trimmedFile = bucket.file(trimmedPath);
+    await trimmedFile.makePublic();
+    const trimmedUrl = `https://storage.googleapis.com/${bucket.name}/${trimmedPath}`;
+
+    // Update the status document with the trimmed video URL
+    console.log('[trimStatusVideo] Updating status document');
+    await getFirestore().doc(`statuses/${statusId}`).update({
+      mediaUrl: trimmedUrl,
+      originalMediaUrl: mediaUrl,
+      needsTrimming: false,
+      trimmedAt: AdminTimestamp.now(),
+      durationMs: trimEnd - trimStart,
+    });
+
+    // Delete the original video to save storage
+    console.log('[trimStatusVideo] Deleting original video');
+    try {
+      await bucket.file(storagePath).delete();
+    } catch (err) {
+      console.warn('[trimStatusVideo] Could not delete original video:', err);
+    }
+
+    // Clean up temp files
+    fs.unlinkSync(inputPath);
+    fs.unlinkSync(outputPath);
+
+    console.log(`[trimStatusVideo] Successfully trimmed status ${statusId}`);
+    
+    return {
+      success: true,
+      trimmedUrl,
+      message: 'Video trimmed successfully',
+    };
+
+  } catch (error) {
+    console.error('[trimStatusVideo] Error:', error);
+    
+    // Update status to indicate trimming failed
+    try {
+      await getFirestore().doc(`statuses/${statusId}`).update({
+        needsTrimming: false,
+        trimmingFailed: true,
+        trimmingError: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } catch (updateErr) {
+      console.error('[trimStatusVideo] Could not update status with error:', updateErr);
+    }
+
+    // Clean up temp files if they exist
+    try {
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    } catch (cleanupErr) {
+      console.warn('[trimStatusVideo] Cleanup error:', cleanupErr);
+    }
+
+    throw new functionsV1.https.HttpsError('internal', error instanceof Error ? error.message : 'Unknown error');
+  }
+});

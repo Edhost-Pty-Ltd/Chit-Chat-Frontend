@@ -32,6 +32,7 @@ export async function uploadFile(
   type:      UploadType,
   params:    { userId?: string; chatId?: string; fileName: string },
   onProgress?: (pct: number) => void,
+  customMetadata?: Record<string, string>, // Add custom metadata parameter
 ): Promise<string> {
   const path = buildPath(type, params);
   console.log('[Storage] Uploading file:', localUri, '→', path);
@@ -52,6 +53,7 @@ export async function uploadFile(
   return new Promise((resolve, reject) => {
     const task = uploadBytesResumable(storageRef, blob, {
       contentType: getMimeType(localUri),
+      customMetadata, // Pass custom metadata to Storage
     });
 
     task.on(

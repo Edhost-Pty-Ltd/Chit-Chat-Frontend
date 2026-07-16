@@ -42,8 +42,16 @@ export function useContacts() {
       if (!raw) return;
       try {
         const cached: AppContact[] = JSON.parse(raw);
-        if (cached.length > 0) {
-          setContacts(cached);
+        // Dedupe by userId in case an older cache was written before the
+        // dedupe logic existed (prevents duplicate-key warnings on render).
+        const seen = new Set<string>();
+        const deduped = cached.filter((c) => {
+          if (!c.userId || seen.has(c.userId)) return false;
+          seen.add(c.userId);
+          return true;
+        });
+        if (deduped.length > 0) {
+          setContacts(deduped);
           setLoading(false);
         }
       } catch {
@@ -58,7 +66,10 @@ export function useContacts() {
 
   async function loadContacts() {
     try {
-      setLoading(true);
+      // Only show the full spinner on the first load. Background refreshes
+      // (e.g. re-syncing when the contact picker opens) keep the existing list
+      // visible so it doesn't flash a spinner every time.
+      if (contacts.length === 0) setLoading(true);
       setError(null);
 
       // ── 1. Request contacts permission ──────────────────────────
@@ -133,10 +144,16 @@ export function useContacts() {
 
       // ── 5. Build the contact list (only registered ChitChat users) ───
       const appContacts: AppContact[] = [];
+      // One entry per account. The same person can be saved under several phone
+      // numbers, all resolving to the same userId — without this dedupe the
+      // contact picker renders duplicate React keys (same uid twice).
+      const seenUserIds = new Set<string>();
 
       for (const [phone, name] of phoneToName.entries()) {
         const appUser = appUserMap.get(phone);
         if (!appUser) continue; // skip contacts without a ChitChat account
+        if (seenUserIds.has(appUser.userId)) continue; // already added under another number
+        seenUserIds.add(appUser.userId);
         appContacts.push({
           userId:           appUser.userId,
           phone,
