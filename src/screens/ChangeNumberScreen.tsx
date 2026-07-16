@@ -356,7 +356,29 @@ const styles = StyleSheet.create({
   backRowText: { fontSize: 13, color: COLORS.blue, fontWeight: '600', marginLeft: 2 },
 
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  otpBox: { width: 46, height: 56, borderRadius: RADIUS.md, fontSize: 22, fontWeight: '700', color: COLORS.text, textAlign: 'center', textAlignVertical: 'center', lineHeight: 56, paddingVertical: 0, paddingHorizontal: 0, ...GLASS.input },
+  otpBox: { 
+    width: 46, 
+    height: 56, 
+    borderRadius: RADIUS.md, 
+    fontSize: 22, 
+    fontWeight: '700', 
+    color: COLORS.text, 
+    textAlign: 'center', 
+    ...Platform.select({
+      ios: {
+        paddingTop: 15,
+      },
+      android: {
+        textAlignVertical: 'center',
+        lineHeight: 56,
+      },
+      default: {
+        lineHeight: 56,
+      }
+    }),
+    paddingHorizontal: 0, 
+    ...GLASS.input 
+  },
   otpBoxFilled: { borderColor: COLORS.blue, backgroundColor: 'rgba(30,156,240,0.10)' },
 
   resendRow:   { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },

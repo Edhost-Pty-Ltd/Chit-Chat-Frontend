@@ -555,7 +555,9 @@ export const onCallCreated = functionsV1.firestore
         sound: 'default',
         badge: 1,
         priority: 'high',
-        // Use category for notification actions (Android & iOS)
+        // Android channel for full-screen intent
+        channelId: 'incoming-call',
+        // iOS/Android category for action buttons
         categoryId: 'incoming-call',
         data: {
           type: 'incoming-call',
@@ -639,7 +641,9 @@ export const onGroupCallCreated = functionsV1.firestore
           sound: 'default',
           badge: 1,
           priority: 'high',
-          // Use category for notification actions (Android & iOS)
+          // Android channel for full-screen intent
+          channelId: 'incoming-call',
+          // iOS/Android category for action buttons
           categoryId: 'incoming-call',
           data: {
             type: 'group-call',

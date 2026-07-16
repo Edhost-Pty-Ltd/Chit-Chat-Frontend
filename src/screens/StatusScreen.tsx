@@ -13,6 +13,7 @@ import { isVisibleTo } from '../hooks/usePrivacySettings';
 import type { FireStatus } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -62,8 +63,19 @@ export default function StatusScreen() {
     error,
     createStatus,
     markAsViewed,
+    markAllAsViewed,
     deleteStatus,
   } = useStatus(userId);
+
+  // ── Mark all statuses as viewed when screen is focused ─────────────────────
+  useFocusEffect(
+    React.useCallback(() => {
+      // Mark all unviewed statuses as viewed when the Updates screen is opened
+      if (userId && contactStatuses.length > 0) {
+        markAllAsViewed();
+      }
+    }, [userId, contactStatuses.length, markAllAsViewed])
+  );
 
   // ── Resolve poster names via phone book ─────────────────────────────────────
   // Status docs store a denormalized displayName (often "Unknown" for phone-auth

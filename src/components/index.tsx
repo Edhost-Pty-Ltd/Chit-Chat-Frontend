@@ -227,7 +227,17 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: 'rgba(255,255,255,0.50)',
   },
   avatarText: { color: '#fff', fontWeight: '700' },
-  statusDot:  { position: 'absolute', borderWidth: 2, borderColor: COLORS.sky1 },
+  statusDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.blue,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
 
   navBar: {
     flexDirection: 'row',

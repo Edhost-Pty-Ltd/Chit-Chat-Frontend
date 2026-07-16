@@ -145,6 +145,36 @@ export function useIncomingCallAnswer() {
 
     try {
       await SignalingService.updateCallStatus(callId, 'rejected');
+      
+      // Save rejected call to history for both parties
+      const call = await SignalingService.getCall(callId);
+      if (call) {
+        // Save for caller (outgoing, rejected)
+        await SignalingService.saveToCallHistory(
+          call.caller.userId,
+          callId,
+          call.callee,
+          call.type,
+          'outgoing',
+          'rejected',
+          null,
+          call.chatId || undefined
+        );
+        
+        // Save for callee (incoming, rejected)
+        await SignalingService.saveToCallHistory(
+          call.callee.userId,
+          callId,
+          call.caller,
+          call.type,
+          'incoming',
+          'rejected',
+          null,
+          call.chatId || undefined
+        );
+        console.log('[useIncomingCallAnswer] Call saved to history for both parties');
+      }
+      
       resetCallState();
       console.log('[useIncomingCallAnswer] Call rejected successfully');
     } catch (err) {

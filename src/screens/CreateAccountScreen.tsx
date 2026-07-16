@@ -598,9 +598,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
     textAlign: 'center',
-    textAlignVertical: 'center',
-    lineHeight: 58,
-    paddingVertical: 0,
+    ...Platform.select({
+      ios: {
+        paddingTop: 16,
+      },
+      android: {
+        textAlignVertical: 'center',
+        lineHeight: 58,
+      },
+      default: {
+        lineHeight: 58,
+      }
+    }),
     paddingHorizontal: 0,
     ...GLASS.input,
   },

@@ -114,6 +114,27 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       },
     ]);
 
+    // Set up notification category for incoming calls with Answer/Decline buttons
+    await Notifications.setNotificationCategoryAsync('incoming-call', [
+      {
+        identifier: 'answer',
+        buttonTitle: '✓ Answer',
+        options: {
+          opensAppToForeground: true,
+          isAuthenticationRequired: false,
+        },
+      },
+      {
+        identifier: 'decline',
+        buttonTitle: '✕ Decline',
+        options: {
+          opensAppToForeground: false,
+          isDestructive: true,
+          isAuthenticationRequired: false,
+        },
+      },
+    ]);
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     
@@ -180,13 +201,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   // so the hook never needs to call useNotifications() itself.
   useNotificationSync(user?.uid ?? null, pushNotification);
 
-  // ── Handle notification action responses (Reply / Mark as Read) ───
+  // ── Handle notification action responses (Reply / Mark as Read / Answer / Decline) ───
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
       const actionId = response.actionIdentifier;
       const data = response.notification.request.content.data;
       const chatId = data?.chatId as string | undefined;
 
+      // Handle message actions
       if (actionId === 'markRead') {
         // Mark all notifications for this chat as read
         if (chatId) {
@@ -227,6 +249,27 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
           } catch (err) {
             console.error('[Notifications] Failed to send reply:', err);
           }
+        }
+      }
+      // Handle incoming call actions (answer/decline)
+      else if (actionId === 'answer' || actionId === 'decline') {
+        const callId = data?.callId as string | undefined;
+        const callType = data?.type as string | undefined;
+        
+        if (callId && (callType === 'incoming-call' || callType === 'group-call')) {
+          console.log(`[Notifications] ${actionId} action for call:`, callId);
+          
+          if (actionId === 'decline') {
+            // Reject the call without opening the app
+            try {
+              const { SignalingService } = await import('../services/signalingService');
+              await SignalingService.updateCallStatus(callId, 'rejected');
+              console.log('[Notifications] Call rejected successfully');
+            } catch (err) {
+              console.error('[Notifications] Error rejecting call:', err);
+            }
+          }
+          // For 'answer', the app will open and IncomingCallManager will handle it
         }
       }
     });

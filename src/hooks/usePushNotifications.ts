@@ -88,7 +88,7 @@ export function usePushNotifications(
       const actionId = response.actionIdentifier;
       console.log('[usePushNotifications] Action identifier:', actionId);
 
-      // Handle incoming call notification actions
+      // Handle incoming call notification actions (1-on-1 calls)
       if (data?.type === 'incoming-call' && data.callId) {
         const { SignalingService } = await import('../services/signalingService');
         
@@ -101,8 +101,27 @@ export function usePushNotifications(
           console.log('[usePushNotifications] Decline action tapped for call:', data.callId);
           // Reject the call directly without opening the app
           try {
+            // Update call status to rejected
             await SignalingService.updateCallStatus(data.callId, 'rejected');
-            console.log('[usePushNotifications] Call rejected successfully');
+            
+            // Save to call history for the callee (this user)
+            if (userId && data.callerId && data.callerName) {
+              await SignalingService.saveToCallHistory(
+                userId,
+                data.callId,
+                {
+                  userId: data.callerId,
+                  displayName: data.callerName,
+                  photoUrl: data.callerPhotoUrl || null,
+                },
+                data.callType || 'audio',
+                'incoming',
+                'rejected',
+                null, // no duration
+              );
+            }
+            
+            console.log('[usePushNotifications] Call rejected successfully from notification');
           } catch (err) {
             console.error('[usePushNotifications] Error rejecting call:', err);
           }
@@ -113,6 +132,21 @@ export function usePushNotifications(
         }
         
         // If answered or default tap, the app opens and IncomingCallManager handles it
+        return;
+      }
+
+      // Handle group call notification actions
+      if (data?.type === 'group-call' && data.callId) {
+        if (actionId === 'answer') {
+          console.log('[usePushNotifications] Answer action tapped for group call:', data.callId);
+          // The app will open and navigate to the video call screen
+        } else if (actionId === 'decline') {
+          console.log('[usePushNotifications] Decline action tapped for group call:', data.callId);
+          // For group calls, just dismiss the notification without joining
+          // No need to update status since other participants may still be on the call
+          return; // Don't navigate anywhere
+        }
+        // For answer or default tap, the app opens and group call handling takes over
         return;
       }
 
@@ -163,20 +197,23 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   // Set up notification category with action buttons for incoming calls
+  // These buttons appear on the notification banner/lock screen
   await Notifications.setNotificationCategoryAsync('incoming-call', [
     {
       identifier: 'answer',
-      buttonTitle: 'Answer',
+      buttonTitle: '✓ Answer',
       options: {
         opensAppToForeground: true,
+        isAuthenticationRequired: false,
       },
     },
     {
       identifier: 'decline',
-      buttonTitle: 'Decline',
+      buttonTitle: '✕ Decline',
       options: {
         opensAppToForeground: false,
         isDestructive: true,
+        isAuthenticationRequired: false,
       },
     },
   ]);

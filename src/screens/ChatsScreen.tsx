@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BottomNav } from '../components';
+import { BottomNav, StatusViewer } from '../components';
 import { useAuth } from '../hooks/useAuth';
 import { useChats, ChatPreview } from '../hooks/useChats';
 import { useContacts, AppContact } from '../hooks/useContacts';
@@ -24,7 +24,7 @@ import { usePhoneBook } from '../hooks/usePhoneBook';
 import { formatE164 } from '../utils/phoneUtils';
 import { db } from '../config/firebase';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
-import { RootStackParamList } from '../types';
+import { RootStackParamList, FireStatus } from '../types';
 
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 type NavProp   = NativeStackNavigationProp<RootStackParamList, 'Chats'>;
@@ -87,19 +87,16 @@ function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedCon
     </View>
   );
 
-  // If user has status, wrap in gradient ring
-  if (hasStatus) {
-    return (
-      <LinearGradient colors={[color, COLORS.blue]} style={styles.ring}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-        <View style={styles.ringInner}>
-          {avatarContent}
-        </View>
-      </LinearGradient>
-    );
-  }
+  const avatarWithRing = hasStatus ? (
+    <LinearGradient colors={[color, COLORS.blue]} style={styles.ring}
+      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+      <View style={styles.ringInner}>
+        {avatarContent}
+      </View>
+    </LinearGradient>
+  ) : avatarContent;
 
-  return avatarContent;
+  return avatarWithRing;
 }
 
 // ─── Dial-pad keypad ──────────────────────────────────────────────────────────
@@ -596,7 +593,7 @@ export default function ChatsScreen() {
 
   const { chats, loading: chatsLoading } = useChats(userId);
   const { contacts, loading: contactsLoading, reload: reloadContacts, hasPermission, error: contactsError } = useContacts();
-  const { contactStatuses } = useStatus(userId);
+  const { contactStatuses, markAsViewed } = useStatus(userId);
   
   // Sync contact names to Firestore so Cloud Functions can personalize notifications
   useSyncContacts(userId ?? undefined, contacts);
@@ -629,6 +626,11 @@ export default function ChatsScreen() {
   const [selectedChat, setSelectedChat] = useState<ChatPreview | null>(null);
   const [actionModalOpen, setActionModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // StatusViewer state
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerStatuses, setViewerStatuses] = useState<FireStatus[]>([]);
+  const [viewerUserId, setViewerUserId] = useState<string | null>(null);
 
   // Extra member info fetched from Firestore for users not in device contacts
   const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string; photoURL?: string }>>(new Map());
@@ -928,6 +930,20 @@ export default function ChatsScreen() {
     );
   }, [selectedChat, userId, getDisplayName]);
 
+  // Handle avatar click to view status
+  const handleAvatarClick = useCallback((otherUserId: string) => {
+    if (!otherUserId) return;
+    
+    // Find the status group for this user
+    const statusGroup = contactStatuses.find(group => group.userId === otherUserId);
+    if (!statusGroup || statusGroup.statuses.length === 0) return;
+    
+    // Open StatusViewer with this user's statuses
+    setViewerStatuses(statusGroup.statuses);
+    setViewerUserId(otherUserId);
+    setViewerVisible(true);
+  }, [contactStatuses]);
+
   const renderChat = ({ item }: { item: ChatPreview }) => {
     const displayName = getDisplayName(item);
     const isGroup = item.type === 'group';
@@ -979,7 +995,9 @@ export default function ChatsScreen() {
     };
 
     return (
-      <TouchableOpacity style={[styles.chatCard, bevel]} activeOpacity={0.75}
+      <TouchableOpacity 
+        style={[styles.chatCard, bevel]} 
+        activeOpacity={0.75}
         onPress={() => navigation.navigate('Chat', { 
           chatId: item.chatId, 
           displayName, 
@@ -989,8 +1007,17 @@ export default function ChatsScreen() {
         })}
         onLongPress={() => handleChatLongPress(item)}
         delayLongPress={500}>
-        {/* Avatar with status ring */}
-        <View style={styles.chatAvatarWrap}>
+        
+        {/* Avatar with status ring - clickable area that intercepts touch */}
+        <View 
+          style={styles.chatAvatarWrap}
+          onStartShouldSetResponder={() => hasStatus && !isGroup && !!otherMemberId}
+          onResponderRelease={() => {
+            if (hasStatus && !isGroup && otherMemberId) {
+              handleAvatarClick(otherMemberId);
+            }
+          }}
+        >
           <ChatAvatar 
             displayName={displayName} 
             contactPhotoUri={contactPhotoUri}
@@ -1235,6 +1262,19 @@ export default function ChatsScreen() {
       </TouchableOpacity>
 
       <BottomNav active="chats" />
+
+      {/* StatusViewer Modal */}
+      {viewerVisible && userId && (
+        <StatusViewer
+          visible={viewerVisible}
+          onClose={() => setViewerVisible(false)}
+          statuses={viewerStatuses}
+          initialIndex={0}
+          currentUserId={userId}
+          onStatusViewed={markAsViewed}
+          onDeleteStatus={undefined}
+        />
+      )}
     </View>
   );
 }
