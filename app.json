@@ -15,10 +15,18 @@
         "NSContactsUsageDescription": "Chit-Chat needs access to your contacts to help you find friends on the app.",
         "NSLocationWhenInUseUsageDescription": "Chit-Chat needs access to your location to share it with your contacts.",
         "NSLocationAlwaysUsageDescription": "Chit-Chat needs access to your location to share live location updates.",
-        "NSUserNotificationsUsageDescription": "Chit-Chat needs permission to send you notifications for new messages, calls, and status updates."
-      }
+        "NSUserNotificationsUsageDescription": "Chit-Chat needs permission to send you notifications for new messages, calls, and status updates.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["remote-notification"]
+      },
+      "entitlements": {
+        "aps-environment": "production"
+      },
+      "bitcode": false
     },
     "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
       [
         "expo-build-properties",
         {
@@ -31,7 +39,8 @@
             ]
           },
           "android": {
-            "enableProguardInReleaseBuilds": false
+            "enableProguardInReleaseBuilds": false,
+            "enableMinifyInReleaseBuilds": false
           }
         }
       ],
@@ -112,7 +121,16 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION"
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "softwareKeyboardLayoutMode": "pan"
     },

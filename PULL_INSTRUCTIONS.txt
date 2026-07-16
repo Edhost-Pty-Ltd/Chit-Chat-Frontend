@@ -1,0 +1,84 @@
+=== PULL INSTRUCTIONS FOR iOS PHONE AUTH FIX ===
+
+BRANCH: ios-phone-auth-fix
+DESCRIPTION: Fixes iOS phone authentication crash and adds APNs support
+
+FILES CHANGED:
+1. app.json - Added Firebase plugins and iOS entitlements
+2. eas.json - Updated build configurations
+3. android/app/build.gradle - Fixed release signing configuration
+4. src/hooks/useAuth.ts - Added crash protection and better error handling
+5. src/hooks/useRingtone.ts - Fixed ringtone initialization
+6. src/screens/SignInScreen.tsx - Added error alerts for debugging
+7. src/config/firebaseNative.ts - Added manual Firebase initialization for iOS
+
+STEPS TO PULL WITHOUT CONFLICTS:
+
+1. COMMIT YOUR CURRENT WORK FIRST
+   ```
+   git add .
+   git commit -m "Your work in progress"
+   ```
+
+2. FETCH AND CHECKOUT THE NEW BRANCH
+   ```
+   git fetch origin
+   git checkout ios-phone-auth-fix
+   ```
+
+3. IF YOU HAVE CONFLICTS (especially in app.json or package files):
+   
+   For app.json conflicts:
+   - Keep both the Firebase plugins AND your changes
+   - Merge manually if needed
+   
+   For src files conflicts:
+   - Review the error handling additions
+   - Keep your logic + the new error handling
+
+4. AFTER PULLING, REBUILD iOS:
+   ```
+   npm install
+   eas build --platform ios --profile development --clear-cache
+   ```
+
+WHAT CHANGED AND WHY:
+
+✅ app.json:
+   - Added "@react-native-firebase/app" plugin
+   - Added "@react-native-firebase/auth" plugin
+   - Added iOS entitlements for APNs
+   - Added UIBackgroundModes for remote notifications
+
+✅ src/config/firebaseNative.ts:
+   - Added manual Firebase initialization for iOS as fallback
+   - Better error messages for debugging
+   - Platform-specific initialization
+
+✅ src/hooks/useAuth.ts:
+   - Wrapped signInWithPhoneNumber in try-catch to prevent crash
+   - Added detailed error logging
+   - iOS-specific error messages
+
+✅ src/screens/SignInScreen.tsx:
+   - Added Alert import
+   - Shows error messages in popup instead of just text
+   - Helps debug without console access
+
+✅ android/app/build.gradle:
+   - Fixed release signing to use release keystore with fallback
+
+TESTING AFTER PULL:
+
+1. Install the new iOS build on device
+2. Try phone authentication
+3. You should see proper error messages instead of crash
+4. Firebase should initialize correctly
+
+NOTES:
+- This does NOT change any business logic
+- Only adds error handling and Firebase configuration
+- Should not conflict with feature work
+- If you get merge conflicts, ping me
+
+QUESTIONS? Contact the person who pushed this branch.

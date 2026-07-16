@@ -13,7 +13,7 @@ import { useState, useRef, useMemo } from 'react';
 import {
   View, TextInput, TouchableOpacity, Image,
   StyleSheet, ScrollView, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Modal, FlatList,
+  Platform, ActivityIndicator, Modal, FlatList, Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -171,15 +171,30 @@ export default function SignInScreen() {
     setErrorMsg('');
     setLoading(true);
     try {
+      console.log('[SignInScreen] Sending OTP to:', fullNumber);
       const success = await sendOTP(fullNumber);
+      console.log('[SignInScreen] sendOTP result:', success);
+      
       if (success) {
         setStep('otp');
         startResendTimer();
       } else {
-        setErrorMsg(authError || 'Failed to send code. Please try again.');
+        const errorMessage = authError || 'Failed to send code. Please try again.';
+        console.error('[SignInScreen] sendOTP failed:', errorMessage);
+        setErrorMsg(errorMessage);
+        
+        // Show alert for critical errors
+        if (authError?.includes('APNs') || authError?.includes('not configured')) {
+          alert(`iOS Configuration Error:\n\n${errorMessage}\n\nPlease contact support or try Android.`);
+        }
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to send code. Please try again.');
+      console.error('[SignInScreen] Exception in handleSendOtp:', err);
+      const errorMessage = err.message || 'Failed to send code. Please try again.';
+      setErrorMsg(errorMessage);
+      
+      // Show detailed error in alert
+      alert(`Error sending code:\n\n${errorMessage}\n\nError details: ${JSON.stringify(err)}`);
     } finally {
       setLoading(false);
     }

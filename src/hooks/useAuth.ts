@@ -4,8 +4,12 @@
 //
 // Uses the native Firebase Auth module which handles reCAPTCHA automatically
 // on both iOS and Android — no WebView or manual recaptcha needed.
+//
+// NOTE: iOS requires APNs (Apple Push Notification Service) to be configured
+// for phone auth. Without APNs, use the web-based auth flow as fallback.
 
 import { useState, useEffect } from 'react';
+import { Platform } from 'react-native';
 import auth, { FirebaseAuthTypes, getAuth, onAuthStateChanged, signInWithPhoneNumber, signOut as firebaseSignOut } from '@react-native-firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -39,14 +43,61 @@ export function useAuth() {
       setError(null);
 
       console.log('[useAuth] Sending OTP to:', phone);
+      console.log('[useAuth] Platform:', Platform.OS);
+      
+      // Check if running on iOS without APNs configured
+      if (Platform.OS === 'ios') {
+        console.warn('[useAuth] iOS Phone Auth requires APNs to be configured in Firebase Console');
+      }
+      
       const authInstance = getAuth();
-      const confirmation = await signInWithPhoneNumber(authInstance, phone);
-      setConfirm(confirmation);
-      setStep('otpSent');
-      return true;
+      
+      // Wrap in try-catch to prevent crash
+      try {
+        const confirmation = await signInWithPhoneNumber(authInstance, phone);
+        setConfirm(confirmation);
+        setStep('otpSent');
+        console.log('[useAuth] OTP sent successfully');
+        return true;
+      } catch (signInError: any) {
+        console.error('[useAuth] signInWithPhoneNumber failed:', signInError);
+        console.error('[useAuth] Error details:', {
+          code: signInError.code,
+          message: signInError.message,
+          name: signInError.name,
+        });
+        
+        // Provide specific error messages for common iOS issues
+        if (Platform.OS === 'ios') {
+          if (signInError.code === 'auth/invalid-app-credential' || 
+              signInError.code === 'auth/app-not-authorized') {
+            throw new Error('Firebase is not properly configured for iOS. Please ensure APNs is set up correctly.');
+          } else if (signInError.code === 'auth/missing-client-identifier') {
+            throw new Error('iOS configuration error: Missing client identifier. APNs may not be properly configured.');
+          } else if (signInError.message?.includes('APNs') || signInError.message?.includes('APNS')) {
+            throw new Error('APNs error: ' + signInError.message);
+          }
+        }
+        
+        throw signInError;
+      }
     } catch (err: any) {
-      console.error('[useAuth] sendOTP error:', err.code, err.message);
-      setError(getAuthErrorMessage(err.code));
+      console.error('[useAuth] sendOTP error:', err);
+      console.error('[useAuth] Error code:', err.code);
+      console.error('[useAuth] Error message:', err.message);
+      
+      // Provide iOS-specific error messages
+      if (Platform.OS === 'ios' && (
+        err.code === 'auth/missing-client-identifier' ||
+        err.code === 'auth/internal-error' ||
+        err.message?.includes('APNs') ||
+        err.message?.includes('APNS')
+      )) {
+        setError('Phone authentication is not configured for iOS. Please contact support or use Android device.');
+      } else {
+        setError(getAuthErrorMessage(err.code) || err.message);
+      }
+      
       setStep('error');
       return false;
     }
