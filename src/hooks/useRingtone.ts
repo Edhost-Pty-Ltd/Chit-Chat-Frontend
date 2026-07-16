@@ -8,9 +8,13 @@ import { Platform } from 'react-native';
 export function useRingtone() {
   const [isPlaying, setIsPlaying] = useState(false);
   const beepIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isAudioConfigured = useRef(false);
   
   // Create audio player for ringtone
-  const player = useAudioPlayer();
+  const player = useAudioPlayer(require('../../assets/ringtone.mp3'), {
+    shouldPlay: false,
+    volume: 1.0,
+  });
 
   // Configure audio mode for ringtone playback
   useEffect(() => {
@@ -21,6 +25,7 @@ export function useRingtone() {
           allowsRecordingIOS: false,
           staysActiveInBackground: true,
         });
+        isAudioConfigured.current = true;
         console.log('[useRingtone] Audio mode configured');
       } catch (error) {
         console.error('[useRingtone] Error configuring audio:', error);
@@ -40,20 +45,25 @@ export function useRingtone() {
       }
 
       console.log('[useRingtone] Starting ringtone...');
+      console.log('[useRingtone] Audio configured:', isAudioConfigured.current);
 
-      // Try to load custom ringtone, fallback to beep pattern
+      // Try to play custom ringtone, fallback to beep pattern
       try {
-        // Load the audio file from assets
-        const ringtoneAsset = require('../../assets/ringtone.mp3');
+        // Ensure audio is configured first
+        if (!isAudioConfigured.current) {
+          await AudioModule.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            allowsRecordingIOS: false,
+            staysActiveInBackground: true,
+          });
+          isAudioConfigured.current = true;
+        }
         
-        console.log('[useRingtone] Loading ringtone asset');
-        
-        // Replace with the ringtone source (SDK 56 uses direct asset/URL)
-        player.replace(ringtoneAsset);
-        
-        // Enable looping
+        // Enable looping and set volume
         player.loop = true;
         player.volume = 1.0;
+        
+        console.log('[useRingtone] Player status before play:', player.playing, 'duration:', player.duration);
         
         // Play the ringtone
         player.play();

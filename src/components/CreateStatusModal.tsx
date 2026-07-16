@@ -23,6 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { COLORS, RADIUS, SHADOW, GRADIENTS } from '../types/theme';
 import { AppBg, AppText, AppIcon, useForeground, useGlass } from '../context/ThemeContext';
 import { VideoTrimmer } from './VideoTrimmer';
+import { FEATURE_FLAGS } from '../constants/featureFlags';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -120,8 +121,13 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
           setMediaDuration(videoDurationMs);
           setVideoTrimStart(0);
           setVideoTrimEnd(Math.min(videoDurationMs, 30000));
-          // Show trimmer modal for videos
-          setMode('trimVideo');
+          // Show trimmer modal for videos only if feature flag is enabled
+          if (FEATURE_FLAGS.statusVideoTrimmer) {
+            setMode('trimVideo');
+          } else {
+            // Skip trimming — use full video up to 30s limit
+            setMode('media');
+          }
         } else {
           setMediaDuration(5000);
           setMode('media');
@@ -546,7 +552,7 @@ export function CreateStatusModal({ visible, onClose, onCreate }: CreateStatusMo
       </View>
 
       {/* Video Trimmer Modal */}
-      {mode === 'trimVideo' && mediaUri && (
+      {FEATURE_FLAGS.statusVideoTrimmer && mode === 'trimVideo' && mediaUri && (
         <VideoTrimmer
           visible={mode === 'trimVideo'}
           videoUri={mediaUri}

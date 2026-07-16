@@ -9,46 +9,63 @@ import { Avatar, BottomNav, UserAvatar } from '../components';
 import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { FEATURE_FLAGS } from '../constants/featureFlags';
 
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
 
-const SETTINGS_SECTIONS: {
+// Build settings sections dynamically based on feature flags
+const buildSettingsSections = (): {
   label?: string;
   items: { id: string; icon: IoniconName; label: string; danger?: boolean }[];
-}[] = [
-  {
-    label: 'APPS',
-    items: [
-      { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar'     },
-      { id: 'notes',    icon: 'document-text-outline', label: 'Notes'        },
-    ],
-  },
-  {
-    items: [
-      { id: 'account',       icon: 'person-outline',        label: 'Account'       },
-      { id: 'privacy',       icon: 'lock-closed-outline',   label: 'Privacy'       },
-      { id: 'notifications', icon: 'notifications-outline', label: 'Notifications' },
-    ],
-  },
-  {
-    items: [
-      { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices'  },
-      { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'      },
-    ],
-  },
-  {
-    items: [
-      { id: 'help',  icon: 'help-circle-outline',        label: 'Help & Support' },
-      { id: 'about', icon: 'information-circle-outline', label: 'About'          },
-    ],
-  },
-  {
+}[] => {
+  const sections: {
+    label?: string;
+    items: { id: string; icon: IoniconName; label: string; danger?: boolean }[];
+  }[] = [
+    {
+      label: 'APPS',
+      items: [
+        { id: 'calendar', icon: 'calendar-outline',      label: 'Calendar'     },
+        { id: 'notes',    icon: 'document-text-outline', label: 'Notes'        },
+      ],
+    },
+    {
+      items: [
+        { id: 'account',       icon: 'person-outline',        label: 'Account'       },
+        { id: 'privacy',       icon: 'lock-closed-outline',   label: 'Privacy'       },
+        { id: 'notifications', icon: 'notifications-outline', label: 'Notifications' },
+      ],
+    },
+    {
+      items: [
+        { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices'  },
+        { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'      },
+      ],
+    },
+  ];
+
+  // Conditionally add Help & About section
+  const helpAboutItems: { id: string; icon: IoniconName; label: string }[] = [];
+  if (FEATURE_FLAGS.helpSupport) {
+    helpAboutItems.push({ id: 'help', icon: 'help-circle-outline', label: 'Help & Support' });
+  }
+  if (FEATURE_FLAGS.about) {
+    helpAboutItems.push({ id: 'about', icon: 'information-circle-outline', label: 'About' });
+  }
+  if (helpAboutItems.length > 0) {
+    sections.push({ items: helpAboutItems });
+  }
+
+  // Always add sign out
+  sections.push({
     items: [{ id: 'signout', icon: 'log-out-outline', label: 'Sign Out', danger: true }],
-  },
-];
+  });
+
+  return sections;
+};
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavProp>();
@@ -57,6 +74,8 @@ export default function SettingsScreen() {
   const { fontFamily, textColor, iconColor } = useTypography();
   const { bevel } = useGlass();
   const insets = useSafeAreaInsets();
+
+  const SETTINGS_SECTIONS = buildSettingsSections();
 
   const handleItem = (id: string) => {
     if (id === 'signout')    { signOut(); return; }
