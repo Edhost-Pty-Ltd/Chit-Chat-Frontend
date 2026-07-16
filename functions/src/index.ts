@@ -500,6 +500,7 @@ export const onCallCreated = functionsV1.firestore
     }
 
     const { callerId, calleeId, type } = callData;
+    const caller = callData.caller;
 
     if (!callerId || !calleeId) {
       console.log('[onCallCreated] Missing caller or callee ID');
@@ -510,7 +511,7 @@ export const onCallCreated = functionsV1.firestore
 
     try {
       // Get caller's name
-      const callerName = await getUserDisplayName(callerId);
+      const callerName = caller?.displayName || await getUserDisplayName(callerId);
 
       // Get callee's push token
       const pushToken = await getUserPushToken(calleeId);
@@ -520,7 +521,7 @@ export const onCallCreated = functionsV1.firestore
       }
 
       const isVideo = type === 'video';
-      const title = `Incoming ${isVideo ? 'Video' : ''} Call`;
+      const title = `Incoming ${isVideo ? 'Video ' : ''}Call`;
       const body = `${callerName} is calling you`;
 
       const messages: ExpoPushMessage[] = [{
@@ -530,11 +531,14 @@ export const onCallCreated = functionsV1.firestore
         sound: 'default',
         badge: 1,
         priority: 'high',
+        // Use category for notification actions (Android & iOS)
+        categoryId: 'incoming-call',
         data: {
           type: 'incoming-call',
           callId,
           callerId,
           callerName,
+          callerPhotoUrl: caller?.photoUrl || null,
           callType: type,
         },
       }];
@@ -598,6 +602,8 @@ export const onGroupCallCreated = functionsV1.firestore
           sound: 'default',
           badge: 1,
           priority: 'high',
+          // Use category for notification actions (Android & iOS)
+          categoryId: 'incoming-call',
           data: {
             type: 'group-call',
             callId,

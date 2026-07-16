@@ -1,9 +1,9 @@
 // ─── Screen: Chats ───────────────────────────────────────────────────────────
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   TextInput, Modal, Pressable, ScrollView, Animated,
-  ActivityIndicator, Image, Platform,
+  ActivityIndicator, Image, Platform, Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -627,6 +627,9 @@ export default function ChatsScreen() {
   const [query,      setQuery]      = useState('');
   const [sheetOpen,  setSheetOpen]  = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [selectedChat, setSelectedChat] = useState<ChatPreview | null>(null);
+  const [actionModalOpen, setActionModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Extra member info fetched from Firestore for users not in device contacts
   const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string; photoURL?: string }>>(new Map());
@@ -852,6 +855,80 @@ export default function ChatsScreen() {
     });
   };
 
+  // Handle long press on chat - show action modal
+  const handleChatLongPress = useCallback((chat: ChatPreview) => {
+    setSelectedChat(chat);
+    setActionModalOpen(true);
+  }, []);
+
+  // Delete chat handler
+  const handleDeleteChat = useCallback(async () => {
+    if (!selectedChat || !userId) return;
+    
+    const chatName = getDisplayName(selectedChat);
+    const isGroup = selectedChat.type === 'group';
+    
+    Alert.alert(
+      'Delete Chat',
+      `Are you sure you want to delete your chat with ${chatName}? ${isGroup ? 'You will also leave this group.' : 'This action cannot be undone.'}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            setActionModalOpen(false);
+            try {
+              const { doc, updateDoc, arrayRemove, deleteDoc, collection, getDocs, writeBatch } = await import('firebase/firestore');
+              
+              if (isGroup) {
+                // For groups: remove user from members (leave group)
+                const chatRef = doc(db, 'chats', selectedChat.chatId);
+                await updateDoc(chatRef, {
+                  members: arrayRemove(userId),
+                });
+              } else {
+                // For direct chats: delete the entire chat and its messages
+                const chatRef = doc(db, 'chats', selectedChat.chatId);
+                const messagesRef = collection(db, 'chats', selectedChat.chatId, 'messages');
+                
+                // Delete all messages in batches
+                const messagesSnap = await getDocs(messagesRef);
+                const batch = writeBatch(db);
+                let count = 0;
+                
+                for (const msgDoc of messagesSnap.docs) {
+                  batch.delete(msgDoc.ref);
+                  count++;
+                  // Firestore batch limit is 500
+                  if (count >= 500) {
+                    await batch.commit();
+                    count = 0;
+                  }
+                }
+                
+                if (count > 0) {
+                  await batch.commit();
+                }
+                
+                // Delete the chat document
+                await deleteDoc(chatRef);
+              }
+              
+              setSelectedChat(null);
+            } catch (err) {
+              console.error('[ChatsScreen] Failed to delete chat:', err);
+              Alert.alert('Error', 'Failed to delete chat. Please try again.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [selectedChat, userId, getDisplayName]);
+
   const renderChat = ({ item }: { item: ChatPreview }) => {
     const displayName = getDisplayName(item);
     const isGroup = item.type === 'group';
@@ -910,7 +987,9 @@ export default function ChatsScreen() {
           isGroup,
           otherUserId: otherMemberId || undefined,
           otherUserPhoto: firebasePhotoURL || contactPhotoUri || null,
-        })}>
+        })}
+        onLongPress={() => handleChatLongPress(item)}
+        delayLongPress={500}>
         {/* Avatar with status ring */}
         <View style={styles.chatAvatarWrap}>
           <ChatAvatar 
@@ -976,6 +1055,63 @@ export default function ChatsScreen() {
   return (
     <View style={styles.root}>
       <AppBg />
+      
+      {/* ── Chat Action Modal (long press) ── */}
+      <Modal visible={actionModalOpen} transparent animationType="fade"
+        onRequestClose={() => setActionModalOpen(false)} statusBarTranslucent>
+        <Pressable style={styles.actionOverlay} onPress={() => setActionModalOpen(false)} />
+        
+        <View style={styles.actionModal}>
+          <View style={styles.actionModalContent}>
+            {selectedChat && (
+              <>
+                <View style={styles.actionModalHeader}>
+                  <ChatAvatar 
+                    displayName={getDisplayName(selectedChat)}
+                    contactPhotoUri={
+                      selectedChat.type !== 'group' 
+                        ? firestoreUsersMap.get(selectedChat.members.find(id => id !== userId) || '')?.contactPhotoUri
+                        : undefined
+                    }
+                    firebasePhotoURL={
+                      selectedChat.type !== 'group'
+                        ? firestoreUsersMap.get(selectedChat.members.find(id => id !== userId) || '')?.photoURL
+                        : undefined
+                    }
+                  />
+                  <AppText style={styles.actionModalName} numberOfLines={1}>
+                    {getDisplayName(selectedChat)}
+                  </AppText>
+                </View>
+                
+                <View style={styles.actionModalDivider} />
+                
+                <TouchableOpacity 
+                  style={styles.actionModalItem}
+                  onPress={handleDeleteChat}
+                  activeOpacity={0.7}
+                  disabled={deleting}
+                >
+                  <AppIcon name="trash-outline" size={22} color={COLORS.missed} fixedColor />
+                  <AppText style={[styles.actionModalItemText, { color: COLORS.missed }]}>
+                    {selectedChat.type === 'group' ? 'Delete and Leave Group' : 'Delete Chat'}
+                  </AppText>
+                  {deleting && <ActivityIndicator size="small" color={COLORS.missed} style={{ marginLeft: 8 }} />}
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.actionModalItem}
+                  onPress={() => setActionModalOpen(false)}
+                  activeOpacity={0.7}
+                >
+                  <AppIcon name="close-outline" size={22} color={COLORS.sub} />
+                  <AppText style={[styles.actionModalItemText, { color: '#666' }]}>Cancel</AppText>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
       
       {/* ── Bottom sheet modal ── */}
       <Modal visible={sheetOpen} transparent animationType="slide"
@@ -1439,4 +1575,57 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   selectedIndicator: { marginLeft: 8 },
+
+  // Action modal (long press)
+  actionOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+  },
+  actionModal: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  actionModalContent: {
+    width: '100%',
+    maxWidth: 300,
+    borderRadius: RADIUS.xl,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
+    paddingTop: 20,
+    paddingBottom: 8,
+    ...SHADOW.glow,
+  },
+  actionModalHeader: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  actionModalName: {
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+    maxWidth: '90%',
+    color: '#1a1a1a',
+  },
+  actionModalDivider: {
+    height: 1,
+    backgroundColor: 'rgba(128,128,128,0.15)',
+    marginHorizontal: 0,
+    marginBottom: 4,
+  },
+  actionModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  actionModalItemText: {
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+  },
 });

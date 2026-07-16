@@ -73,10 +73,48 @@ export function usePushNotifications(
     });
 
     // Listener for when a notification is tapped/interacted with
-    const subscription2 = Notifications.addNotificationResponseReceivedListener((response: any) => {
-      console.log('[usePushNotifications] Notification tapped:', response);
+    const subscription2 = Notifications.addNotificationResponseReceivedListener(async (response: any) => {
+      console.log('[usePushNotifications] Notification response:', response);
 
-      const data = response.notification.request.content.data as { type?: string } | undefined;
+      const data = response.notification.request.content.data as { 
+        type?: string;
+        callId?: string;
+        callerId?: string;
+        callerName?: string;
+        callerPhotoUrl?: string;
+        callType?: 'audio' | 'video';
+      } | undefined;
+      
+      const actionId = response.actionIdentifier;
+      console.log('[usePushNotifications] Action identifier:', actionId);
+
+      // Handle incoming call notification actions
+      if (data?.type === 'incoming-call' && data.callId) {
+        const { SignalingService } = await import('../services/signalingService');
+        
+        if (actionId === 'answer') {
+          console.log('[usePushNotifications] Answer action tapped for call:', data.callId);
+          // The app will open and IncomingCallManager will detect the call
+          // and show the overlay. User can then complete the answer flow.
+          // We don't answer directly here because we need the full WebRTC setup.
+        } else if (actionId === 'decline') {
+          console.log('[usePushNotifications] Decline action tapped for call:', data.callId);
+          // Reject the call directly without opening the app
+          try {
+            await SignalingService.updateCallStatus(data.callId, 'rejected');
+            console.log('[usePushNotifications] Call rejected successfully');
+          } catch (err) {
+            console.error('[usePushNotifications] Error rejecting call:', err);
+          }
+          return; // Don't navigate anywhere
+        } else {
+          // Default tap (not an action button) - open the app
+          console.log('[usePushNotifications] Notification tapped (default), opening app');
+        }
+        
+        // If answered or default tap, the app opens and IncomingCallManager handles it
+        return;
+      }
 
       // Calendar notifications navigate to the Calendar screen.
       if (data?.type === 'calendar-event') {
@@ -104,13 +142,44 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   let token: string | null = null;
 
   if (Platform.OS === 'android') {
+    // Default notification channel
     await Notifications.setNotificationChannelAsync('default', {
       name: 'default',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#FF231F7C',
     });
+    
+    // Incoming call notification channel - highest priority for full-screen intent
+    await Notifications.setNotificationChannelAsync('incoming-call', {
+      name: 'Incoming Calls',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 500, 500],
+      lightColor: '#1E9CF0',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      bypassDnd: true,
+      sound: 'default',
+    });
   }
+
+  // Set up notification category with action buttons for incoming calls
+  await Notifications.setNotificationCategoryAsync('incoming-call', [
+    {
+      identifier: 'answer',
+      buttonTitle: 'Answer',
+      options: {
+        opensAppToForeground: true,
+      },
+    },
+    {
+      identifier: 'decline',
+      buttonTitle: 'Decline',
+      options: {
+        opensAppToForeground: false,
+        isDestructive: true,
+      },
+    },
+  ]);
 
   if (Platform.OS === 'web') {
     console.log('[usePushNotifications] Push notifications not supported on web');

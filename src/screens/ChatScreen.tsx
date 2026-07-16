@@ -2658,33 +2658,7 @@ export default function ChatScreen() {
             />
            ) : item.type === 'call' ? (
   <View style={[styles.callBubble, styles.callBubbleIn]}>
-    <View style={styles.callIconCircle}>
-      <AppIcon
-        name={item.callType === 'video' ? 'videocam' : 'call'}
-        size={20}
-        color={COLORS.sub}
-      />
-    </View>
-    <View style={styles.callContent}>
-            <AppText style={styles.callTitle}>
-        {item.callType === 'video' ? 'Video call' : 'Voice call'}
-      </AppText>
-      {/* Debug: Show duration or status */}
-      <AppText style={styles.callDuration}>
-        {item.callDuration !== null && item.callDuration !== undefined
-          ? `Duration: ${formatCallDuration(item.callDuration)} (${item.callDuration}s)`
-          : item.callStatus === 'missed'
-          ? 'Missed'
-          : item.callStatus === 'rejected'
-          ? 'Declined'
-          : item.callStatus === 'busy'
-          ? 'Busy'
-          : item.callStatus === 'failed'
-          ? 'Failed'
-          : `No duration (status: ${item.callStatus})`}
-      </AppText>
-
-    </View>
+    <AppText style={styles.callTitle}>{item.text}</AppText>
     <AppText style={styles.callTime}>{formatTime(item.timestamp)}</AppText>
   </View>
 
@@ -2877,32 +2851,7 @@ export default function ChatScreen() {
             />
               ) : item.type === 'call' ? (
   <View style={[styles.callBubble, styles.callBubbleOut]}>
-    <View style={styles.callIconCircle}>
-      <AppIcon
-        name={item.callType === 'video' ? 'videocam' : 'call'}
-        size={20}
-        color={COLORS.blue}
-      />
-    </View>
-    <View style={styles.callContent}>
-      <AppText style={[styles.callTitle, { color: textColor }]}>
-        {item.callType === 'video' ? 'Video call' : 'Voice call'}
-      </AppText>
-      {item.callDuration && item.callDuration > 0 ? (
-        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>
-          {formatCallDuration(item.callDuration)}
-        </AppText>
-      ) : item.callStatus === 'missed' ? (
-        <AppText style={[styles.callDuration, { color: COLORS.missed }]}>Missed</AppText>
-
-      ) : item.callStatus === 'rejected' ? (
-        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>Declined</AppText>
-      ) : item.callStatus === 'busy' ? (
-        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>Busy</AppText>
-      ) : item.callStatus === 'failed' ? (
-        <AppText style={[styles.callDuration, { color: textColor, opacity: 0.6 }]}>Failed</AppText>
-      ) : null}
-    </View>
+    <AppText style={[styles.callTitle, { color: textColor }]}>{item.text}</AppText>
     <View style={styles.callTimeWithTick}>
       <AppText style={styles.callTime}>{formatTime(item.timestamp)}</AppText>
       <AppIcon
