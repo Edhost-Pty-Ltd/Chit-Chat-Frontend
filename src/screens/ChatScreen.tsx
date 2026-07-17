@@ -47,6 +47,7 @@ import { LocationMessageBubble } from '../components/LocationMessageBubble';
 import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { ForwardModal } from '../components/ForwardModal';
 import { MessageInfoModal } from '../components/MessageInfoModal';
+import { ProfilePictureViewer } from '../components/ProfilePictureViewer';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages, FireMessage } from '../hooks/useMessages';
 import { useVoicePlayer } from '../hooks/useVoicePlayer';
@@ -268,7 +269,7 @@ export default function ChatScreen() {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const insets = useSafeAreaInsets();
-  const { chatId, displayName, isGroup, otherUserId, otherUserPhoto } = route.params;
+  const { chatId, displayName, isGroup, otherUserId, otherUserPhoto, autoCall } = route.params;
   const { FG } = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
@@ -460,6 +461,7 @@ export default function ChatScreen() {
   // ── Firebase signup name for unsaved contacts (used for avatar initials on calls) ──
   const [otherUserSignupName, setOtherUserSignupName] = useState<string | null>(null);
   const [otherUserPhone, setOtherUserPhone] = useState<string | null>(null);
+  const [otherUserBio, setOtherUserBio] = useState<string>('');
   const isOtherUserSaved = !isGroup && otherUserId ? phoneContacts.some((c) => c.userId === otherUserId) : true;
   
   useEffect(() => {
@@ -488,6 +490,18 @@ export default function ChatScreen() {
     });
   }, [isGroup, otherUserId, phoneContacts]);
 
+  // ── Fetch the other user's bio (shown in the profile / info modal) ──────────
+  useEffect(() => {
+    if (isGroup || !otherUserId) { setOtherUserBio(''); return; }
+    getDoc(doc(db, 'users', otherUserId)).then((snap) => {
+      if (snap.exists()) {
+        setOtherUserBio((snap.data().bio as string) || '');
+      }
+    }).catch((err) => {
+      console.warn('[ChatScreen] Failed to fetch other user bio:', err);
+    });
+  }, [isGroup, otherUserId]);
+
   // ── Location sharing ────────────────────────────────────────────
   const locationSharing = useLocationSharing();
 
@@ -498,6 +512,7 @@ export default function ChatScreen() {
   const [showLocationMenu, setShowLocationMenu] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [pfpViewerOpen, setPfpViewerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [muted, setMuted] = useState(false);
   const [selectedDuration, setSelectedDuration] = useState(15);
@@ -1452,6 +1467,19 @@ export default function ChatScreen() {
 
   // ── Video call handler ──────────────────────────────────────────────────────
   const handleVideoCall = useCallback(() => startCall('video'), [startCall]);
+
+  // ── Auto-start a call when navigated here with an `autoCall` param ───────────
+  // Used by the WhatsApp-style avatar popup on the Chats screen so its call
+  // buttons reuse this screen's privacy-aware call flow. Runs once.
+  const autoCallFiredRef = useRef(false);
+  useEffect(() => {
+    if (!autoCall || autoCallFiredRef.current) return;
+    autoCallFiredRef.current = true;
+    // Clear the param so it doesn't re-fire on re-focus / re-render.
+    navigation.setParams({ autoCall: undefined } as never);
+    const t = setTimeout(() => startCall(autoCall), 350);
+    return () => clearTimeout(t);
+  }, [autoCall, startCall, navigation]);
 
   // ── Voice recording tap handler (WhatsApp-style) ─────────────────
   const handleMicTap = useCallback(async () => {
@@ -2620,6 +2648,50 @@ export default function ChatScreen() {
     const tickStatus = getTickStatus(item, userId, isGroup, isGroup ? groupMembers.length : undefined);
     const tickIcon = getTickIcon(tickStatus);
 
+    // ── Status-reply quote (WhatsApp: "replied to <name>'s status") ──────────
+    const renderStatusReply = (outgoing: boolean) => {
+      const sr = item.statusReply;
+      if (!sr) return null;
+      const label = sr.ownerId === userId ? 'Your status' : `${sr.ownerName}'s status`;
+      const previewText =
+        sr.mediaType === 'text'
+          ? (sr.caption || 'Status')
+          : sr.caption || (sr.mediaType === 'video' ? '🎥 Video' : '📷 Photo');
+      return (
+        <View style={[styles.statusReplyQuote, outgoing && { backgroundColor: 'rgba(30,156,240,0.08)' }]}>
+          <View style={[styles.replyBubbleBar, outgoing && { backgroundColor: COLORS.blue }]} />
+          <View style={{ flex: 1 }}>
+            <AppText
+              fixedColor={!outgoing}
+              style={outgoing ? [styles.replyBubbleSender, { color: COLORS.blue }] : styles.replyBubbleSender}
+              numberOfLines={1}
+            >
+              {label}
+            </AppText>
+            <AppText
+              fixedColor={!outgoing}
+              style={outgoing ? [styles.replyBubbleText, { color: textColor, opacity: 0.7 }] : styles.replyBubbleText}
+              numberOfLines={1}
+            >
+              {previewText}
+            </AppText>
+          </View>
+          {sr.thumbnailUrl ? (
+            <Image source={{ uri: sr.thumbnailUrl }} style={styles.statusReplyThumb} />
+          ) : (
+            <View
+              style={[
+                styles.statusReplyThumb,
+                { backgroundColor: sr.backgroundColor || COLORS.blue, alignItems: 'center', justifyContent: 'center' },
+              ]}
+            >
+              <AppIcon name="text" size={16} color="#fff" fixedColor />
+            </View>
+          )}
+        </View>
+      );
+    };
+
     // Debug logging for outgoing text messages
     if (item.senderId === userId && item.type === 'text' && Math.random() < 0.1) {
       console.log('[ChatScreen] Tick status:', {
@@ -2784,6 +2856,7 @@ export default function ChatScreen() {
                   <AppText fixedColor style={styles.forwardedText}>Forwarded</AppText>
                 </View>
               )}
+              {renderStatusReply(false)}
               {item.replyTo && (
                 <TouchableOpacity 
                   style={styles.replyBubble}
@@ -2974,6 +3047,7 @@ export default function ChatScreen() {
                   <AppText style={[styles.forwardedText, { color: COLORS.sub }]}>Forwarded</AppText>
                 </View>
               )}
+              {renderStatusReply(true)}
               {item.replyTo && (
                 <TouchableOpacity 
                   style={[styles.replyBubble, { backgroundColor: 'rgba(30,156,240,0.08)' }]}
@@ -3620,6 +3694,7 @@ export default function ChatScreen() {
       <Modal visible={showAttach} transparent animationType="slide" onRequestClose={() => setShowAttach(false)}>
         <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setShowAttach(false)} />
         <View style={[styles.attachSheet, { backgroundColor: FG.glassBg }]}>
+          <AppBg />
           <View style={styles.attachHandle} />
           <AppText style={[styles.attachTitle, { color: textColor, fontFamily }]}>Share</AppText>
           <View style={styles.attachGrid}>
@@ -4331,6 +4406,14 @@ export default function ChatScreen() {
         </Modal>
       )}
 
+      {/* ── Contact profile-picture viewer (full screen) ── */}
+      <ProfilePictureViewer
+        visible={pfpViewerOpen}
+        imageUri={headerPhoto ?? null}
+        displayName={displayName}
+        onClose={() => setPfpViewerOpen(false)}
+      />
+
       {/* ── Profile Modal ── */}
       <Modal
         visible={profileModalOpen}
@@ -4373,12 +4456,19 @@ export default function ChatScreen() {
                     </View>
                   </TouchableOpacity>
                 ) : (
-                  <Avatar 
-                    initials={getInitials(displayName)} 
-                    color={COLORS.blue} 
-                    size={80}
-                    imageUrl={headerPhoto}
-                  />
+                  <TouchableOpacity
+                    activeOpacity={headerPhoto ? 0.8 : 1}
+                    onPress={() => { if (headerPhoto) setPfpViewerOpen(true); }}
+                    accessibilityRole="button"
+                    accessibilityLabel="View profile picture"
+                  >
+                    <Avatar 
+                      initials={getInitials(displayName)} 
+                      color={COLORS.blue} 
+                      size={80}
+                      imageUrl={headerPhoto}
+                    />
+                  </TouchableOpacity>
                 )}
                 </View>
                 <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>
@@ -4390,6 +4480,19 @@ export default function ChatScreen() {
                     {otherUserPhone || phoneContacts.find(c => c.userId === otherUserId)?.phone || ''}
                   </AppText>
                 )}
+
+                {/* Bio / About — individual chats, shown under the phone number */}
+                {!isGroup && !!otherUserBio && (
+                  <View style={{ width: '100%', marginTop: 12, marginBottom: 4 }}>
+                    <AppText style={[styles.profileSectionLabel, { color: FG.secondary }]}>ABOUT</AppText>
+                    <View style={[{ borderRadius: RADIUS.lg, padding: 12 }, bevel]}>
+                      <AppText style={{ fontSize: 14, color: textColor, lineHeight: 20 }}>
+                        {otherUserBio}
+                      </AppText>
+                    </View>
+                  </View>
+                )}
+
                 <AppText style={[styles.profileStatus, { color: isOnline ? COLORS.blue : FG.secondary }]}>
                   {isGroup ? `Group · ${groupMembers.length} members` : (presenceText || 'Tap here for info')}
                 </AppText>
@@ -5447,10 +5550,10 @@ const styles = StyleSheet.create({
     flex: 1, 
     flexDirection: 'row', 
     alignItems: 'center', 
-    backgroundColor: 'rgba(30,156,240,0.06)', 
+    backgroundColor: 'rgba(255,255,255,0.85)', 
     borderRadius: RADIUS.xl, 
     borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
+    borderColor: 'rgba(30,156,240,0.25)',
     paddingHorizontal: 14, 
     height: 42 
   },
@@ -5472,11 +5575,12 @@ const styles = StyleSheet.create({
   emojiChar: { fontSize: 26 },
 
   // Attachment sheet
-  attachOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.30)' },
+  attachOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
   attachSheet: {
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
     paddingBottom: Platform.OS === 'ios' ? 50 : 40,
     paddingHorizontal: 20, paddingTop: 12,
+    overflow: 'hidden',
     ...SHADOW.glow,
   },
   attachHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(30,156,240,0.40)', alignSelf: 'center', marginBottom: 14 },
@@ -6533,6 +6637,22 @@ const styles = StyleSheet.create({
   },
   replyBubbleText: {
     fontSize: 12,
+  },
+
+  // ── Status-reply quote (inside message) ────────────────────────────────────
+  statusReplyQuote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: RADIUS.md,
+    marginBottom: 6,
+  },
+  statusReplyThumb: {
+    width: 38,
+    height: 38,
+    borderRadius: 6,
   },
 
   // ── Location Menu ─────────────────────────────────────────────────────────

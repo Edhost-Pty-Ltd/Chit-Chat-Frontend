@@ -8,6 +8,7 @@ import {
   Text,
   Image,
   Modal,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Dimensions,
@@ -15,14 +16,19 @@ import {
   ActivityIndicator,
   StatusBar,
   Animated,
+  Platform,
+  Keyboard,
+  KeyboardAvoidingView,
   GestureResponderEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEventListener } from 'expo';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FireStatus } from '../types';
 import { COLORS, SHADOW } from '../types/theme';
+import { getOrCreateDirectChat, sendMessage } from '../hooks/useChatActions';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -68,6 +74,23 @@ export function StatusViewer({
   const [loading, setLoading] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [progress, setProgress] = useState(0);
+
+  // ── Reply / comment bar state ───────────────────────────────────────────────
+  const insets = useSafeAreaInsets();
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
+  const [replySent, setReplySent] = useState(false);
+  const [kbVisible, setKbVisible] = useState(false);
+
+  // Track keyboard visibility so we can drop the bottom (nav-bar) padding while
+  // it's open — the KeyboardAvoidingView already lifts the bar to the keyboard.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvt, () => setKbVisible(true));
+    const hideSub = Keyboard.addListener(hideEvt, () => setKbVisible(false));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Signals that the current item finished and we should advance — avoids
@@ -232,6 +255,8 @@ export function StatusViewer({
       setCurrentIndex(initialIndex);
       setProgress(0);
       setShowOptions(false);
+      setReplyText('');
+      setReplySent(false);
     } else {
       // Stop video when closing
       try { player.pause(); } catch {}
@@ -286,6 +311,39 @@ export function StatusViewer({
       handleTapRight();
     }
   }, [isPaused, handleTapLeft, handleTapRight]);
+
+  // ── Send a reply to the status owner (WhatsApp-style) ───────────────────────
+  const handleSendReply = useCallback(async () => {
+    const text = replyText.trim();
+    if (!text || sendingReply || !currentStatus || isOwner) return;
+    setSendingReply(true);
+    try {
+      const chatId = await getOrCreateDirectChat(currentUserId, currentStatus.userId);
+      const thumb =
+        currentStatus.mediaType === 'image'
+          ? currentStatus.mediaUrl
+          : currentStatus.mediaType === 'video'
+          ? (currentStatus as any).thumbnailUrl ?? currentStatus.mediaUrl ?? null
+          : null;
+      await sendMessage(chatId, currentUserId, text, {
+        statusId: currentStatus.statusId,
+        ownerId: currentStatus.userId,
+        ownerName: displayName,
+        mediaType: currentStatus.mediaType,
+        thumbnailUrl: thumb ?? null,
+        caption: currentStatus.caption ?? null,
+        backgroundColor: currentStatus.backgroundColor ?? null,
+      });
+      setReplyText('');
+      Keyboard.dismiss();
+      setReplySent(true);
+      setTimeout(() => setReplySent(false), 1800);
+    } catch (err) {
+      console.error('[StatusViewer] Failed to send reply:', err);
+    } finally {
+      setSendingReply(false);
+    }
+  }, [replyText, sendingReply, currentStatus, isOwner, currentUserId]);
 
   const handleDelete = () => {
     if (onDeleteStatus && currentStatus) {
@@ -365,10 +423,10 @@ export function StatusViewer({
           colors={['rgba(0,0,0,0.6)', 'transparent']}
           style={styles.topGradient}
         />
-        {(currentStatus.caption || isOwner) && (
+        {!isExcluded && (
           <LinearGradient
             pointerEvents="none"
-            colors={['transparent', 'rgba(0,0,0,0.6)']}
+            colors={['transparent', 'rgba(0,0,0,0.75)']}
             style={styles.bottomGradient}
           />
         )}
@@ -454,21 +512,67 @@ export function StatusViewer({
           )}
         </View>
 
-        {/* Layer 5: bottom info (caption + view count) — non-interactive */}
-        {(currentStatus.caption || isOwner) && (
-          <View style={styles.bottomInfo} pointerEvents="none">
+        {/* Layer 5: bottom area — centered caption + reply bar (others) / views (owner).
+            KeyboardAvoidingView lifts the bar to sit right on top of the keyboard. */}
+        {!isExcluded && (
+          <KeyboardAvoidingView
+            style={styles.bottomAvoider}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            pointerEvents="box-none"
+          >
+          <View
+            style={[styles.bottomWrap, { paddingBottom: kbVisible ? 10 : insets.bottom + 12 }]}
+            pointerEvents="box-none"
+          >
             {currentStatus.caption && currentStatus.mediaType !== 'text' && (
-              <Text style={styles.caption}>{currentStatus.caption}</Text>
+              <Text style={styles.caption} pointerEvents="none">
+                {currentStatus.caption}
+              </Text>
             )}
-            {isOwner && (
-              <View style={styles.viewsContainer}>
+
+            {isOwner ? (
+              <View style={styles.viewsContainer} pointerEvents="none">
                 <Ionicons name="eye-outline" size={16} color="#ffffff" />
                 <Text style={styles.viewsText}>
                   {viewCount} {viewCount === 1 ? 'view' : 'views'}
                 </Text>
               </View>
+            ) : (
+              <View style={styles.replyBar}>
+                <View style={styles.replyInputWrap}>
+                  <TextInput
+                    style={styles.replyInput}
+                    placeholder={replySent ? 'Reply sent ✓' : `Reply to ${displayName}...`}
+                    placeholderTextColor="rgba(255,255,255,0.7)"
+                    value={replyText}
+                    onChangeText={setReplyText}
+                    onFocus={() => setIsPaused(true)}
+                    onBlur={() => setIsPaused(false)}
+                    multiline
+                    returnKeyType="send"
+                    onSubmitEditing={handleSendReply}
+                    blurOnSubmit
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.replySendBtn,
+                    (!replyText.trim() || sendingReply) && { opacity: 0.5 },
+                  ]}
+                  onPress={handleSendReply}
+                  disabled={!replyText.trim() || sendingReply}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {sendingReply ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="send" size={20} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
             )}
           </View>
+          </KeyboardAvoidingView>
         )}
       </View>
     </Modal>
@@ -646,14 +750,19 @@ const styles = StyleSheet.create({
     right: 0,
     height: 140,
   },
-  bottomInfo: {
+  bottomAvoider: {
     position: 'absolute',
-    bottom: 0,
+    top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+  },
+  bottomWrap: {
     paddingHorizontal: 16,
-    paddingTop: 40,
-    paddingBottom: 30,
+    paddingTop: 14,
+    gap: 12,
+    backgroundColor: 'rgba(0,0,0,0.85)',
   },
   missingText: {
     fontSize: 15,
@@ -662,15 +771,50 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   caption: {
-    fontSize: 15,
+    fontSize: 16,
     color: '#ffffff',
-    marginBottom: 12,
-    lineHeight: 20,
+    lineHeight: 22,
+    textAlign: 'center',
+    alignSelf: 'center',
+    maxWidth: '92%',
   },
   viewsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
     gap: 6,
+  },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
+  replyInputWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    paddingHorizontal: 16,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+    minHeight: 46,
+    justifyContent: 'center',
+  },
+  replyInput: {
+    color: '#ffffff',
+    fontSize: 15,
+    maxHeight: 100,
+    padding: 0,
+  },
+  replySendBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: COLORS.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOW.button,
   },
   viewsText: {
     fontSize: 13,

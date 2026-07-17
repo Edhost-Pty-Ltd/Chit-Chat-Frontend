@@ -11,6 +11,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomNav, StatusViewer } from '../components';
+import { ProfilePictureViewer } from '../components/ProfilePictureViewer';
 import { useAuth } from '../hooks/useAuth';
 import { useChats, ChatPreview } from '../hooks/useChats';
 import { useContacts, AppContact } from '../hooks/useContacts';
@@ -56,6 +57,35 @@ function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase();
+}
+
+// Strip emoji / pictographic glyphs (and any leftover leading spaces) from a
+// chat-list preview so message previews show clean text only.
+function stripEmojis(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .replace(
+      /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}]/gu,
+      '',
+    )
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+// Map a last-message preview to a small Ionicon (like the camera one) based on
+// its emoji prefix / keywords, so previews show a clean icon instead of emoji.
+function getPreviewIcon(
+  raw: string | null | undefined,
+): React.ComponentProps<typeof Ionicons>['name'] | null {
+  if (!raw) return null;
+  const t = raw.toLowerCase();
+  if (/📹|🎥/.test(raw) || /video call/.test(t)) return 'videocam';
+  if (/📞/.test(raw) || /voice call/.test(t)) return 'call';
+  if (/🎤|🎙/.test(raw) || /voice (message|note)/.test(t)) return 'mic';
+  if (/📍/.test(raw) || /location/.test(t)) return 'location';
+  if (/👤/.test(raw)) return 'person';
+  if (/📎/.test(raw) || /document|\bfile\b/.test(t)) return 'document';
+  return null;
 }
 
 // ─── Chat Avatar ──────────────────────────────────────────────────────────────
@@ -108,12 +138,62 @@ const KEY_ROWS = [
   [{ d: '*', s: '' },    { d: '0', s: '+' },     { d: '#', s: ''     }],
 ];
 
-function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+function NewContactSheet({ onBack, onDone, onSaved }: { onBack: () => void; onDone: () => void; onSaved?: () => void }) {
   const [number, setNumber] = useState('');
   const [name,   setName]   = useState('');
+  const [saving, setSaving] = useState(false);
   const { bevel } = useGlass();
   const press = (k: string) => setNumber((n) => n + k);
   const del   = () => setNumber((n) => n.slice(0, -1));
+
+  const handleSave = async () => {
+    if (!number.trim() || !name.trim() || saving) return;
+
+    if (Platform.OS === 'web') {
+      Alert.alert('Not available', 'Saving contacts is not available on web.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const Contacts = require('expo-contacts/legacy');
+
+      // Ask for write access to the device address book
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant contacts permission to save this contact.');
+        setSaving(false);
+        return;
+      }
+
+      const nameParts = name.trim().split(/\s+/);
+      const firstName = nameParts[0];
+      const lastName = nameParts.slice(1).join(' ') || '';
+
+      const contact = {
+        contactType: Contacts.ContactTypes.Person,
+        name: name.trim(),
+        firstName,
+        lastName,
+        phoneNumbers: [{ number: number.trim(), label: 'mobile' }],
+      } as any;
+
+      const contactId = await Contacts.addContactAsync(contact);
+
+      setSaving(false);
+      if (contactId) {
+        onSaved?.();
+        onDone();
+        Alert.alert('Contact Saved', `${name.trim()} has been added to your contacts.`);
+      } else {
+        Alert.alert('Error', 'Failed to save contact. Please try again.');
+      }
+    } catch (err) {
+      console.error('[NewContactSheet] Failed to save contact:', err);
+      setSaving(false);
+      Alert.alert('Error', 'Failed to save contact. Please try again.');
+    }
+  };
 
   return (
     <>
@@ -160,12 +240,18 @@ function NewContactSheet({ onBack, onDone }: { onBack: () => void; onDone: () =>
         <TouchableOpacity style={[styles.cancelBtn, bevel]} onPress={onBack} activeOpacity={0.8}>
           <AppText style={styles.cancelText}>Cancel</AppText>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.confirmBtn, (!number || !name) && styles.dimmed]}
-          activeOpacity={number && name ? 0.85 : 1}
-          onPress={() => { if (number && name) onDone(); }}>
+        <TouchableOpacity style={[styles.confirmBtn, (!number || !name || saving) && styles.dimmed]}
+          activeOpacity={number && name && !saving ? 0.85 : 1}
+          onPress={handleSave}>
           <LinearGradient colors={GRADIENTS.primary} style={styles.confirmGrad}>
-            <AppIcon name="person-add-outline" size={18} color="#fff" fixedColor />
-            <AppText fixedColor style={styles.confirmText}>Save Contact</AppText>
+            {saving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <AppIcon name="person-add-outline" size={18} color="#fff" fixedColor />
+                <AppText fixedColor style={styles.confirmText}>Save Contact</AppText>
+              </>
+            )}
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -431,7 +517,7 @@ function SelectContactSheet({
     : contacts;
 
   if (mode === 'newContact') {
-    return <NewContactSheet onBack={() => setMode('select')} onDone={onClose} />;
+    return <NewContactSheet onBack={() => setMode('select')} onDone={onClose} onSaved={reloadContacts} />;
   }
   if (mode === 'newGroup') {
     return <NewGroupSheet 
@@ -632,6 +718,20 @@ export default function ChatsScreen() {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerStatuses, setViewerStatuses] = useState<FireStatus[]>([]);
   const [viewerUserId, setViewerUserId] = useState<string | null>(null);
+
+  // Profile-picture viewer state (full-screen photo, opened from the popup)
+  const [pfpViewerOpen, setPfpViewerOpen] = useState(false);
+  const [pfpUri, setPfpUri] = useState<string | null>(null);
+  const [pfpName, setPfpName] = useState('');
+
+  // WhatsApp-style avatar popup: tapping an avatar with no status shows a
+  // preview card with quick actions (message / voice call / video call).
+  const [avatarPopup, setAvatarPopup] = useState<null | {
+    chatId: string;
+    displayName: string;
+    otherUserId: string;
+    photo: string | null;
+  }>(null);
 
   // Extra member info fetched from Firestore for users not in device contacts
   const [memberInfo, setMemberInfo] = useState<Map<string, { displayName: string; phone: string; photoURL?: string }>>(new Map());
@@ -956,6 +1056,9 @@ export default function ChatsScreen() {
     const contactPhotoUri = otherUser?.contactPhotoUri;
     const firebasePhotoURL = getVisiblePhoto(otherMemberId, otherUser?.photoURL);
     const isSavedContact = !!(contactPhotoUri || (otherMemberId && savedContactNamesByUserId.has(otherMemberId)));
+    // Photo shown by the avatar (same priority as ChatAvatar): used for the
+    // full-screen profile-picture viewer when the contact has no status.
+    const avatarPhoto = contactPhotoUri || firebasePhotoURL || null;
     
     // Check if user has active status
     const hasStatus = otherMemberId ? userStatusMap.get(otherMemberId) || false : false;
@@ -986,13 +1089,24 @@ export default function ChatsScreen() {
         return (
           <View style={[styles.voiceNotePreview, { flex: 1 }]}>
             {prefix ? <Text style={[styles.chatPreview, { flex: 0 }]}>{prefix}</Text> : null}
-            <Image source={{ uri: item.lastMessageImageUrl }} style={{ width: 20, height: 20, borderRadius: 3, marginRight: 4 }} />
             <Ionicons name="camera" size={14} color={COLORS.sub} style={{ marginRight: 3 }} />
             <Text style={[styles.chatPreview, { flex: 0 }]}>Photo</Text>
           </View>
         );
       }
-      return <Text style={styles.chatPreview} numberOfLines={2}>{item.lastMessage}</Text>;
+      const previewIcon = getPreviewIcon(item.lastMessage);
+      const cleanText = stripEmojis(item.lastMessage);
+      if (previewIcon) {
+        const prefix = getSenderPrefix();
+        return (
+          <View style={[styles.voiceNotePreview, { flex: 1 }]}>
+            {prefix ? <Text style={[styles.chatPreview, { flex: 0 }]}>{prefix}</Text> : null}
+            <Ionicons name={previewIcon} size={14} color={COLORS.sub} style={{ marginRight: 3 }} />
+            <Text style={[styles.chatPreview, { flex: 1 }]} numberOfLines={1}>{cleanText}</Text>
+          </View>
+        );
+      }
+      return <Text style={styles.chatPreview} numberOfLines={2}>{cleanText}</Text>;
     };
 
     return (
@@ -1009,13 +1123,23 @@ export default function ChatsScreen() {
         onLongPress={() => handleChatLongPress(item)}
         delayLongPress={500}>
         
-        {/* Avatar with status ring - clickable area that intercepts touch */}
+        {/* Avatar with status ring - clickable area that intercepts touch.
+            WhatsApp behavior: tap opens the status if one exists, otherwise
+            opens the full-screen profile picture. */}
         <View 
           style={styles.chatAvatarWrap}
-          onStartShouldSetResponder={() => hasStatus && !isGroup && !!otherMemberId}
+          onStartShouldSetResponder={() => !isGroup && !!otherMemberId}
           onResponderRelease={() => {
-            if (hasStatus && !isGroup && otherMemberId) {
+            if (isGroup || !otherMemberId) return;
+            if (hasStatus) {
               handleAvatarClick(otherMemberId);
+            } else {
+              setAvatarPopup({
+                chatId: item.chatId,
+                displayName,
+                otherUserId: otherMemberId,
+                photo: avatarPhoto,
+              });
             }
           }}
         >
@@ -1276,6 +1400,96 @@ export default function ChatsScreen() {
           onDeleteStatus={undefined}
         />
       )}
+
+      {/* WhatsApp-style avatar popup with quick actions */}
+      <Modal
+        visible={!!avatarPopup}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAvatarPopup(null)}
+      >
+        <Pressable style={styles.avatarPopupBackdrop} onPress={() => setAvatarPopup(null)}>
+          <Pressable
+            style={styles.avatarPopupCard}
+            onPress={() => {}}
+          >
+            {/* Photo (tap to expand full screen) */}
+            <TouchableOpacity
+              activeOpacity={avatarPopup?.photo ? 0.85 : 1}
+              onPress={() => {
+                if (avatarPopup?.photo) {
+                  setPfpUri(avatarPopup.photo);
+                  setPfpName(avatarPopup.displayName);
+                  setPfpViewerOpen(true);
+                }
+              }}
+            >
+              {avatarPopup?.photo ? (
+                <Image source={{ uri: avatarPopup.photo }} style={styles.avatarPopupImage} />
+              ) : (
+                <LinearGradient
+                  colors={[stringToColor(avatarPopup?.displayName ?? ''), COLORS.blue]}
+                  style={styles.avatarPopupImage}
+                >
+                  <Text style={styles.avatarPopupInitials}>
+                    {getInitials(avatarPopup?.displayName ?? '')}
+                  </Text>
+                </LinearGradient>
+              )}
+              {/* Name overlay */}
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.65)']}
+                style={styles.avatarPopupNameOverlay}
+              >
+                <Text style={styles.avatarPopupName} numberOfLines={1}>
+                  {avatarPopup?.displayName}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Quick actions */}
+            <View style={styles.avatarPopupActions}>
+              {([
+                { icon: 'chatbubble' as const, label: 'Message', call: undefined },
+                { icon: 'call' as const, label: 'Voice', call: 'audio' as const },
+                { icon: 'videocam' as const, label: 'Video', call: 'video' as const },
+              ]).map((a) => (
+                <TouchableOpacity
+                  key={a.label}
+                  style={styles.avatarPopupActionBtn}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const popup = avatarPopup;
+                    setAvatarPopup(null);
+                    if (!popup) return;
+                    navigation.navigate('Chat', {
+                      chatId: popup.chatId,
+                      displayName: popup.displayName,
+                      isGroup: false,
+                      otherUserId: popup.otherUserId,
+                      otherUserPhoto: popup.photo,
+                      autoCall: a.call,
+                    });
+                  }}
+                >
+                  <AppIcon name={a.icon} size={22} color={COLORS.blue} fixedColor />
+                  <AppText fixedColor style={[styles.avatarPopupActionLabel, { color: COLORS.sub }]}>
+                    {a.label}
+                  </AppText>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Full-screen profile-picture viewer (opened from the avatar popup) */}
+      <ProfilePictureViewer
+        visible={pfpViewerOpen}
+        imageUri={pfpUri}
+        displayName={pfpName}
+        onClose={() => setPfpViewerOpen(false)}
+      />
     </View>
   );
 }
@@ -1303,6 +1517,67 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarText: { color: '#fff', fontWeight: '700', fontSize: 18 },
+
+  // ── WhatsApp-style avatar popup ────────────────────────────────────────────
+  avatarPopupBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  avatarPopupCard: {
+    width: '82%',
+    maxWidth: 320,
+    borderRadius: RADIUS.lg,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+    ...SHADOW.glow,
+  },
+  avatarPopupImage: {
+    width: '100%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPopupInitials: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 72,
+  },
+  avatarPopupNameOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 14,
+    paddingTop: 28,
+    paddingBottom: 12,
+  },
+  avatarPopupName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  avatarPopupActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: '#fff',
+  },
+  avatarPopupActionBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 6,
+  },
+  avatarPopupActionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
 
   // ── Header ───────────────────────────────────────────────────────────────
   header: {

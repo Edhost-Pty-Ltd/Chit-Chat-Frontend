@@ -1,17 +1,17 @@
 ﻿// ─── Screen: Settings ────────────────────────────────────────────────────────
-import React from 'react';
+import React, { useState } from 'react';
 import { View, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons'; // kept for IoniconName type
-import { Avatar, BottomNav, UserAvatar } from '../components';
-import { COLORS, RADIUS, SHADOW, GRADIENTS, GLASS } from '../types/theme';
+import { BottomNav, UserAvatar } from '../components';
+import { ProfilePictureViewer } from '../components/ProfilePictureViewer';
+import { COLORS, RADIUS } from '../types/theme';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { FEATURE_FLAGS } from '../constants/featureFlags';
 
-import { AppBg, AppText, AppIcon, useForeground, useTypography, useTheme, useGlass } from '../context/ThemeContext';
+import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Settings'>;
@@ -69,11 +69,14 @@ const buildSettingsSections = (): {
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavProp>();
-  const { signOut, phone, displayName } = useAuth();
+  const { signOut, displayName, avatarUri } = useAuth();
   const { FG } = useForeground();
   const { fontFamily, textColor, iconColor } = useTypography();
   const { bevel } = useGlass();
   const insets = useSafeAreaInsets();
+
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const shownName = displayName || 'John Doe';
 
   const SETTINGS_SECTIONS = buildSettingsSections();
 
@@ -98,17 +101,35 @@ export default function SettingsScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
-        {/* Profile — glass card — tap to open profile */}
-        <TouchableOpacity
-          style={[styles.profileCard, bevel]}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('Profile')}
-        >
-          <UserAvatar size={54} />
-          <View style={styles.profileText}>
-            <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>{displayName || 'John Doe'}</AppText>
-          </View>
-        </TouchableOpacity>
+        {/* Profile — tap the avatar to expand the photo, details to open profile */}
+        <View style={[styles.profileCard, bevel]}>
+          <TouchableOpacity
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel={avatarUri ? 'View profile picture' : 'Open profile'}
+            onPress={() => {
+              if (avatarUri) {
+                setViewerOpen(true);
+              } else {
+                navigation.navigate('Profile');
+              }
+            }}
+          >
+            <View pointerEvents="none">
+              <UserAvatar size={54} />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.profileText}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <AppText style={[styles.profileName, { color: textColor, fontFamily }]}>{shownName}</AppText>
+          </TouchableOpacity>
+        </View>
 
         {/* Each section: label + individual glass cards per row */}
         {SETTINGS_SECTIONS.map((section, si) => (
@@ -141,6 +162,13 @@ export default function SettingsScreen() {
         ))}
       </ScrollView>
 
+      <ProfilePictureViewer
+        visible={viewerOpen}
+        imageUri={avatarUri}
+        displayName={shownName}
+        onClose={() => setViewerOpen(false)}
+      />
+
       <BottomNav active="settings" />
     </View>
   );
@@ -162,7 +190,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 10,
   },
-  profileText: { flex: 1 },
+  profileText: { flex: 1, minHeight: 54, justifyContent: 'center' },
   profileName: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   profileSub:  { fontSize: 12, color: COLORS.sub, marginTop: 2 },
 
@@ -176,7 +204,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
-  iconBoxDanger: {}, // kept for legacy reference — glass tile handles danger styling via fixedColor
   itemLabel:       { flex: 1, fontSize: 14, fontWeight: '500', color: COLORS.text },
   itemLabelDanger: { color: COLORS.missed, fontWeight: '600' },
 });

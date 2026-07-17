@@ -108,10 +108,21 @@ export async function createGroupChat(
 }
 
 // ── Send a message with unread increments ─────────────────────────────────────
+export interface StatusReplyContext {
+  statusId: string;
+  ownerId: string;
+  ownerName: string;
+  mediaType: 'image' | 'video' | 'text';
+  thumbnailUrl: string | null;
+  caption: string | null;
+  backgroundColor?: string | null;
+}
+
 export async function sendMessage(
   chatId: string,
   senderId: string,
   text: string,
+  statusReply?: StatusReplyContext,
 ): Promise<boolean> {
   try {
     const trimmed = text.trim();
@@ -140,6 +151,7 @@ export async function sendMessage(
       imageUrl:  null,
       voiceUrl:  null,
       type:      'text',
+      statusReply: statusReply ?? null,
       timestamp: serverTimestamp(),
       expiresAt: expiresAt,
       readBy:    [senderId],

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Platform, View, ActivityIndicator, Linking, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
@@ -289,6 +289,10 @@ export default function App() {
                   <NotificationTapHandler />
                   <NavigationContainer 
                     ref={navigationRef}
+                    theme={{
+                      ...DefaultTheme,
+                      colors: { ...DefaultTheme.colors, background: '#C5E8F7' },
+                    }}
                     onReady={() => {
                       console.log('[App] Navigation container ready');
                       navigationQueue.setReady();

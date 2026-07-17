@@ -13,7 +13,6 @@ import { isVisibleTo } from '../hooks/usePrivacySettings';
 import type { FireStatus } from '../types';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -63,19 +62,13 @@ export default function StatusScreen() {
     error,
     createStatus,
     markAsViewed,
-    markAllAsViewed,
     deleteStatus,
   } = useStatus(userId);
 
-  // ── Mark all statuses as viewed when screen is focused ─────────────────────
-  useFocusEffect(
-    React.useCallback(() => {
-      // Mark all unviewed statuses as viewed when the Updates screen is opened
-      if (userId && contactStatuses.length > 0) {
-        markAllAsViewed();
-      }
-    }, [userId, contactStatuses.length, markAllAsViewed])
-  );
+  // NOTE: Unlike a "mark everything read on open" model, WhatsApp only marks a
+  // status as viewed once you actually open it. That happens per-status via the
+  // StatusViewer's onStatusViewed callback below, so we intentionally do NOT
+  // mark all as viewed when this screen gains focus.
 
   // ── Resolve poster names via phone book ─────────────────────────────────────
   // Status docs store a denormalized displayName (often "Unknown" for phone-auth
@@ -141,6 +134,16 @@ export default function StatusScreen() {
     const setting = statusVisibilityMap.get(g.userId) ?? 'Everyone';
     return isVisibleTo(setting as any, true);
   });
+
+  // WhatsApp splits updates into "Recent updates" (still unviewed) and
+  // "Viewed updates" (already opened).
+  const recentUpdates = visibleContactStatuses.filter((g) => g.hasUnviewed);
+  const viewedUpdates = visibleContactStatuses.filter((g) => !g.hasUnviewed);
+
+  const sections: { key: string; title: string; data: StatusGroup[] }[] = [
+    ...(recentUpdates.length > 0 ? [{ key: 'recent', title: 'RECENT UPDATES', data: recentUpdates }] : []),
+    ...(viewedUpdates.length > 0 ? [{ key: 'viewed', title: 'VIEWED UPDATES', data: viewedUpdates }] : []),
+  ];
 
   // Resolve the name to show for a poster: saved contact name → phone number.
   const nameForUser = (uid: string, userPhone: string | null): string => {
@@ -348,20 +351,24 @@ export default function StatusScreen() {
           </View>
         </>
       ) : (
-        <>
-          <AppText style={[styles.sectionText, { color: FG.secondary }]}>
-            RECENT UPDATES ({visibleContactStatuses.length})
-          </AppText>
-
-          <FlatList
-            data={visibleContactStatuses}
-            keyExtractor={(item) => item.userId}
-            renderItem={renderStatus}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
-            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          />
-        </>
+        <FlatList
+          data={sections}
+          keyExtractor={(item) => item.key}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.listContent}
+          renderItem={({ item: section }) => (
+            <View>
+              <AppText style={[styles.sectionText, { color: FG.secondary }]}>
+                {section.title} ({section.data.length})
+              </AppText>
+              {section.data.map((group) => (
+                <View key={group.userId} style={{ marginBottom: 10 }}>
+                  {renderStatus({ item: group })}
+                </View>
+              ))}
+            </View>
+          )}
+        />
       )}
 
       <BottomNav active="status" />
