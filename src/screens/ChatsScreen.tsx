@@ -95,9 +95,13 @@ interface ChatAvatarProps {
   firebasePhotoURL?: string;
   isSavedContact?: boolean;
   hasStatus?: boolean;
+  /** When the contact has a status but every update has already been viewed,
+   *  the ring turns grey (matching the "Viewed updates" ring on the Updates
+   *  screen) instead of the colored/blue "unviewed" ring. */
+  hasUnviewed?: boolean;
 }
 
-function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedContact, hasStatus = false }: ChatAvatarProps) {
+function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedContact, hasStatus = false, hasUnviewed = true }: ChatAvatarProps) {
   const color = stringToColor(displayName);
   const initials = getInitials(displayName);
   
@@ -119,7 +123,7 @@ function ChatAvatar({ displayName, contactPhotoUri, firebasePhotoURL, isSavedCon
   );
 
   const avatarWithRing = hasStatus ? (
-    <LinearGradient colors={[color, COLORS.blue]} style={styles.ring}
+    <LinearGradient colors={hasUnviewed ? [color, COLORS.blue] : ['#888888', '#666666']} style={styles.ring}
       start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
       <View style={styles.ringInner}>
         {avatarContent}
@@ -699,6 +703,17 @@ export default function ChatsScreen() {
     return map;
   }, [contactStatuses]);
 
+  // Create a map of userId -> hasUnviewed so the chat-list avatar ring can
+  // reflect viewed state: colored ring while updates are unviewed, grey once
+  // they've all been opened (matching the Updates screen).
+  const userUnviewedMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const statusGroup of contactStatuses) {
+      map.set(statusGroup.userId, statusGroup.hasUnviewed);
+    }
+    return map;
+  }, [contactStatuses]);
+
   // Log contacts state
   useEffect(() => {
     if (contacts.length > 0) {
@@ -1062,6 +1077,8 @@ export default function ChatsScreen() {
     
     // Check if user has active status
     const hasStatus = otherMemberId ? userStatusMap.get(otherMemberId) || false : false;
+    // Whether any of that status is still unviewed (colored ring) vs all viewed (grey ring)
+    const hasUnviewedStatus = otherMemberId ? userUnviewedMap.get(otherMemberId) ?? true : true;
 
     const getSenderPrefix = (): string => {
       if (!item.lastSenderId) return '';
@@ -1149,6 +1166,7 @@ export default function ChatsScreen() {
             firebasePhotoURL={firebasePhotoURL ?? undefined}
             isSavedContact={isSavedContact}
             hasStatus={hasStatus}
+            hasUnviewed={hasUnviewedStatus}
           />
         </View>
 
