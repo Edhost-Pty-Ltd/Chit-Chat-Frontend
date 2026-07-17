@@ -92,7 +92,8 @@
           "color": "#0A2463",
           "mode": "production"
         }
-      ]
+      ],
+      "./plugins/withFcmNotificationColorFix"
     ],
     "android": {
       "versionCode": 4,

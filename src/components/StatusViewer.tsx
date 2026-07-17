@@ -87,7 +87,6 @@ export function StatusViewer({
   const { resolveName } = usePhoneBook();
 
   // ── Reply / comment bar state ───────────────────────────────────────────────
-  const insets = useSafeAreaInsets();
   const [replyText, setReplyText] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
   const [replySent, setReplySent] = useState(false);
