@@ -173,7 +173,7 @@ export type RootStackParamList = {
   Splash: undefined;
   SignIn: undefined;
   Chats: undefined;
-  Chat: { chatId: string; displayName: string; isGroup: boolean; otherUserId?: string; otherUserPhoto?: string | null };
+  Chat: { chatId: string; displayName: string; isGroup: boolean; otherUserId?: string; otherUserPhoto?: string | null; autoCall?: 'audio' | 'video' };
   Calls: undefined;
   Status: undefined;
   Contacts: undefined;

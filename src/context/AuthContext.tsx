@@ -30,6 +30,7 @@ const KEYS = {
   lastActive:  'auth_last_active',
   displayName: 'auth_display_name',
   avatarUri:   'auth_avatar_uri',
+  bio:         'auth_bio',
 } as const;
 
 interface AuthContextValue {
@@ -39,6 +40,8 @@ interface AuthContextValue {
   setDisplayName: (name: string) => Promise<void>;
   avatarUri: string | null;
   setAvatarUri: (uri: string) => Promise<void>;
+  bio: string;
+  setBio: (bio: string) => Promise<void>;
   signIn: (phone: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshActivity: () => void;
@@ -52,6 +55,8 @@ const AuthContext = createContext<AuthContextValue>({
   setDisplayName: async () => {},
   avatarUri: null,
   setAvatarUri: async () => {},
+  bio: '',
+  setBio: async () => {},
   signIn: async () => {},
   signOut: async () => {},
   refreshActivity: () => {},
@@ -63,6 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [phone, setPhone]                   = useState('');
   const [displayName, setDisplayNameState]  = useState('');
   const [avatarUri, setAvatarUriState]      = useState<string | null>(null);
+  const [bio, setBioState]                  = useState('');
   const [loading, setLoading]               = useState(true);
   const webTimerRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -96,11 +102,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       KEYS.lastActive,
       KEYS.displayName,
       KEYS.avatarUri,
+      KEYS.bio,
     ]);
     setPhone('');
     setIsSignedIn(false);
     setDisplayNameState('');
     setAvatarUriState(null);
+    setBioState('');
   };
 
   // ── Hydrate on mount ──────────────────────────────────────────────────────
@@ -114,16 +122,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
-        const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar] = await Promise.all([
+        const [signedIn, storedPhone, lastActiveStr, storedName, storedAvatar, storedBio] = await Promise.all([
           AsyncStorage.getItem(KEYS.signedIn),
           AsyncStorage.getItem(KEYS.phone),
           AsyncStorage.getItem(KEYS.lastActive),
           AsyncStorage.getItem(KEYS.displayName),
           AsyncStorage.getItem(KEYS.avatarUri),
+          AsyncStorage.getItem(KEYS.bio),
         ]);
 
         if (storedName)   setDisplayNameState(storedName);
         if (storedAvatar) setAvatarUriState(storedAvatar);
+        if (storedBio)    setBioState(storedBio);
 
         if (signedIn === 'true' && storedPhone) {
           if (Platform.OS === 'web') {
@@ -240,10 +250,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const userData = userSnap.data();
             const firestoreDisplayName = userData.displayName || '';
             const firestorePhotoURL = userData.photoURL || null;
+            const firestoreBio = userData.bio || '';
             
             console.log('[AuthContext] Profile found in Firestore:', {
               displayName: firestoreDisplayName,
               photoURL: firestorePhotoURL,
+              bio: firestoreBio,
             });
             
             // Update state
@@ -255,6 +267,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (firestorePhotoURL) {
               setAvatarUriState(firestorePhotoURL);
               await AsyncStorage.setItem(KEYS.avatarUri, firestorePhotoURL);
+            }
+            
+            if (firestoreBio) {
+              setBioState(firestoreBio);
+              await AsyncStorage.setItem(KEYS.bio, firestoreBio);
             }
           } else {
             console.log('[AuthContext] No user profile found in Firestore');
@@ -301,6 +318,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem(KEYS.avatarUri, uri);
   };
 
+  const setBio = async (bioText: string) => {
+    setBioState(bioText);
+    await AsyncStorage.setItem(KEYS.bio, bioText);
+  };
+
   const signOut = async () => {
     await doSignOut();
   };
@@ -316,6 +338,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       isSignedIn, phone, displayName, setDisplayName,
       avatarUri, setAvatarUri,
+      bio, setBio,
       signIn, signOut, refreshActivity, loading,
     }}>
       {children}

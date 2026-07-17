@@ -5,6 +5,7 @@ import {
   Image, Alert, Platform, TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -15,10 +16,14 @@ import { useAuth } from '../context/AuthContext';
 import { AppBg, AppText, AppIcon, useForeground, useTypography, useGlass } from '../context/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADIUS, SHADOW, GLASS } from '../types/theme';
+import { RootStackParamList } from '../types';
+import { ProfilePictureViewer } from '../components/ProfilePictureViewer';
+
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'Profile'>;
 
 export default function ProfileScreen() {
-  const navigation = useNavigation();
-  const { phone, displayName, setDisplayName, avatarUri, setAvatarUri } = useAuth();
+  const navigation = useNavigation<NavProp>();
+  const { phone, displayName, setDisplayName, avatarUri, setAvatarUri, bio, setBio } = useAuth();
   const { FG }  = useForeground();
   const { fontFamily, textColor } = useTypography();
   const { bevel } = useGlass();
@@ -28,7 +33,14 @@ export default function ProfileScreen() {
   const [draftName,   setDraftName]   = useState(displayName || 'John Doe');
   const nameInputRef = useRef<TextInput>(null);
 
+  const [editingBio, setEditingBio] = useState(false);
+  const [draftBio,   setDraftBio]   = useState(bio || '');
+  const bioInputRef = useRef<TextInput>(null);
+
+  const [viewerOpen, setViewerOpen] = useState(false);
+
   const shownName = displayName || 'John Doe';
+  const shownBio = bio || 'No bio yet';
 
   // ── Save name ─────────────────────────────────────────────────────────────
   const saveName = async () => {
@@ -37,11 +49,11 @@ export default function ProfileScreen() {
       setEditingName(false);
       return;
     }
-    
+
     try {
       // Save to AsyncStorage via context
       await setDisplayName(trimmed);
-      
+
       // Also save to Firestore so other users can see the updated name
       const authInstance = getAuth();
       const currentUser = authInstance.currentUser;
@@ -54,8 +66,32 @@ export default function ProfileScreen() {
       console.error('[ProfileScreen] Error saving displayName:', error);
       Alert.alert('Error', 'Failed to save display name. Please try again.');
     }
-    
+
     setEditingName(false);
+  };
+
+  // ── Save bio ──────────────────────────────────────────────────────────────
+  const saveBio = async () => {
+    const trimmed = draftBio.trim();
+
+    try {
+      // Save to AsyncStorage via context
+      await setBio(trimmed);
+
+      // Also save to Firestore so other users can see the bio
+      const authInstance = getAuth();
+      const currentUser = authInstance.currentUser;
+      if (currentUser) {
+        const userRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userRef, { bio: trimmed });
+        console.log('[ProfileScreen] Updated bio in Firestore:', trimmed);
+      }
+    } catch (error) {
+      console.error('[ProfileScreen] Error saving bio:', error);
+      Alert.alert('Error', 'Failed to save bio. Please try again.');
+    }
+
+    setEditingBio(false);
   };
 
   // ── Pick photo ────────────────────────────────────────────────────────────
@@ -73,10 +109,10 @@ export default function ProfileScreen() {
       aspect: [1, 1],
       quality: 0.85,
     });
-    
+
     if (!result.canceled && result.assets[0]) {
       const uri = result.assets[0].uri;
-      
+
       try {
         const authInstance = getAuth();
         const currentUser = authInstance.currentUser;
@@ -138,20 +174,46 @@ export default function ProfileScreen() {
 
         {/* ── Avatar ── */}
         <View style={styles.avatarSection}>
-          <TouchableOpacity onPress={pickPhoto} activeOpacity={0.85} style={styles.avatarWrap}>
-            {avatarUri ? (
-              <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
-            ) : (
-              <LinearGradient colors={[COLORS.blue, COLORS.blueDark]} style={styles.avatarPlaceholder}>
-                <AppText fixedColor style={styles.avatarInitials}>{initials}</AppText>
-              </LinearGradient>
-            )}
-            <View style={styles.cameraBadge}>
-              <AppIcon name="camera" size={16} fixedColor color={COLORS.blue} />
-            </View>
-          </TouchableOpacity>
+          <View style={styles.avatarWrap}>
+            <TouchableOpacity
+              onPress={() => {
+                if (avatarUri) {
+                  setViewerOpen(true);
+                } else {
+                  pickPhoto();
+                }
+              }}
+              activeOpacity={0.75}
+              style={styles.avatarButton}
+              accessibilityRole="button"
+              accessibilityLabel={avatarUri ? 'View profile picture' : 'Add profile picture'}
+            >
+              <View pointerEvents="none">
+                {avatarUri ? (
+                  <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+                ) : (
+                  <LinearGradient colors={[COLORS.blue, COLORS.blueDark]} style={styles.avatarPlaceholder}>
+                    <AppText fixedColor style={styles.avatarInitials}>{initials}</AppText>
+                  </LinearGradient>
+                )}
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={pickPhoto}
+              activeOpacity={0.75}
+              style={styles.cameraBadge}
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Change profile picture"
+            >
+              <View pointerEvents="none">
+                <AppIcon name="camera" size={16} fixedColor color={COLORS.blue} />
+              </View>
+            </TouchableOpacity>
+          </View>
           <AppText style={[styles.tapHint, { color: FG.secondary, fontFamily }]}>
-            Tap photo to change
+            {avatarUri ? 'Tap photo to view • Tap camera to change' : 'Tap to add a profile picture'}
           </AppText>
         </View>
 
@@ -212,8 +274,58 @@ export default function ProfileScreen() {
             <AppIcon name="chevron-forward" size={16} color={FG.secondary} />
           </TouchableOpacity>
 
+          {/* Bio — tap to edit */}
+          <TouchableOpacity
+            style={[styles.infoCard, styles.bioCard, bevel]}
+            activeOpacity={0.8}
+            onPress={() => {
+              setDraftBio(bio || '');
+              setEditingBio(true);
+              setTimeout(() => bioInputRef.current?.focus(), 50);
+            }}
+          >
+            <AppIcon glass tileSize={40} name="information-circle-outline" size={20} />
+            <View style={styles.infoContent}>
+              <AppText style={[styles.infoLabel, { color: FG.secondary, fontFamily }]}>Bio</AppText>
+              {editingBio ? (
+                <TextInput
+                  ref={bioInputRef}
+                  style={[styles.bioInput, { color: textColor, fontFamily }]}
+                  value={draftBio}
+                  onChangeText={setDraftBio}
+                  placeholder="Add a bio..."
+                  placeholderTextColor={FG.secondary}
+                  returnKeyType="done"
+                  onSubmitEditing={saveBio}
+                  onBlur={saveBio}
+                  multiline
+                  numberOfLines={3}
+                  maxLength={150}
+                  autoFocus
+                />
+              ) : (
+                <AppText style={[styles.bioValue, { color: bio ? textColor : FG.secondary, fontFamily }]}>
+                  {shownBio}
+                </AppText>
+              )}
+            </View>
+            {/* Save button only shown while editing */}
+            {editingBio && (
+              <TouchableOpacity onPress={saveBio} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <AppIcon glass tileSize={34} name="checkmark" size={16} fixedColor color={COLORS.blue} />
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
+
         </View>
       </ScrollView>
+
+      <ProfilePictureViewer
+        visible={viewerOpen}
+        imageUri={avatarUri}
+        displayName={shownName}
+        onClose={() => setViewerOpen(false)}
+      />
     </View>
   );
 }
@@ -237,6 +349,7 @@ const styles = StyleSheet.create({
   // Avatar
   avatarSection: { alignItems: 'center', gap: 10 },
   avatarWrap:    { width: 110, height: 110, borderRadius: 55, ...SHADOW.glow },
+  avatarButton:  { width: 110, height: 110, borderRadius: 55, overflow: 'hidden' },
   avatarImg: {
     width: 110, height: 110, borderRadius: 55,
     borderWidth: 3, borderColor: 'rgba(255,255,255,0.50)',
@@ -274,5 +387,20 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.blue,
     paddingBottom: 2,
     padding: 0, margin: 0,
+  },
+  bioCard: {
+    alignItems: 'flex-start',
+  },
+  bioValue: {
+    fontSize: 14, fontWeight: '500', color: COLORS.text, lineHeight: 20,
+  },
+  bioInput: {
+    fontSize: 14, fontWeight: '500', color: COLORS.text,
+    borderBottomWidth: 1.5,
+    borderBottomColor: COLORS.blue,
+    paddingBottom: 4,
+    padding: 0, margin: 0,
+    minHeight: 60,
+    textAlignVertical: 'top',
   },
 });

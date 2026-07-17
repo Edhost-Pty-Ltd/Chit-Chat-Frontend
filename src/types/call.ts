@@ -29,6 +29,7 @@ export interface Call {
   startTime: Date | null;
   endTime: Date | null;
   duration: number | null; // seconds
+  chatId?: string | null; // Optional chat ID for 1-on-1 calls
   
   // WebRTC signaling data
   offer: RTCSessionDescriptionInit | null;

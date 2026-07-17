@@ -190,19 +190,30 @@ export default function AppNavigator() {
             ? 'Chats'
             : 'Splash'
         }
-        screenOptions={{ headerShown: false }}
+        screenOptions={{
+          headerShown: false,
+          // Default: a smooth horizontal slide for drill-in / detail screens.
+          animation: 'slide_from_right',
+          animationDuration: 380,
+          // Screens are transparent (they draw their own AppBg), so give the
+          // scene container a solid base color — otherwise the default white
+          // window flashes through during the fade/slide transition.
+          contentStyle: { backgroundColor: COLORS.sky1 },
+        }}
       >
         {isSignedIn && profileExists ? (
           // ── Authenticated screens with profile ───────────────────────────
           <>
-            <Stack.Screen name="Chats"       component={ChatsScreen}       />
+            {/* Bottom-nav tabs cross-fade into each other (no side slide) so
+                switching tabs feels smooth rather than like navigating deeper. */}
+            <Stack.Screen name="Chats"       component={ChatsScreen}       options={{ animation: 'none' }} />
             <Stack.Screen name="Chat"        component={ChatScreen}        />
-            <Stack.Screen name="Calls"       component={CallsScreen}       />
-            <Stack.Screen name="Status"      component={StatusScreen}      />
+            <Stack.Screen name="Calls"       component={CallsScreen}       options={{ animation: 'none' }} />
+            <Stack.Screen name="Status"      component={StatusScreen}      options={{ animation: 'none' }} />
             <Stack.Screen name="Contacts"    component={ContactsScreen}    />
             <Stack.Screen name="Calendar"    component={CalendarScreen}    />
             <Stack.Screen name="Notes"       component={NotesScreen}       />
-            <Stack.Screen name="Settings"    component={SettingsScreen}    />
+            <Stack.Screen name="Settings"    component={SettingsScreen}    options={{ animation: 'none' }} />
             <Stack.Screen name="Appearance"      component={AppearanceScreen}      />
             <Stack.Screen name="Profile"         component={ProfileScreen}         />
             <Stack.Screen name="VideoCall"       component={VideoCallScreen}       />

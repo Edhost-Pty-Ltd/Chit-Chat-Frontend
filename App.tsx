@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Platform, View, ActivityIndicator, Linking, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { enableScreens } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
@@ -18,7 +18,7 @@ import './src/config/firebase';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { useAuth as useHooksAuth } from './src/hooks/useAuth';
 import { ThemeProvider } from './src/context/ThemeContext';
-import { CallProvider } from './src/context/CallContext';
+import { CallProvider, useCallContext } from './src/context/CallContext';
 import { NotificationProvider, useNotifications } from './src/context/NotificationContext';
 import { FloatingCallProvider } from './src/context/FloatingCallContext';
 import { ActiveCallProvider } from './src/context/ActiveCallContext';
@@ -28,7 +28,9 @@ import { FloatingCallManager } from './src/components/FloatingCallManager';
 import { CallHost } from './src/components/CallHost';
 import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
 import { BiometricGate } from './src/components/BiometricGate';
-import { usePushNotifications } from './src/hooks/usePushNotifications';
+import { usePushNotifications, type IncomingCallPushPayload } from './src/hooks/usePushNotifications';
+import { useCallKeepEvents } from './src/hooks/useCallKeepEvents';
+import { SignalingService } from './src/services/signalingService';
 import { useWritePresence } from './src/hooks/usePresence';
 import { useGlobalDelivery } from './src/hooks/useGlobalDelivery';
 import { navigationRef, navigationQueue, navigateToChatWhenReady } from './src/services/navigationService';
@@ -71,7 +73,47 @@ function PushNotificationManager() {
   // hooks/useAuth exposes the native Firebase user object with uid
   const { user } = useHooksAuth();
   const { pushNotification } = useNotifications();
-  usePushNotifications(user?.uid ?? null, pushNotification);
+  const { incomingCall, setIncomingCall } = useCallContext();
+
+  // Bridge incoming-call pushes → in-app full-screen IncomingCallScreen.
+  // When a call push is received or tapped while the app process is alive
+  // (foreground/background), fetch the call and present the ringing UI
+  // immediately, so we don't rely solely on the Firestore ringing listener.
+  const currentIncomingId = incomingCall?.callId ?? null;
+  const handleIncomingCallPush = React.useCallback(
+    async (payload: IncomingCallPushPayload) => {
+      try {
+        // Don't clobber a call we're already showing.
+        if (currentIncomingId === payload.callId) return;
+
+        // Fetch the full call doc to get authoritative caller info + status.
+        const call = await SignalingService.getCall(payload.callId);
+        if (!call) {
+          console.log('[PushNotificationManager] Call not found for push:', payload.callId);
+          return;
+        }
+        // Only surface calls that are still ringing (ignore ended/answered).
+        if (call.status !== 'ringing') {
+          console.log('[PushNotificationManager] Ignoring non-ringing call push:', call.status);
+          return;
+        }
+
+        setIncomingCall({ callId: call.callId, caller: call.caller, type: call.type });
+      } catch (err) {
+        console.error('[PushNotificationManager] Error handling incoming-call push:', err);
+      }
+    },
+    [currentIncomingId, setIncomingCall],
+  );
+
+  usePushNotifications(user?.uid ?? null, pushNotification, handleIncomingCallPush);
+  return null;
+}
+
+// CallKeep native call-UI event bridge (Android killed-state answer/hang up).
+// Mounted inside CallProvider so it can drive the shared WebRTC answer flow.
+function CallKeepManager() {
+  useCallKeepEvents();
   return null;
 }
 
@@ -91,16 +133,54 @@ function GlobalDeliveryManager() {
 
 // Notification tap handler — handles taps in all app states
 function NotificationTapHandler() {
+  const { setIncomingCall } = useCallContext();
+
+  // Surface a still-ringing incoming call via the in-app IncomingCallScreen.
+  // Used for the iOS "best-effort" killed-state path: when the app is opened by
+  // tapping a call notification, we fetch the call and, if still ringing, show
+  // the ringing UI so the user can answer through the proven WebRTC answer path
+  // (routing straight into AudioCall/VideoCall would bypass that answer setup).
+  //
+  // TODO: PushKit/VoIP — true iOS killed-state native CallKit UI (a VoIP push
+  // that wakes the terminated app to display the system call screen before the
+  // user taps anything) requires an Apple Developer VoIP push key and a native
+  // PKPushRegistryDelegate integration. Not implemented in this pass.
+  const surfaceIncomingCall = React.useCallback(
+    async (callId: string) => {
+      try {
+        const call = await SignalingService.getCall(callId);
+        if (!call) {
+          console.log('[NotificationTapHandler] Call not found for id:', callId);
+          return;
+        }
+        if (call.status !== 'ringing') {
+          console.log('[NotificationTapHandler] Ignoring non-ringing call:', call.status);
+          return;
+        }
+        setIncomingCall({ callId: call.callId, caller: call.caller, type: call.type });
+      } catch (err) {
+        console.error('[NotificationTapHandler] Error surfacing incoming call:', err);
+      }
+    },
+    [setIncomingCall],
+  );
+
   useEffect(() => {
     // Handle notification tap when app is in FOREGROUND or BACKGROUND
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data;
       console.log('[NotificationTapHandler] Notification tapped (foreground/background):', data);
-      
+
+      const type = data.type as string | undefined;
+      const callId = data.callId as string | undefined;
       const chatId = data.chatId as string | undefined;
       const contactId = data.contactId as string | undefined;
-      
-      if (chatId) {
+
+      if (type === 'incoming-call' && callId) {
+        // Incoming 1-on-1 call — present the ringing UI instead of navigating.
+        console.log('[NotificationTapHandler] Surfacing incoming call:', callId);
+        surfaceIncomingCall(callId);
+      } else if (chatId) {
         // chatId takes precedence - navigate directly to chat
         console.log('[NotificationTapHandler] Navigating to chat:', chatId);
         navigateToChatWhenReady(chatId);
@@ -113,7 +193,7 @@ function NotificationTapHandler() {
     });
 
     return () => subscription.remove();
-  }, []);
+  }, [surfaceIncomingCall]);
 
   useEffect(() => {
     // Handle notification tap when app was KILLED/TERMINATED
@@ -124,11 +204,19 @@ function NotificationTapHandler() {
       if (response) {
         const data = response.notification.request.content.data;
         console.log('[NotificationTapHandler] App opened from notification (killed state):', data);
-        
+
+        const type = data.type as string | undefined;
+        const callId = data.callId as string | undefined;
         const chatId = data.chatId as string | undefined;
         const contactId = data.contactId as string | undefined;
-        
-        if (chatId) {
+
+        if (type === 'incoming-call' && callId) {
+          // iOS best-effort killed-state path: show the ringing UI once the app
+          // has launched (the CallProvider holds the state until the
+          // IncomingCallManager mounts and renders the IncomingCallScreen).
+          console.log('[NotificationTapHandler] Surfacing incoming call from killed state:', callId);
+          surfaceIncomingCall(callId);
+        } else if (chatId) {
           console.log('[NotificationTapHandler] Navigating to chat from killed state:', chatId);
           // Queue this navigation - it will execute once navigator is ready
           navigateToChatWhenReady(chatId);
@@ -137,7 +225,7 @@ function NotificationTapHandler() {
         }
       }
     })();
-  }, []);
+  }, [surfaceIncomingCall]);
 
   return null;
 }
@@ -284,11 +372,16 @@ export default function App() {
                 <ActiveCallProvider>
                   <ActivityWatcher />
                   <PushNotificationManager />
+                  <CallKeepManager />
                   <PresenceManager />
                   <GlobalDeliveryManager />
                   <NotificationTapHandler />
                   <NavigationContainer 
                     ref={navigationRef}
+                    theme={{
+                      ...DefaultTheme,
+                      colors: { ...DefaultTheme.colors, background: '#C5E8F7' },
+                    }}
                     onReady={() => {
                       console.log('[App] Navigation container ready');
                       navigationQueue.setReady();

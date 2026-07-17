@@ -1,20 +1,21 @@
 // ─── Component: Group Call Notification ─────────────────────────────────────
-// Displays incoming group call invitation as a banner/modal
+// WhatsApp-style full-screen incoming call with Answer / Decline buttons.
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Modal,
-  Dimensions,
+  Platform,
+  Animated,
+  Vibration,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOW } from '../types/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { AppText, AppIcon } from '../context/ThemeContext';
+import { Avatar } from '.';
+import { COLORS, SHADOW } from '../types/theme';
 import { GroupCallNotification as GroupCallNotificationType } from '../hooks/useGroupCallNotifications';
-
-const { width } = Dimensions.get('window');
 
 interface GroupCallNotificationProps {
   notification: GroupCallNotificationType;
@@ -27,6 +28,12 @@ interface GroupCallNotificationProps {
   onDismiss: () => void;
 }
 
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
 export default function GroupCallNotification({
   notification,
   memberCount = 2,
@@ -35,132 +42,129 @@ export default function GroupCallNotification({
   onJoin,
   onDismiss,
 }: GroupCallNotificationProps) {
-  const callTypeIcon = notification.callType === 'video' ? 'videocam' : 'call';
-  const callTypeLabel = notification.callType === 'video' ? 'Video Call' : 'Voice Call';
-  // Only label as "Group" when there are more than 2 participants.
+  const isVideo = notification.callType === 'video';
   const isGroup = memberCount > 2;
-  const callTypeText = isGroup ? `Group ${callTypeLabel}` : callTypeLabel;
+  const callLabel = `${isGroup ? 'Group ' : ''}${isVideo ? 'video' : 'voice'} call`;
 
-  // Use resolvedCallerName if provided, otherwise fall back to initiatorName
-  const callerName = resolvedCallerName || notification.initiatorName;
+  const callerName = resolvedCallerName || notification.initiatorName || 'Unknown';
+  const initials = callerInitials || getInitials(callerName);
+
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Pulse the avatar + vibrate while the call is ringing.
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ]),
+    );
+    animation.start();
+    Vibration.vibrate([0, 600, 600], true);
+    return () => {
+      animation.stop();
+      Vibration.cancel();
+    };
+  }, [pulseAnim]);
+
+  const handleAnswer = () => {
+    Vibration.cancel();
+    onJoin();
+  };
+
+  const handleDecline = () => {
+    Vibration.cancel();
+    onDismiss();
+  };
 
   return (
-    <Modal
-      transparent
-      visible={true}
-      animationType="slide"
-      onRequestClose={onDismiss}
-    >
+    <Modal transparent visible animationType="fade" statusBarTranslucent onRequestClose={handleDecline}>
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          {/* Call Type Icon */}
-          <View style={styles.iconContainer}>
-            <Ionicons name={callTypeIcon} size={40} color={COLORS.blue} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(10, 22, 40, 0.96)' }]} />
+
+        <LinearGradient
+          colors={['rgba(10, 22, 40, 0.3)', 'rgba(13, 34, 68, 0.5)', 'rgba(26, 74, 138, 0.3)']}
+          style={styles.content}
+          start={{ x: 0.3, y: 0 }}
+          end={{ x: 0.7, y: 1 }}
+        >
+          {/* Caller info */}
+          <View style={styles.callerSection}>
+            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+              <View style={styles.avatarRing}>
+                <Avatar initials={initials} color={COLORS.blue} size={120} />
+              </View>
+            </Animated.View>
+
+            <AppText fixedColor style={styles.callerName} numberOfLines={1}>
+              {callerName}
+            </AppText>
+            <AppText fixedColor style={styles.callStatus}>
+              Incoming {callLabel}…
+            </AppText>
           </View>
 
-          {/* Call Info */}
-          <Text style={styles.title}>Incoming {callTypeText}</Text>
-          <Text style={styles.subtitle}>
-            {isGroup
-              ? `${callerName} started a group call`
-              : `${callerName} is calling you`}
-          </Text>
-
-          {/* Action Buttons */}
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={[styles.button, styles.dismissButton]}
-              onPress={onDismiss}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close" size={24} color="#fff" />
-              <Text style={styles.buttonText}>Dismiss</Text>
+          {/* Action buttons */}
+          <View style={styles.actionsRow}>
+            {/* Decline / hang up */}
+            <TouchableOpacity style={styles.actionButton} onPress={handleDecline} activeOpacity={0.8}>
+              <View style={[styles.actionIcon, styles.rejectIcon]}>
+                <AppIcon name="call" size={32} color="#fff" fixedColor />
+              </View>
+              <AppText fixedColor style={styles.actionLabel}>Decline</AppText>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.button, styles.joinButton]}
-              onPress={onJoin}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="checkmark" size={24} color="#fff" />
-              <Text style={styles.buttonText}>Join</Text>
+            {/* Answer */}
+            <TouchableOpacity style={styles.actionButton} onPress={handleAnswer} activeOpacity={0.8}>
+              <View style={[styles.actionIcon, styles.answerIcon]}>
+                <AppIcon name={isVideo ? 'videocam' : 'call'} size={32} color="#fff" fixedColor />
+              </View>
+              <AppText fixedColor style={styles.actionLabel}>Answer</AppText>
             </TouchableOpacity>
           </View>
-        </View>
+        </LinearGradient>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  overlay: { flex: 1, justifyContent: 'center' },
+  content: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    justifyContent: 'space-between',
+    paddingTop: 110,
+    paddingBottom: Platform.OS === 'ios' ? 70 : 50,
+    paddingHorizontal: 20,
   },
-  container: {
-    width: width - 40,
-    maxWidth: 400,
-    backgroundColor: 'rgba(180, 225, 245, 0.28)',
-    borderRadius: RADIUS.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.45)',
-    padding: 24,
-    alignItems: 'center',
-    ...SHADOW.card,
-  },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(30, 156, 240, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.50)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
+  callerSection: { alignItems: 'center', gap: 18 },
+  avatarRing: {
+    padding: 8,
+    borderRadius: 80,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    marginBottom: 10,
     ...SHADOW.glow,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: 'rgba(255, 255, 255, 0.75)',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  buttonContainer: {
+  callerName: { fontSize: 30, fontWeight: '700', color: '#fff', textAlign: 'center' },
+  callStatus: { fontSize: 17, color: 'rgba(255, 255, 255, 0.75)', textAlign: 'center' },
+
+  actionsRow: {
     flexDirection: 'row',
-    gap: 12,
-    width: '100%',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    paddingHorizontal: 20,
   },
-  button: {
-    flex: 1,
-    flexDirection: 'row',
+  actionButton: { alignItems: 'center', gap: 12 },
+  actionIcon: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: RADIUS.lg,
     ...SHADOW.button,
   },
-  dismissButton: {
-    backgroundColor: 'rgba(220, 38, 38, 0.85)',
-  },
-  joinButton: {
-    backgroundColor: COLORS.blue,
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
+  rejectIcon: { backgroundColor: '#e84343', transform: [{ rotate: '135deg' }] },
+  answerIcon: { backgroundColor: '#34C759' },
+  actionLabel: { fontSize: 16, fontWeight: '600', color: '#fff' },
 });

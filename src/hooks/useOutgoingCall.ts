@@ -96,12 +96,43 @@ export function useOutgoingCall() {
 
           // Handle call rejected/missed/ended FIRST before processing answer - IMMEDIATE cleanup
           if (call.status === 'rejected') {
-            console.log('[useOutgoingCall] Call rejected - immediate cleanup');
+            console.log('[useOutgoingCall] Call rejected - saving to history and cleaning up');
             if (timeoutRef.current) {
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            cleanup(); // Cleanup FIRST
+            
+            // Save to call history for both parties
+            try {
+              // Save for caller (outgoing, rejected)
+              await SignalingService.saveToCallHistory(
+                call.caller.userId,
+                callId,
+                call.callee,
+                call.type,
+                'outgoing',
+                'rejected',
+                null,
+                call.chatId || undefined
+              );
+              
+              // Save for callee (incoming, rejected)
+              await SignalingService.saveToCallHistory(
+                call.callee.userId,
+                callId,
+                call.caller,
+                call.type,
+                'incoming',
+                'rejected',
+                null,
+                call.chatId || undefined
+              );
+              console.log('[useOutgoingCall] Call saved to history for both parties');
+            } catch (err) {
+              console.error('[useOutgoingCall] Error saving rejected call to history:', err);
+            }
+            
+            cleanup(); // Cleanup WebRTC
             setCallStatus('rejected');
             setError('Call rejected');
             if (unsubscribeRef.current) {
@@ -110,12 +141,43 @@ export function useOutgoingCall() {
             }
             return; // Stop processing
           } else if (call.status === 'missed') {
-            console.log('[useOutgoingCall] Call missed - immediate cleanup');
+            console.log('[useOutgoingCall] Call missed - saving to history and cleaning up');
             if (timeoutRef.current) {
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            cleanup(); // Cleanup FIRST
+            
+            // Save to call history for both parties
+            try {
+              // Save for caller (outgoing, missed)
+              await SignalingService.saveToCallHistory(
+                call.caller.userId,
+                callId,
+                call.callee,
+                call.type,
+                'outgoing',
+                'missed',
+                null,
+                call.chatId || undefined
+              );
+              
+              // Save for callee (incoming, missed)
+              await SignalingService.saveToCallHistory(
+                call.callee.userId,
+                callId,
+                call.caller,
+                call.type,
+                'incoming',
+                'missed',
+                null,
+                call.chatId || undefined
+              );
+              console.log('[useOutgoingCall] Call saved to history for both parties');
+            } catch (err) {
+              console.error('[useOutgoingCall] Error saving missed call to history:', err);
+            }
+            
+            cleanup(); // Cleanup WebRTC
             setCallStatus('missed');
             setError('Call not answered');
             if (unsubscribeRef.current) {

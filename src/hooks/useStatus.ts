@@ -306,6 +306,38 @@ export function useStatus(currentUserId: string | null) {
     [currentUserId]
   );
 
+  // ── Mark all contact statuses as viewed ─────────────────────────────────────
+  const markAllAsViewed = useCallback(
+    async () => {
+      if (!currentUserId) return;
+
+      try {
+        // Get all unviewed statuses from contacts (not own statuses)
+        const unviewedStatuses = contactStatuses.flatMap((group) =>
+          group.statuses.filter((status) => !status.viewedBy.includes(currentUserId))
+        );
+
+        if (unviewedStatuses.length === 0) {
+          console.log('[useStatus] No unviewed statuses to mark');
+          return;
+        }
+
+        // Mark all as viewed in parallel
+        const updatePromises = unviewedStatuses.map((status) =>
+          updateDoc(doc(db, 'statuses', status.statusId), {
+            viewedBy: arrayUnion(currentUserId),
+          })
+        );
+
+        await Promise.all(updatePromises);
+        console.log(`[useStatus] Marked ${unviewedStatuses.length} statuses as viewed`);
+      } catch (err) {
+        console.error('[useStatus] Mark all viewed error:', err);
+      }
+    },
+    [currentUserId, contactStatuses]
+  );
+
   // ── Delete status ──────────────────────────────────────────────────────────
   const deleteStatus = useCallback(async (statusId: string, mediaUrl: string | null) => {
     try {
@@ -356,6 +388,7 @@ export function useStatus(currentUserId: string | null) {
     error,
     createStatus,
     markAsViewed,
+    markAllAsViewed,
     deleteStatus,
     deleteExpiredStatuses,
   };

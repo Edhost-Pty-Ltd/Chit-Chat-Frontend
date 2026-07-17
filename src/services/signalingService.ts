@@ -17,6 +17,7 @@ export class SignalingService {
     callerInfo: CallParticipant,
     calleeInfo: CallParticipant,
     type: CallType = 'audio',
+    chatId?: string,
   ): Promise<string> {
     const callRef = doc(db, 'calls', `${callerId}_${calleeId}_${Date.now()}`);
     
@@ -26,6 +27,7 @@ export class SignalingService {
       callee: calleeInfo,
       status: 'ringing',
       type,
+      chatId: chatId || null,
       startTime: null,
       endTime: null,
       duration: null,
@@ -37,7 +39,7 @@ export class SignalingService {
       updatedAt: serverTimestamp(),
     });
     
-    console.log('[SignalingService] Call created:', callRef.id);
+    console.log('[SignalingService] Call created:', callRef.id, 'chatId:', chatId);
     return callRef.id;
   }
   
@@ -132,6 +134,7 @@ export class SignalingService {
         callee: data.callee,
         status: data.status,
         type: data.type,
+        chatId: data.chatId ?? null,
         startTime: data.startTime ? (data.startTime as Timestamp).toDate() : null,
         endTime: data.endTime ? (data.endTime as Timestamp).toDate() : null,
         duration: data.duration ?? null,
@@ -163,6 +166,7 @@ export class SignalingService {
       callee: data.callee,
       status: data.status,
       type: data.type,
+      chatId: data.chatId ?? null,
       startTime: data.startTime ? (data.startTime as Timestamp).toDate() : null,
       endTime: data.endTime ? (data.endTime as Timestamp).toDate() : null,
       duration: data.duration ?? null,

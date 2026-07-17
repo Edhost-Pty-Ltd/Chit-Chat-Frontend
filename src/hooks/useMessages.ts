@@ -65,6 +65,16 @@ export interface FireMessage {
    type: 'text' | 'image' | 'voice' | 'video' | 'file' | 'location' | 'system' | 'call' | 'contact' | 'group-invite';
 
   } | null;
+  // Set when this message is a reply to someone's status/update (WhatsApp-style).
+  statusReply?: {
+    statusId: string;
+    ownerId: string;
+    ownerName: string;
+    mediaType: 'image' | 'video' | 'text';
+    thumbnailUrl: string | null;   // preview image (image/video status)
+    caption: string | null;        // caption or text-status content
+    backgroundColor?: string | null;
+  } | null;
 }
 
 export function useMessages(chatId: string | null, currentUserId: string | null) {
@@ -160,6 +170,7 @@ export function useMessages(chatId: string | null, currentUserId: string | null)
                 ? (d.liveLocationExpiry as Timestamp).toDate()
                 : null,
               replyTo: d.replyTo ?? null,
+              statusReply: d.statusReply ?? null,
               contactName: d.contactName ?? null,
               contactPhone: d.contactPhone ?? null,
               contactUserId: d.contactUserId ?? null,
