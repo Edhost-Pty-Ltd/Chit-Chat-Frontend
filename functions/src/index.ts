@@ -9,6 +9,7 @@
 import * as functionsV1 from 'firebase-functions/v1';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getMessaging } from 'firebase-admin/messaging';
 import { AccessToken } from 'livekit-server-sdk';
 
 // Initialize the Admin SDK once
@@ -31,6 +32,11 @@ interface TokenRequest {
  * Firebase Auth, whose context is not always attached to JS-SDK callables).
  */
 export const generateLiveKitToken = functionsV1
+  // Pin the region: the client (web + native) calls the default us-central1.
+  // This function currently exists in multiple regions in the project, which
+  // makes deploys ambiguous ("Cannot resolve default region"). Pinning here
+  // resolves that and lets deploy clean up the stray copy in the other region.
+  .region('us-central1')
   .runWith({ secrets: ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'] })
   .https.onCall(async (data: TokenRequest, context) => {
     const { roomName, displayName, idToken } = data || ({} as TokenRequest);
@@ -368,6 +374,74 @@ async function getUserPushToken(userId: string): Promise<string | null> {
   }
 }
 
+/** Tokens + platform for choosing the right call-push transport. */
+interface UserCallTokens {
+  expoToken: string | null;
+  fcmToken: string | null;
+  platform: string | null;
+}
+
+/**
+ * Fetch a user's Expo push token, native FCM token, and platform in one read.
+ * Used to route incoming-call pushes: Android with a native FCM token gets a
+ * data-only message (wakes a killed app → CallKeep); everyone else gets the
+ * existing Expo push (iOS best-effort in-app UI + system notification).
+ */
+async function getUserCallTokens(userId: string): Promise<UserCallTokens> {
+  try {
+    const dbAdmin = getFirestore();
+    const userDoc = await dbAdmin.collection('users').doc(userId).get();
+    if (!userDoc.exists) return { expoToken: null, fcmToken: null, platform: null };
+    const data = userDoc.data() || {};
+    return {
+      expoToken: data.pushToken || null,
+      fcmToken: data.fcmToken || null,
+      // Prefer the platform recorded with the FCM token; fall back to the Expo one.
+      platform: data.fcmTokenPlatform || data.platform || null,
+    };
+  } catch (error) {
+    console.error(`[Push] Error fetching call tokens for user ${userId}:`, error);
+    return { expoToken: null, fcmToken: null, platform: null };
+  }
+}
+
+/**
+ * Send a DATA-ONLY, high-priority FCM message for an incoming call. Data-only
+ * (no `notification` block) + android priority 'high' ensures delivery to the
+ * app's background handler even when the app is fully killed, which then shows
+ * the native CallKeep incoming-call UI. All data values must be strings.
+ */
+async function sendCallDataFcm(
+  fcmToken: string,
+  payload: {
+    callId: string;
+    callerId: string;
+    callerName: string;
+    callerPhotoUrl: string | null;
+    callType: string;
+  },
+): Promise<void> {
+  try {
+    await getMessaging().send({
+      token: fcmToken,
+      data: {
+        type: 'incoming-call',
+        callId: payload.callId,
+        callerId: payload.callerId || '',
+        callerName: payload.callerName || '',
+        callerPhotoUrl: payload.callerPhotoUrl || '',
+        callType: payload.callType || 'audio',
+      },
+      android: {
+        priority: 'high',
+      },
+    });
+    console.log('[Push] Sent data-only call FCM to', fcmToken.slice(0, 12) + '…');
+  } catch (error) {
+    console.error('[Push] Error sending data-only call FCM:', error);
+  }
+}
+
 /**
  * Get the display name for a user as seen by a specific recipient.
  * Priority: recipient's saved contact name → user's phone number.
@@ -523,8 +597,16 @@ export const onCallCreated = functionsV1.firestore
       return null;
     }
 
-    const { callerId, calleeId, type } = callData;
+    // NOTE: SignalingService.createCall stores caller/callee as objects
+    // ({ userId, displayName, photoUrl }) and the call `type`. It does NOT store
+    // top-level callerId/calleeId — reading those was a latent bug that made
+    // this trigger bail out and never send the call push. Derive the ids from
+    // the participant objects.
     const caller = callData.caller;
+    const callee = callData.callee;
+    const type = callData.type || 'audio';
+    const callerId: string | undefined = caller?.userId;
+    const calleeId: string | undefined = callee?.userId;
 
     if (!callerId || !calleeId) {
       console.log('[onCallCreated] Missing caller or callee ID');
@@ -537,9 +619,30 @@ export const onCallCreated = functionsV1.firestore
       // Get personalized caller name for the callee
       const callerName = await getDisplayNameForRecipient(callerId, calleeId);
 
-      // Get callee's push token
-      const pushToken = await getUserPushToken(calleeId);
-      if (!pushToken) {
+      // Resolve the callee's tokens + platform to pick the transport.
+      const { expoToken, fcmToken, platform } = await getUserCallTokens(calleeId);
+
+      const callData2 = {
+        callId,
+        callerId,
+        callerName,
+        callerPhotoUrl: caller?.photoUrl || null,
+        callType: type,
+      };
+
+      // Android + native FCM token → data-only high-priority FCM. This wakes a
+      // killed app and drives the native CallKeep full-screen call UI. We do
+      // NOT also send the Expo push here, to avoid a duplicate notification.
+      if (platform === 'android' && fcmToken) {
+        await sendCallDataFcm(fcmToken, callData2);
+        console.log(`[onCallCreated] Sent data-only call FCM to Android callee ${calleeId}`);
+        return null;
+      }
+
+      // Otherwise (iOS, or no FCM token) → existing Expo push. iOS is
+      // best-effort: in-app IncomingCallScreen when alive, system notification
+      // tap otherwise. TODO: PushKit/VoIP for true iOS killed-state CallKit.
+      if (!expoToken) {
         console.log(`[onCallCreated] No push token for callee ${calleeId}`);
         return null;
       }
@@ -549,7 +652,7 @@ export const onCallCreated = functionsV1.firestore
       const body = `${callerName} is calling you`;
 
       const messages: ExpoPushMessage[] = [{
-        to: pushToken,
+        to: expoToken,
         title,
         body,
         sound: 'default',
@@ -570,7 +673,7 @@ export const onCallCreated = functionsV1.firestore
       }];
 
       await sendExpoPushNotifications(messages);
-      console.log(`[onCallCreated] Sent call notification to ${calleeId}`);
+      console.log(`[onCallCreated] Sent Expo call notification to ${calleeId}`);
 
     } catch (error) {
       console.error('[onCallCreated] Error:', error);

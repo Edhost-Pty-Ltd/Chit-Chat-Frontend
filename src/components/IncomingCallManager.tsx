@@ -1,46 +1,35 @@
 // ─── Component: Incoming Call Manager ────────────────────────────────────────
 // Manages incoming call detection and display
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../hooks/useAuth';
 import { useIncomingCalls } from '../hooks/useIncomingCalls';
 import { useIncomingCallAnswer } from '../hooks/useIncomingCallAnswer';
 import { useCallContext } from '../context/CallContext';
-import { useRingtone } from '../hooks/useRingtone';
 import { SignalingService } from '../services/signalingService';
-import { IncomingCallOverlay } from '.';
+import { IncomingCallScreen } from '.';
 import type { RootStackParamList } from '../types';
-import type { Call } from '../types/call';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export function IncomingCallManager() {
   const { user } = useAuth();
   const navigation = useNavigation<NavigationProp>();
-  const { incomingCall, setIncomingCall, resetCallState } = useCallContext();
+  const { incomingCall, setIncomingCall } = useCallContext();
   const incomingCallAnswer = useIncomingCallAnswer();
-  const ringtone = useRingtone();
-  
-  // Listen for incoming calls
+
+  // Listen for incoming calls (Firestore listener → sets incomingCall in context).
+  // Also covers the iOS killed-state cold-start case: when the app is opened
+  // from a call notification, this listener detects the still-ringing call and
+  // presents the IncomingCallScreen so the user can answer via the proven
+  // WebRTC answer path.
   useIncomingCalls(user?.uid || null);
 
-  // Play/stop ringtone when incoming call state changes
-  useEffect(() => {
-    if (incomingCall) {
-      console.log('[IncomingCallManager] Incoming call detected, playing ringtone');
-      ringtone.play();
-    } else {
-      console.log('[IncomingCallManager] No incoming call, stopping ringtone');
-      ringtone.stop();
-    }
-
-    // Cleanup: stop ringtone on unmount
-    return () => {
-      ringtone.stop();
-    };
-  }, [incomingCall]);
+  // NOTE: ringtone + vibration are owned by <IncomingCallScreen /> so it is
+  // self-contained and reusable. Do NOT start the ringtone here as well, or it
+  // will double-play.
 
   // Handle answer
   const handleAnswer = async () => {
@@ -109,11 +98,11 @@ export function IncomingCallManager() {
   };
 
   return (
-    <IncomingCallOverlay
+    <IncomingCallScreen
       visible={!!incomingCall}
       call={incomingCall}
       onAnswer={handleAnswer}
-      onReject={handleReject}
+      onDecline={handleReject}
     />
   );
 }

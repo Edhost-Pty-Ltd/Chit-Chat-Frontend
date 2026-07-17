@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { AppNotification, NotifType } from '../context/NotificationContext';
+import { registerAndSaveFcmToken, subscribeFcmTokenRefresh } from '../services/fcmService';
 
 // Lazy-load expo-notifications so a missing native module doesn't crash startup.
 let Notifications: any = null;
@@ -31,10 +32,24 @@ try {
   console.warn('[usePushNotifications] expo-notifications not available. Push notifications disabled.');
 }
 
+/** Payload passed to the incoming-call bridge when a call push arrives. */
+export interface IncomingCallPushPayload {
+  callId: string;
+  callerId?: string;
+  callerName?: string;
+  callerPhotoUrl?: string | null;
+  callType?: 'audio' | 'video';
+}
+
 // usePushNotifications.ts
 export function usePushNotifications(
   userId: string | null,
   onNotificationReceived?: (n: Omit<AppNotification, 'id' | 'time' | 'read'>, skipNative?: boolean) => void,
+  // Bridge for incoming 1-on-1 call pushes. When an 'incoming-call' push is
+  // received (foreground/background) or tapped, this fires so the app can
+  // surface the in-app full-screen IncomingCallScreen immediately, rather than
+  // waiting solely on the Firestore ringing-call listener.
+  onIncomingCallPush?: (payload: IncomingCallPushPayload) => void,
 ) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<any | null>(null);
@@ -50,19 +65,40 @@ export function usePushNotifications(
     });
 
     // Listener for notifications received while app is foregrounded
+    // (and, on some platforms, briefly on the tap-to-foreground path).
     const subscription1 = Notifications.addNotificationReceivedListener((notif: any) => {
       console.log('[usePushNotifications] Notification received:', notif);
       setNotification(notif);
 
+      const data = notif.request.content.data as {
+        type?: string;
+        contactId?: string;
+        chatId?: string;
+        callId?: string;
+        callerId?: string;
+        callerName?: string;
+        callerPhotoUrl?: string | null;
+        callType?: 'audio' | 'video';
+      } | undefined;
+
+      // 🔑 Incoming 1-on-1 call → surface the in-app full-screen call UI now.
+      // This makes the IncomingCallScreen appear immediately when the app is
+      // alive (foreground/background), instead of only via the Firestore
+      // ringing-call listener.
+      if (data?.type === 'incoming-call' && data.callId) {
+        console.log('[usePushNotifications] Incoming call push received:', data.callId);
+        onIncomingCallPush?.({
+          callId: data.callId,
+          callerId: data.callerId,
+          callerName: data.callerName,
+          callerPhotoUrl: data.callerPhotoUrl ?? null,
+          callType: data.callType,
+        });
+      }
+
       // 🔑 Bridge into the in-app notification context
       // Pass skipNative=true to prevent scheduling a duplicate native notification
       // (the native notification was already shown by the push system)
-      const data = notif.request.content.data as { 
-        type?: string; 
-        contactId?: string;
-        chatId?: string;
-      } | undefined;
-      
       onNotificationReceived?.({
         type: (data?.type as NotifType) ?? 'system',
         title: notif.request.content.title ?? '',
@@ -97,6 +133,15 @@ export function usePushNotifications(
           // The app will open and IncomingCallManager will detect the call
           // and show the overlay. User can then complete the answer flow.
           // We don't answer directly here because we need the full WebRTC setup.
+          // Surface the in-app IncomingCallScreen immediately as well (covers
+          // foreground/background where the app process is already alive).
+          onIncomingCallPush?.({
+            callId: data.callId,
+            callerId: data.callerId,
+            callerName: data.callerName,
+            callerPhotoUrl: data.callerPhotoUrl ?? null,
+            callType: data.callType,
+          });
         } else if (actionId === 'decline') {
           console.log('[usePushNotifications] Decline action tapped for call:', data.callId);
           // Reject the call directly without opening the app
@@ -129,6 +174,14 @@ export function usePushNotifications(
         } else {
           // Default tap (not an action button) - open the app
           console.log('[usePushNotifications] Notification tapped (default), opening app');
+          // Surface the in-app IncomingCallScreen for the still-ringing call.
+          onIncomingCallPush?.({
+            callId: data.callId,
+            callerId: data.callerId,
+            callerName: data.callerName,
+            callerPhotoUrl: data.callerPhotoUrl ?? null,
+            callType: data.callType,
+          });
         }
         
         // If answered or default tap, the app opens and IncomingCallManager handles it
@@ -165,7 +218,17 @@ export function usePushNotifications(
       subscription1.remove();
       subscription2.remove();
     };
-  }, [userId, onNotificationReceived]);
+  }, [userId, onNotificationReceived, onIncomingCallPush]);
+
+  // ── Native FCM token (Android killed-state incoming calls) ─────────────────
+  // Runs independently of expo-notifications. Dual-writes the native FCM token
+  // to Firestore alongside the Expo push token; call pushes target this token.
+  useEffect(() => {
+    if (!userId) return;
+    registerAndSaveFcmToken(userId);
+    const unsubscribe = subscribeFcmTokenRefresh(userId);
+    return () => unsubscribe();
+  }, [userId]);
 
   return { expoPushToken, notification };
 }

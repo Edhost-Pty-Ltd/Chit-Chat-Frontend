@@ -305,6 +305,8 @@ const styles = StyleSheet.create({
 // ─── Re-exports ──────────────────────────────────────────────────────────────
 // Export other components that are in separate files
 export { IncomingCallOverlay } from './IncomingCallOverlay';
+export { IncomingCallScreen } from './IncomingCallScreen';
+export type { IncomingCallScreenProps } from './IncomingCallScreen';
 export { IncomingCallManager } from './IncomingCallManager';
 export { LocationMessageBubble } from './LocationMessageBubble';
 export { FloatingCallOverlay } from './FloatingCallOverlay';

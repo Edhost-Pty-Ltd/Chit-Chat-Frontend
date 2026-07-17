@@ -44,6 +44,7 @@
       ],
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
+      "@config-plugins/react-native-callkeep",
       "expo-contacts",
       "expo-font",
       [
@@ -124,6 +125,8 @@
         "android.permission.BLUETOOTH",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.ACCESS_MEDIA_LOCATION",
         "android.permission.READ_MEDIA_AUDIO",
