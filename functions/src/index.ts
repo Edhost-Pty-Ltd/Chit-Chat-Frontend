@@ -2,11 +2,16 @@
 // Securely generates LiveKit access tokens on the backend so the API secret
 // never ships in the client bundle.
 //
-// Uses 1st-gen callable functions. 1st-gen HTTPS/callable functions are public
-// by default and are NOT subject to the Cloud Run `allUsers` invoker org policy
-// that blocks 2nd-gen callables in projects with domain-restricted sharing.
+// Region: all 2nd-gen functions here deploy to africa-south1 (Johannesburg) via
+// setGlobalOptions below. NOTE: `trimStatusVideo` remains a 1st-gen function
+// (still imported from firebase-functions/v1) and stays in us-central1 — it is
+// intentionally excluded from the africa-south1 migration.
 
 import * as functionsV1 from 'firebase-functions/v1';
+import { setGlobalOptions } from 'firebase-functions/v2';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { AccessToken } from 'livekit-server-sdk';
@@ -16,6 +21,10 @@ if (getApps().length === 0) {
   initializeApp();
 }
 
+// Region for all 2nd-gen functions in this file (Johannesburg).
+// Does NOT affect the 1st-gen `trimStatusVideo`, which stays in us-central1.
+setGlobalOptions({ region: 'africa-south1' });
+
 interface TokenRequest {
   roomName: string;
   displayName: string;
@@ -24,23 +33,23 @@ interface TokenRequest {
 }
 
 /**
- * Callable function: generateLiveKitToken (1st gen)
+ * Callable function: generateLiveKitToken (2nd gen, africa-south1)
  *
  * Resolves the caller's UID from the callable auth context when available, and
  * otherwise from an explicitly-passed Firebase ID token (this app uses native
  * Firebase Auth, whose context is not always attached to JS-SDK callables).
  */
-export const generateLiveKitToken = functionsV1
-  .runWith({ secrets: ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'] })
-  .https.onCall(async (data: TokenRequest, context) => {
-    const { roomName, displayName, idToken } = data || ({} as TokenRequest);
+export const generateLiveKitToken = onCall(
+  { secrets: ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'] },
+  async (request) => {
+    const { roomName, displayName, idToken } = (request.data || {}) as TokenRequest;
 
     if (!roomName || typeof roomName !== 'string') {
-      throw new functionsV1.https.HttpsError('invalid-argument', 'roomName is required.');
+      throw new HttpsError('invalid-argument', 'roomName is required.');
     }
 
     // Resolve the caller identity
-    let uid = context.auth?.uid;
+    let uid = request.auth?.uid;
 
     if (!uid && idToken) {
       try {
@@ -48,12 +57,12 @@ export const generateLiveKitToken = functionsV1
         uid = decoded.uid;
       } catch (err) {
         console.error('[generateLiveKitToken] ID token verification failed:', err);
-        throw new functionsV1.https.HttpsError('unauthenticated', 'Invalid authentication token.');
+        throw new HttpsError('unauthenticated', 'Invalid authentication token.');
       }
     }
 
     if (!uid) {
-      throw new functionsV1.https.HttpsError(
+      throw new HttpsError(
         'unauthenticated',
         'You must be signed in to join a call.'
       );
@@ -64,7 +73,7 @@ export const generateLiveKitToken = functionsV1
 
     if (!apiKey || !apiSecret) {
       console.error('[generateLiveKitToken] Missing LiveKit secrets');
-      throw new functionsV1.https.HttpsError('internal', 'Server is not configured.');
+      throw new HttpsError('internal', 'Server is not configured.');
     }
 
     try {
@@ -87,9 +96,10 @@ export const generateLiveKitToken = functionsV1
       return { token };
     } catch (err) {
       console.error('[generateLiveKitToken] Failed to generate token:', err);
-      throw new functionsV1.https.HttpsError('internal', 'Failed to generate access token.');
+      throw new HttpsError('internal', 'Failed to generate access token.');
     }
-  });
+  }
+);
 
 
 // ─── Scheduled Cleanup Functions ───────────────────────────────────────────
@@ -105,17 +115,17 @@ const FIRESTORE_BATCH_LIMIT = 500;
 // ─── Group Call Participant Threshold Check ─────────────────────────────────
 // Trigger: When a group call's activeParticipants array changes
 // Purpose: Auto-end group calls when only 1 participant remains (fixes Bug 2)
-export const checkGroupCallParticipants = functionsV1.firestore
-  .document('groupCalls/{callId}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data();
-    const after = change.after.data();
-    
+export const checkGroupCallParticipants = onDocumentUpdated(
+  'groupCalls/{callId}',
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+
     // Only proceed if the call is still active
     if (!after || after.status !== 'active') {
-      return null;
+      return;
     }
-    
+
     const beforeParticipants = before?.activeParticipants || [];
     const activeParticipants = after.activeParticipants || [];
 
@@ -127,18 +137,17 @@ export const checkGroupCallParticipants = functionsV1.firestore
       beforeParticipants.length >= 2 && activeParticipants.length <= 1;
 
     if (droppedToOneOrFewer) {
-      console.log(`[checkGroupCallParticipants] Participants dropped from ${beforeParticipants.length} to ${activeParticipants.length} in call ${context.params.callId} - ending call`);
-      
-      await change.after.ref.update({
+      console.log(`[checkGroupCallParticipants] Participants dropped from ${beforeParticipants.length} to ${activeParticipants.length} in call ${event.params.callId} - ending call`);
+
+      await event.data!.after.ref.update({
         status: 'ended',
         activeParticipants: [],
       });
-      
-      console.log(`[checkGroupCallParticipants] Call ${context.params.callId} ended successfully`);
+
+      console.log(`[checkGroupCallParticipants] Call ${event.params.callId} ended successfully`);
     }
-    
-    return null;
-  });
+  }
+);
 
 /** Delete a list of document refs in chunks that respect the 500-write batch limit. */
 async function deleteRefsInBatches(
@@ -184,121 +193,124 @@ async function deleteStorageByUrls(urls: Array<string | null | undefined>): Prom
 
 // ─── 1. Expired statuses (24h) ──────────────────────────────────────────────
 // Removes status docs past their expiresAt and the associated Storage media.
-export const cleanupExpiredStatuses = functionsV1.pubsub
-  .schedule('every 60 minutes')
-  .onRun(async () => {
-    const dbAdmin = getFirestore();
-    const now = AdminTimestamp.now();
+export const cleanupExpiredStatuses = onSchedule(
+  // Cloud Scheduler is not available in africa-south1, so override the global
+  // region for scheduled functions and keep them in us-central1.
+  { schedule: 'every 60 minutes', region: 'us-central1' },
+  async () => {
+  const dbAdmin = getFirestore();
+  const now = AdminTimestamp.now();
 
-    const snap = await dbAdmin
-      .collection('statuses')
-      .where('expiresAt', '<=', now)
-      .limit(1000)
-      .get();
+  const snap = await dbAdmin
+    .collection('statuses')
+    .where('expiresAt', '<=', now)
+    .limit(1000)
+    .get();
 
-    if (snap.empty) {
-      console.log('[cleanupExpiredStatuses] Nothing to clean.');
-      return null;
-    }
+  if (snap.empty) {
+    console.log('[cleanupExpiredStatuses] Nothing to clean.');
+    return;
+  }
 
-    // Delete media first (best-effort), then the docs.
-    await deleteStorageByUrls(snap.docs.map((d) => d.data().mediaUrl));
-    const deleted = await deleteRefsInBatches(snap.docs.map((d) => d.ref));
+  // Delete media first (best-effort), then the docs.
+  await deleteStorageByUrls(snap.docs.map((d) => d.data().mediaUrl));
+  const deleted = await deleteRefsInBatches(snap.docs.map((d) => d.ref));
 
-    console.log(`[cleanupExpiredStatuses] Deleted ${deleted} expired status(es).`);
-    return null;
-  });
+  console.log(`[cleanupExpiredStatuses] Deleted ${deleted} expired status(es).`);
+});
 
 // ─── 2. Expired messages (72h TTL) ──────────────────────────────────────────
 // Deletes messages past their expiresAt across every chat, plus their media.
 // Uses a collectionGroup query so it spans all chats/{chatId}/messages.
-export const cleanupExpiredMessages = functionsV1.pubsub
-  .schedule('every 24 hours')
-  .onRun(async () => {
-    const dbAdmin = getFirestore();
-    const now = AdminTimestamp.now();
+export const cleanupExpiredMessages = onSchedule(
+  // Cloud Scheduler is not available in africa-south1, so override the global
+  // region for scheduled functions and keep them in us-central1.
+  { schedule: 'every 24 hours', region: 'us-central1' },
+  async () => {
+  const dbAdmin = getFirestore();
+  const now = AdminTimestamp.now();
 
-    const snap = await dbAdmin
-      .collectionGroup('messages')
-      .where('expiresAt', '<=', now)
-      .limit(2000)
-      .get();
+  const snap = await dbAdmin
+    .collectionGroup('messages')
+    .where('expiresAt', '<=', now)
+    .limit(2000)
+    .get();
 
-    if (snap.empty) {
-      console.log('[cleanupExpiredMessages] Nothing to clean.');
-      return null;
-    }
+  if (snap.empty) {
+    console.log('[cleanupExpiredMessages] Nothing to clean.');
+    return;
+  }
 
-    // Remove any attached Storage media for these messages.
-    const mediaUrls: Array<string | null | undefined> = [];
-    snap.docs.forEach((d) => {
-      const m = d.data();
-      mediaUrls.push(m.imageUrl, m.voiceUrl, m.videoUrl, m.fileUrl, m.thumbnailUrl);
-    });
-    await deleteStorageByUrls(mediaUrls);
-
-    const deleted = await deleteRefsInBatches(snap.docs.map((d) => d.ref));
-    console.log(`[cleanupExpiredMessages] Deleted ${deleted} expired message(s).`);
-    return null;
+  // Remove any attached Storage media for these messages.
+  const mediaUrls: Array<string | null | undefined> = [];
+  snap.docs.forEach((d) => {
+    const m = d.data();
+    mediaUrls.push(m.imageUrl, m.voiceUrl, m.videoUrl, m.fileUrl, m.thumbnailUrl);
   });
+  await deleteStorageByUrls(mediaUrls);
+
+  const deleted = await deleteRefsInBatches(snap.docs.map((d) => d.ref));
+  console.log(`[cleanupExpiredMessages] Deleted ${deleted} expired message(s).`);
+});
 
 // ─── 3. Stale / ghost calls ─────────────────────────────────────────────────
 // Removes 1-on-1 call signaling docs, finished/abandoned group calls, and
 // lingering group-call invites that would otherwise resurface as ghost calls.
-export const cleanupStaleCalls = functionsV1.pubsub
-  .schedule('every 30 minutes')
-  .onRun(async () => {
-    const dbAdmin = getFirestore();
-    const now = Date.now();
-    const cutoff3h = AdminTimestamp.fromMillis(now - 3 * 60 * 60 * 1000);
-    const cutoff6h = AdminTimestamp.fromMillis(now - 6 * 60 * 60 * 1000);
-    const cutoff24h = AdminTimestamp.fromMillis(now - 24 * 60 * 60 * 1000);
+export const cleanupStaleCalls = onSchedule(
+  // Cloud Scheduler is not available in africa-south1, so override the global
+  // region for scheduled functions and keep them in us-central1.
+  { schedule: 'every 30 minutes', region: 'us-central1' },
+  async () => {
+  const dbAdmin = getFirestore();
+  const now = Date.now();
+  const cutoff3h = AdminTimestamp.fromMillis(now - 3 * 60 * 60 * 1000);
+  const cutoff6h = AdminTimestamp.fromMillis(now - 6 * 60 * 60 * 1000);
+  const cutoff24h = AdminTimestamp.fromMillis(now - 24 * 60 * 60 * 1000);
 
-    const toDelete: FirebaseFirestore.DocumentReference[] = [];
+  const toDelete: FirebaseFirestore.DocumentReference[] = [];
 
-    // 3a. 1-on-1 calls untouched for 3h (terminal, abandoned, or long-ended).
-    const staleCalls = await dbAdmin
-      .collection('calls')
-      .where('updatedAt', '<=', cutoff3h)
-      .limit(1000)
-      .get();
-    staleCalls.forEach((d) => toDelete.push(d.ref));
+  // 3a. 1-on-1 calls untouched for 3h (terminal, abandoned, or long-ended).
+  const staleCalls = await dbAdmin
+    .collection('calls')
+    .where('updatedAt', '<=', cutoff3h)
+    .limit(1000)
+    .get();
+  staleCalls.forEach((d) => toDelete.push(d.ref));
 
-    // 3b. Group calls already ended.
-    const endedGroupCalls = await dbAdmin
-      .collection('groupCalls')
-      .where('status', '==', 'ended')
-      .limit(1000)
-      .get();
-    endedGroupCalls.forEach((d) => toDelete.push(d.ref));
+  // 3b. Group calls already ended.
+  const endedGroupCalls = await dbAdmin
+    .collection('groupCalls')
+    .where('status', '==', 'ended')
+    .limit(1000)
+    .get();
+  endedGroupCalls.forEach((d) => toDelete.push(d.ref));
 
-    // 3c. Group calls still "active" but older than 6h → ghost calls.
-    const ghostGroupCalls = await dbAdmin
-      .collection('groupCalls')
-      .where('startedAt', '<=', cutoff6h)
-      .limit(1000)
-      .get();
-    ghostGroupCalls.forEach((d) => {
-      if (!toDelete.find((r) => r.path === d.ref.path)) toDelete.push(d.ref);
-    });
-
-    // 3d. Group-call invites older than 24h (any status).
-    const staleInvites = await dbAdmin
-      .collectionGroup('groupCallNotifications')
-      .where('createdAt', '<=', cutoff24h)
-      .limit(2000)
-      .get();
-    staleInvites.forEach((d) => toDelete.push(d.ref));
-
-    if (toDelete.length === 0) {
-      console.log('[cleanupStaleCalls] Nothing to clean.');
-      return null;
-    }
-
-    const deleted = await deleteRefsInBatches(toDelete);
-    console.log(`[cleanupStaleCalls] Deleted ${deleted} stale call/invite doc(s).`);
-    return null;
+  // 3c. Group calls still "active" but older than 6h → ghost calls.
+  const ghostGroupCalls = await dbAdmin
+    .collection('groupCalls')
+    .where('startedAt', '<=', cutoff6h)
+    .limit(1000)
+    .get();
+  ghostGroupCalls.forEach((d) => {
+    if (!toDelete.find((r) => r.path === d.ref.path)) toDelete.push(d.ref);
   });
+
+  // 3d. Group-call invites older than 24h (any status).
+  const staleInvites = await dbAdmin
+    .collectionGroup('groupCallNotifications')
+    .where('createdAt', '<=', cutoff24h)
+    .limit(2000)
+    .get();
+  staleInvites.forEach((d) => toDelete.push(d.ref));
+
+  if (toDelete.length === 0) {
+    console.log('[cleanupStaleCalls] Nothing to clean.');
+    return;
+  }
+
+  const deleted = await deleteRefsInBatches(toDelete);
+  console.log(`[cleanupStaleCalls] Deleted ${deleted} stale call/invite doc(s).`);
+});
 
 
 // ─── Push Notification Functions ────────────────────────────────────────────
@@ -409,28 +421,28 @@ async function getDisplayNameForRecipient(userId: string, recipientId: string): 
 
 // ─── onMessageCreated: Trigger when a new message is added ──────────────────
 // Path: /chats/{chatId}/messages/{messageId}
-export const onMessageCreated = functionsV1.firestore
-  .document('chats/{chatId}/messages/{messageId}')
-  .onCreate(async (snap, context) => {
-    const { chatId, messageId } = context.params;
-    const message = snap.data();
+export const onMessageCreated = onDocumentCreated(
+  'chats/{chatId}/messages/{messageId}',
+  async (event) => {
+    const { chatId, messageId } = event.params;
+    const message = event.data?.data();
 
     if (!message) {
       console.log('[onMessageCreated] No message data');
-      return null;
+      return;
     }
 
     const senderId = message.senderId;
     if (!senderId) {
       console.log('[onMessageCreated] No sender ID');
-      return null;
+      return;
     }
 
     // Skip system messages (block/unblock/leave-group notifications, etc.)
     // These are rendered inline in the chat and should not push-notify anyone.
     if (message.type === 'system' || senderId === 'system') {
       console.log(`[onMessageCreated] Skipping system message in chat ${chatId}`);
-      return null;
+      return;
     }
 
     console.log(`[onMessageCreated] New message in chat ${chatId} from ${senderId}`);
@@ -442,7 +454,7 @@ export const onMessageCreated = functionsV1.firestore
       const chatDoc = await dbAdmin.collection('chats').doc(chatId).get();
       if (!chatDoc.exists) {
         console.log('[onMessageCreated] Chat not found');
-        return null;
+        return;
       }
 
       const chatData = chatDoc.data();
@@ -506,28 +518,25 @@ export const onMessageCreated = functionsV1.firestore
     } catch (error) {
       console.error('[onMessageCreated] Error:', error);
     }
-
-    return null;
-  });
+  }
+);
 
 // ─── onCallCreated: Trigger when a new call is initiated ────────────────────
 // Path: /calls/{callId}
-export const onCallCreated = functionsV1.firestore
-  .document('calls/{callId}')
-  .onCreate(async (snap, context) => {
-    const { callId } = context.params;
-    const callData = snap.data();
+export const onCallCreated = onDocumentCreated('calls/{callId}', async (event) => {
+    const { callId } = event.params;
+    const callData = event.data?.data();
 
     if (!callData) {
       console.log('[onCallCreated] No call data');
-      return null;
+      return;
     }
 
     const { callerId, calleeId, type } = callData;
 
     if (!callerId || !calleeId) {
       console.log('[onCallCreated] Missing caller or callee ID');
-      return null;
+      return;
     }
 
     console.log(`[onCallCreated] New ${type} call ${callId} from ${callerId} to ${calleeId}`);
@@ -540,7 +549,7 @@ export const onCallCreated = functionsV1.firestore
       const pushToken = await getUserPushToken(calleeId);
       if (!pushToken) {
         console.log(`[onCallCreated] No push token for callee ${calleeId}`);
-        return null;
+        return;
       }
 
       const isVideo = type === 'video';
@@ -569,28 +578,25 @@ export const onCallCreated = functionsV1.firestore
     } catch (error) {
       console.error('[onCallCreated] Error:', error);
     }
-
-    return null;
-  });
+  }
+);
 
 // ─── onGroupCallCreated: Trigger when a group call is initiated ─────────────
 // Path: /groupCalls/{callId}
-export const onGroupCallCreated = functionsV1.firestore
-  .document('groupCalls/{callId}')
-  .onCreate(async (snap, context) => {
-    const { callId } = context.params;
-    const callData = snap.data();
+export const onGroupCallCreated = onDocumentCreated('groupCalls/{callId}', async (event) => {
+    const { callId } = event.params;
+    const callData = event.data?.data();
 
     if (!callData) {
       console.log('[onGroupCallCreated] No call data');
-      return null;
+      return;
     }
 
     const { initiatorId, participants, groupName, callType } = callData;
 
     if (!initiatorId || !participants || !Array.isArray(participants)) {
       console.log('[onGroupCallCreated] Missing initiator or participants');
-      return null;
+      return;
     }
 
     console.log(`[onGroupCallCreated] New group call ${callId} initiated by ${initiatorId}`);
@@ -652,22 +658,20 @@ export const onGroupCallCreated = functionsV1.firestore
     } catch (error) {
       console.error('[onGroupCallCreated] Error:', error);
     }
-
-    return null;
-  });
+  }
+);
 
 // ─── onMissedCall: Trigger when a call status changes to missed ─────────────
 // Path: /calls/{callId}
-export const onCallUpdated = functionsV1.firestore
-  .document('calls/{callId}')
-  .onUpdate(async (change, context) => {
-    const { callId } = context.params;
-    const before = change.before.data();
-    const after = change.after.data();
+export const onCallUpdated = onDocumentUpdated('calls/{callId}', async (event) => {
+    const { callId } = event.params;
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
 
     // Only trigger on status change to 'missed' or 'rejected'
-    if (before.status === after.status) return null;
-    if (after.status !== 'missed' && after.status !== 'rejected') return null;
+    if (!before || !after) return;
+    if (before.status === after.status) return;
+    if (after.status !== 'missed' && after.status !== 'rejected') return;
 
     const { callerId, calleeId, type } = after;
 
@@ -681,7 +685,7 @@ export const onCallUpdated = functionsV1.firestore
       const pushToken = await getUserPushToken(calleeId);
       if (!pushToken) {
         console.log(`[onCallUpdated] No push token for callee ${calleeId}`);
-        return null;
+        return;
       }
 
       const isVideo = type === 'video';
@@ -711,9 +715,8 @@ export const onCallUpdated = functionsV1.firestore
     } catch (error) {
       console.error('[onCallUpdated] Error:', error);
     }
-
-    return null;
-  });
+  }
+);
 
 
 // ─── Video Trimming Callable Function ────────────────────────────────────────

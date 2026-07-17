@@ -71,6 +71,10 @@ export default function StatusScreen() {
   // contact name, else the phone number. We need each poster's phone: it's on
   // newer status docs (userPhone); for older docs we look it up from `users`.
   const [phoneMap, setPhoneMap] = useState<Map<string, string>>(new Map());
+  // The current user's own display name (username), resolved from their Firestore
+  // profile. The Firebase auth object has no displayName for phone-auth users,
+  // which is why status docs stored "Unknown". Used for the own-status header.
+  const [myProfileName, setMyProfileName] = useState<string>('');
   // Cache of each poster's privacyProfilePhoto setting ('Everyone'|'Contacts'|'Nobody')
   const [statusPrivacyPhotoMap, setStatusPrivacyPhotoMap] = useState<Map<string, string>>(new Map());
   // Cache of each poster's privacyStatus setting (who can see their status updates)
@@ -115,6 +119,21 @@ export default function StatusScreen() {
 
     return () => { cancelled = true; };
   }, [contactStatuses]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Resolve the current user's own display name (username) from Firestore so the
+  // own-status header shows the username instead of "Unknown".
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    getDoc(doc(db, 'users', userId))
+      .then((snap) => {
+        if (cancelled || !snap.exists()) return;
+        const data = snap.data();
+        setMyProfileName(data.displayName || user?.phoneNumber || 'My Status');
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Only show statuses from posters who are:
   //   1. Saved in the viewer's phone book (WhatsApp-style — you only see updates from contacts)
@@ -165,8 +184,12 @@ export default function StatusScreen() {
   ) => {
     if (!userId) return;
     
+    // Prefer the resolved profile username over the auth object's (usually empty)
+    // displayName so status docs don't store "Unknown".
+    const nameToStore = myProfileName || user?.phoneNumber || displayName;
+
     await createStatus(
-      displayName, 
+      nameToStore, 
       photoURL, 
       mediaType, 
       mediaUri, 
@@ -183,7 +206,10 @@ export default function StatusScreen() {
   // ── Handle view status ──────────────────────────────────────────────────────
   const handleViewMyStatus = () => {
     if (myStatuses.length === 0) return;
-    setViewerStatuses(myStatuses);
+    // Inject the resolved own username so the viewer header shows the user's
+    // name instead of the "Unknown" that was denormalized onto the status doc.
+    const ownerName = myProfileName || user?.phoneNumber || 'My Status';
+    setViewerStatuses(myStatuses.map((s) => ({ ...s, displayName: ownerName })));
     setViewerIsOwner(true);
     setViewerVisible(true);
   };

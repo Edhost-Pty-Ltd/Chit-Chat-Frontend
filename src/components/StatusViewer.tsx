@@ -15,12 +15,17 @@ import {
   ActivityIndicator,
   StatusBar,
   Animated,
+  ScrollView,
   GestureResponderEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEventListener } from 'expo';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { usePhoneBook } from '../hooks/usePhoneBook';
 import type { FireStatus } from '../types';
 import { COLORS, SHADOW } from '../types/theme';
 
@@ -68,6 +73,13 @@ export function StatusViewer({
   const [loading, setLoading] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [progress, setProgress] = useState(0);
+  // Viewers ("seen by") sheet state — owner only.
+  const [showViewers, setShowViewers] = useState(false);
+  const [viewers, setViewers] = useState<{ userId: string; name: string; photoURL: string | null }[]>([]);
+  const [viewersLoading, setViewersLoading] = useState(false);
+
+  const insets = useSafeAreaInsets();
+  const { resolveName } = usePhoneBook();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Signals that the current item finished and we should advance — avoids
@@ -184,8 +196,8 @@ export function StatusViewer({
   useEffect(() => {
     if (!visible || isPaused || !currentStatus || isVideo) return;
 
-    // Mark as viewed
-    if (!currentStatus.viewedBy.includes(currentUserId)) {
+    // Mark as viewed — but never count the owner viewing their own status.
+    if (!isOwner && !currentStatus.viewedBy.includes(currentUserId)) {
       onStatusViewed(currentStatus.statusId);
     }
 
@@ -206,15 +218,16 @@ export function StatusViewer({
     }, interval);
 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [visible, currentIndex, isPaused, isVideo, currentStatus, currentUserId, onStatusViewed, goNext]);
+  }, [visible, currentIndex, isPaused, isVideo, currentStatus, currentUserId, onStatusViewed, goNext, isOwner]);
 
   // Mark video statuses viewed immediately on open
   useEffect(() => {
     if (!visible || !currentStatus || !isVideo) return;
-    if (!currentStatus.viewedBy.includes(currentUserId)) {
+    // Never count the owner viewing their own status.
+    if (!isOwner && !currentStatus.viewedBy.includes(currentUserId)) {
       onStatusViewed(currentStatus.statusId);
     }
-  }, [visible, currentIndex, isVideo, currentStatus, currentUserId, onStatusViewed]);
+  }, [visible, currentIndex, isVideo, currentStatus, currentUserId, onStatusViewed, isOwner]);
 
   // Advance to the next item after the image/text timer completes.
   // Using a separate effect avoids calling goNext() inside the setProgress
@@ -299,6 +312,45 @@ export function StatusViewer({
       }
     }
   };
+
+  // ── Viewers ("seen by") sheet ───────────────────────────────────────────────
+  // Resolve each viewer's name via the phone book (saved contact name → phone
+  // number), fetching their phone/photo from their Firestore profile.
+  const handleOpenViewers = useCallback(async () => {
+    if (!currentStatus) return;
+    const ids = currentStatus.viewedBy || [];
+    if (ids.length === 0) return;
+
+    setIsPaused(true); // pause auto-advance while the sheet is open
+    setShowViewers(true);
+    setViewersLoading(true);
+
+    try {
+      const results = await Promise.all(
+        ids.map(async (uid) => {
+          try {
+            const snap = await getDoc(doc(db, 'users', uid));
+            const data = snap.exists() ? snap.data() : {};
+            const phone = data.phone ?? null;
+            const name = resolveName(phone, phone ?? 'Unknown');
+            return { userId: uid, name, photoURL: data.photoURL ?? null };
+          } catch {
+            return { userId: uid, name: 'Unknown', photoURL: null };
+          }
+        })
+      );
+      setViewers(results);
+    } catch {
+      setViewers([]);
+    } finally {
+      setViewersLoading(false);
+    }
+  }, [currentStatus, resolveName]);
+
+  const handleCloseViewers = useCallback(() => {
+    setShowViewers(false);
+    setIsPaused(false);
+  }, []);
 
   if (!visible || !currentStatus) return null;
 
@@ -454,20 +506,76 @@ export function StatusViewer({
           )}
         </View>
 
-        {/* Layer 5: bottom info (caption + view count) — non-interactive */}
+        {/* Layer 5: bottom info (caption + view count) */}
         {(currentStatus.caption || isOwner) && (
-          <View style={styles.bottomInfo} pointerEvents="none">
+          <View
+            style={[styles.bottomInfo, { paddingBottom: insets.bottom + 24 }]}
+            pointerEvents="box-none"
+          >
             {currentStatus.caption && currentStatus.mediaType !== 'text' && (
               <Text style={styles.caption}>{currentStatus.caption}</Text>
             )}
             {isOwner && (
-              <View style={styles.viewsContainer}>
+              <TouchableOpacity
+                style={styles.viewsContainer}
+                onPress={handleOpenViewers}
+                activeOpacity={0.7}
+                disabled={viewCount === 0}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
                 <Ionicons name="eye-outline" size={16} color="#ffffff" />
                 <Text style={styles.viewsText}>
                   {viewCount} {viewCount === 1 ? 'view' : 'views'}
                 </Text>
-              </View>
+                {viewCount > 0 && (
+                  <Ionicons name="chevron-up" size={14} color="#ffffff" />
+                )}
+              </TouchableOpacity>
             )}
+          </View>
+        )}
+
+        {/* Viewers ("seen by") bottom sheet — owner only */}
+        {showViewers && (
+          <View style={styles.viewersOverlay}>
+            <Pressable style={styles.viewersBackdrop} onPress={handleCloseViewers} />
+            <View style={[styles.viewersSheet, { paddingBottom: insets.bottom + 16 }]}>
+              <View style={styles.viewersHandle} />
+              <View style={styles.viewersTitleRow}>
+                <Ionicons name="eye-outline" size={18} color={COLORS.blue} />
+                <Text style={styles.viewersTitle}>
+                  Viewed by {viewers.length}
+                </Text>
+              </View>
+
+              {viewersLoading ? (
+                <ActivityIndicator color={COLORS.blue} style={{ marginVertical: 24 }} />
+              ) : viewers.length === 0 ? (
+                <Text style={styles.viewersEmpty}>No views yet</Text>
+              ) : (
+                <ScrollView
+                  style={{ maxHeight: SCREEN_HEIGHT * 0.4 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {viewers.map((v) => (
+                    <View key={v.userId} style={styles.viewerRow}>
+                      <View style={styles.viewerAvatar}>
+                        {v.photoURL ? (
+                          <Image source={{ uri: v.photoURL }} style={styles.avatarImage} />
+                        ) : (
+                          <View style={[styles.avatarPlaceholder, { backgroundColor: COLORS.blue }]}>
+                            <Text style={styles.avatarText}>
+                              {v.name.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.viewerName} numberOfLines={1}>{v.name}</Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
           </View>
         )}
       </View>
@@ -676,6 +784,64 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#ffffff',
     fontWeight: '600',
+  },
+  viewersOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+  },
+  viewersBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  viewersSheet: {
+    backgroundColor: '#1c1c1e',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  viewersHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginBottom: 16,
+  },
+  viewersTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  viewersTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  viewersEmpty: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
+    marginVertical: 24,
+  },
+  viewerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  viewerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
+  viewerName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   tapZones: {
     ...StyleSheet.absoluteFillObject,

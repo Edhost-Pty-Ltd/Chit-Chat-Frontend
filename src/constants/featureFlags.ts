@@ -8,7 +8,7 @@ export const FEATURE_FLAGS = {
   about: false,
 
   // Status/Story features
-  statusVideoTrimmer: false,
+  statusVideoTrimmer: true,
 
   // Chat list features
   chatSearch: false,

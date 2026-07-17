@@ -27,9 +27,10 @@ export async function generateLiveKitToken(opts: TokenOptions): Promise<string> 
 
   if (Platform.OS === 'web') {
     // Web: Firebase JS SDK callable (auth context attached automatically)
+    // Region must match the deployed function region (africa-south1).
     const { getApp } = require('firebase/app');
     const { getFunctions, httpsCallable } = require('firebase/functions');
-    const functions = getFunctions(getApp());
+    const functions = getFunctions(getApp(), 'africa-south1');
     const callable = httpsCallable(functions, 'generateLiveKitToken');
     const result: any = await callable({ roomName, displayName });
     return result.data.token as string;
@@ -44,8 +45,10 @@ export async function generateLiveKitToken(opts: TokenOptions): Promise<string> 
   }
   const idToken = await currentUser.getIdToken();
 
+  // Region must match the deployed function region (africa-south1).
+  const { getApp } = require('@react-native-firebase/app');
   const { getFunctions, httpsCallable } = require('@react-native-firebase/functions');
-  const callable = httpsCallable(getFunctions(), 'generateLiveKitToken');
+  const callable = httpsCallable(getFunctions(getApp(), 'africa-south1'), 'generateLiveKitToken');
   const result: any = await callable({ roomName, displayName, idToken });
   return result.data.token as string;
 }

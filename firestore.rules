@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // NOTE: Auth uses @react-native-firebase/auth (native module) while
+    // Firestore uses the firebase/firestore JS SDK. These do not share an
+    // auth session, so request.auth is always null for Firestore requests.
+    // Until an auth bridge is implemented, rules must be fully open.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

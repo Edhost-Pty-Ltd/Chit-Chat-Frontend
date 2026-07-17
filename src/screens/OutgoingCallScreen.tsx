@@ -28,6 +28,7 @@ import { useActiveCall } from '../context/ActiveCallContext';
 import { useGroupCall } from '../hooks/useGroupCall';
 import { useAuth } from '../hooks/useAuth';
 import { sendCallMessage } from '../hooks/useChatActions';
+import { SignalingService } from '../services/signalingService';
 
 type RouteP = RouteProp<RootStackParamList, 'OutgoingCall'>;
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'OutgoingCall'>;
@@ -146,10 +147,11 @@ export default function OutgoingCallScreen() {
           return;
         }
 
-        // Write call message to chat for missed/declined calls
+        // Write call message to chat + save call history for missed/declined calls
         if (chatId && (data.status === 'declined' || data.status === 'missed' || data.status === 'cancelled')) {
+          const callStatus = data.status === 'declined' ? 'rejected' : 'missed';
+
           try {
-            const callStatus = data.status === 'declined' ? 'rejected' : 'missed';
             await sendCallMessage(
               chatId,
               user?.uid ?? '',
@@ -159,6 +161,28 @@ export default function OutgoingCallScreen() {
             );
           } catch (err) {
             console.warn('[OutgoingCall] Failed to write call message:', err);
+          }
+
+          // Save to THIS caller's call history (outgoing, unanswered) so it
+          // shows up on the Calls screen. Don't pass chatId here — the chat
+          // message is already sent above (avoids a duplicate message).
+          if (user?.uid) {
+            try {
+              const participantsArr: string[] = data.participants || [];
+              const calleeId = participantsArr.find((id) => id !== user.uid) || '';
+              await SignalingService.saveToCallHistory(
+                user.uid,
+                callId,
+                { userId: calleeId, displayName, photoUrl: photoUrl ?? null },
+                callType,
+                'outgoing',
+                callStatus as 'missed' | 'rejected',
+                null,
+              );
+              console.log('[OutgoingCall] Saved outgoing call history:', callStatus);
+            } catch (err) {
+              console.warn('[OutgoingCall] Failed to save call history:', err);
+            }
           }
         }
 

@@ -1,11 +1,11 @@
 // ─── Component: Group Call Notification Manager ─────────────────────────────
 // Global listener for group call notifications that shows UI for incoming calls
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useGroupCallNotifications } from '../hooks/useGroupCallNotifications';
@@ -13,6 +13,7 @@ import { useGroupCall } from '../hooks/useGroupCall';
 import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { useActiveCall } from '../context/ActiveCallContext';
+import { SignalingService } from '../services/signalingService';
 import GroupCallNotification from './GroupCallNotification';
 import { RootStackParamList } from '../types';
 
@@ -31,6 +32,9 @@ export default function GroupCallNotificationManager() {
   const [callMemberCount, setCallMemberCount] = useState(2);
   // Resolved caller phone from Firebase (for unsaved contacts)
   const [callerPhone, setCallerPhone] = useState<string | null>(null);
+  // Tracks callIds we've already written a terminal history entry for, so the
+  // call-document listener below never double-writes.
+  const handledCallsRef = useRef<Set<string>>(new Set());
 
   // Show the most recent notification and pre-fetch its chat member count.
   useEffect(() => {
@@ -72,6 +76,53 @@ export default function GroupCallNotificationManager() {
       setCallerPhone(null);
     }
   }, [notifications, contacts]);
+
+  // Watch the current incoming call document. If the caller cancels or nobody
+  // answers (status → cancelled/missed) while the notification is showing,
+  // record an incoming MISSED call in this callee's history and dismiss the UI.
+  useEffect(() => {
+    if (!currentNotification || !user?.uid) return;
+
+    const callId = currentNotification.callId;
+    const callRef = doc(db, 'groupCalls', callId);
+
+    const unsubscribe = onSnapshot(callRef, async (snap) => {
+      if (!snap.exists()) return;
+      const status = snap.data()?.status;
+
+      if (
+        (status === 'missed' || status === 'cancelled') &&
+        !handledCallsRef.current.has(callId)
+      ) {
+        handledCallsRef.current.add(callId);
+
+        try {
+          await SignalingService.saveToCallHistory(
+            user.uid,
+            callId,
+            {
+              userId: currentNotification.initiatorId,
+              displayName: currentNotification.initiatorName || '',
+              photoUrl: null,
+            },
+            currentNotification.callType,
+            'incoming',
+            'missed',
+            null,
+          );
+          console.log('[GroupCallNotificationManager] Saved incoming missed call history');
+        } catch (err) {
+          console.warn('[GroupCallNotificationManager] Failed to save missed call history:', err);
+        }
+
+        await dismissNotification(callId);
+        setCurrentNotification(null);
+      }
+    });
+
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentNotification, user?.uid]);
 
   const handleJoin = async () => {
     if (!currentNotification || !user?.uid) return;
@@ -182,6 +233,30 @@ export default function GroupCallNotificationManager() {
         }
       } catch (err) {
         console.error('[GroupCallNotificationManager] Failed to mark call declined:', err);
+      }
+
+      // Save to THIS callee's call history as an incoming rejected call so it
+      // shows on the Calls screen. Only for 1-on-1 — declining a group call
+      // just dismisses your own notification without ending the call.
+      if (user?.uid) {
+        try {
+          await SignalingService.saveToCallHistory(
+            user.uid,
+            currentNotification.callId,
+            {
+              userId: currentNotification.initiatorId,
+              displayName: currentNotification.initiatorName || '',
+              photoUrl: null,
+            },
+            currentNotification.callType,
+            'incoming',
+            'rejected',
+            null,
+          );
+          console.log('[GroupCallNotificationManager] Saved incoming rejected call history');
+        } catch (err) {
+          console.warn('[GroupCallNotificationManager] Failed to save call history:', err);
+        }
       }
     }
 

@@ -3134,8 +3134,8 @@ export default function ChatScreen() {
 
   return (
     <>
-      <SafeAreaView style={[styles.root, { backgroundColor: COLORS.sky1 }]} edges={['left', 'right', 'bottom']}>
-        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <SafeAreaView style={[styles.root, { backgroundColor: COLORS.sky1 }]} edges={['left', 'right']}>
+        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <AppBg />
 
           {/* ── Top bar ── */}
@@ -3513,7 +3513,7 @@ export default function ChatScreen() {
               </TouchableOpacity>
 
               {/* Input bar - always show */}
-              <View style={styles.inputBar}>
+              <View style={[styles.inputBar, { paddingBottom: (Platform.OS === 'ios' ? 28 : 10) + insets.bottom }]}>
                 {isRecording ? (
                   <View style={styles.recordingOverlayContainer}>
                     <VoiceRecordingOverlay
@@ -3574,7 +3574,7 @@ export default function ChatScreen() {
             </View>
           ) : (
             /* Normal Input Bar */
-            <View style={styles.inputBar}>
+            <View style={[styles.inputBar, { paddingBottom: (Platform.OS === 'ios' ? 28 : 10) + insets.bottom }]}>
             {isRecording ? (
               <View style={styles.voiceRecordingBar}>
                 {/* Delete button */}
