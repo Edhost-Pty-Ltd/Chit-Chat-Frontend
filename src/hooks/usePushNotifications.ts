@@ -255,7 +255,10 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
       lightColor: '#1E9CF0',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       bypassDnd: true,
-      sound: 'default',
+      // Omit `sound` so the channel uses the system default notification sound.
+      // Passing 'default' made expo-notifications look for a custom sound file
+      // named "default" in the config plugin's sounds array (which doesn't
+      // exist), throwing "Custom sound 'default' not found in native app".
     });
   }
 
