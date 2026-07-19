@@ -2,7 +2,7 @@
 // Uses LiveKit (SFU) for up to 8 participants. UI matches AudioCallScreen and
 // VideoCallScreen so group and 1-on-1 calls look consistent.
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Alert, Platform,
   Dimensions, Animated, Modal, Pressable, ActivityIndicator, PermissionsAndroid, FlatList,
@@ -349,6 +349,19 @@ function RoomView({
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
   const { resolveName, contactsMap } = usePhoneBook();
 
+  // Saved device contacts (already cross-referenced with Firestore) keyed by
+  // Firebase uid. LiveKit participant.identity IS the uid, so this lets us
+  // resolve the saved phone-book name directly by uid — the same reliable path
+  // the contact picker uses — without depending on a phone-number string match.
+  const { contacts } = useContacts();
+  const savedNameByUid = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      if (c.userId && c.displayName) map.set(c.userId, c.displayName);
+    }
+    return map;
+  }, [contacts]);
+
   // Firebase signup usernames keyed by uid. LiveKit participant.identity is the
   // Firebase uid, while participant.name is only their phone number — so we look
   // up the registered username to show instead of the bare number.
@@ -485,11 +498,25 @@ function RoomView({
   //   1. Saved device contact (matched by phone number = participant.name)
   //   2. Firebase signup username (matched by uid = participant.identity)
   //   3. The raw phone number as a last resort
+  // A "group name" that is really a phone number (1-on-1 calls carry the other
+  // party's number here) should not be treated as a human-readable name.
+  const looksLikePhone = (s?: string | null) => !!s && /^\+?[\d\s()-]{5,}$/.test(s.trim());
+
   const nameFor = (p: any) => {
     const phone = p?.name as string | undefined;
     const uid = p?.identity as string | undefined;
+    // 1. Saved device contact matched by uid (reliable — no phone-format issues)
+    if (uid && savedNameByUid.has(uid)) return savedNameByUid.get(uid)!;
+    // 2. Saved device contact matched by phone number
     if (phone && contactsMap.has(phone)) return contactsMap.get(phone)!;
+    // 3. Firebase signup username matched by uid
     if (uid && uidNames.get(uid)) return uidNames.get(uid)!;
+    // 4. For a 1-on-1 call, fall back to the name resolved at call start (the
+    //    same value shown in the header) before resorting to the raw number.
+    //    This keeps the on-screen name stable while the async contact/username
+    //    lookups above are still loading, instead of flickering to a number.
+    if (memberCount <= 2 && groupName && !looksLikePhone(groupName)) return groupName;
+    // 5. Raw phone number as a last resort
     return resolveName(phone || uid, 'Guest');
   };
 
@@ -510,7 +537,6 @@ function RoomView({
   // which we keep as-is. A 1-on-1 call carries the other party's phone number as
   // its "group name", so in that case we resolve the remote participant instead
   // (contact → Firebase username → number) rather than showing raw digits.
-  const looksLikePhone = (s?: string | null) => !!s && /^\+?[\d\s()-]{5,}$/.test(s.trim());
   const headerTitle =
     groupName && !looksLikePhone(groupName)
       ? resolveName(groupName, groupName)
@@ -1041,13 +1067,23 @@ function FloatingCallView({
     : undefined;
   const hasVideo = !!(camTrack && isTrackReference(camTrack));
 
-  // Resolve the remote's display name for the avatar: saved contact (by phone)
-  // → Firebase signup username (by uid) → phone number → group name.
+  // Resolve the remote's display name for the avatar: saved contact by uid
+  // (reliable) → saved contact by phone → Firebase signup username (by uid) →
+  // phone number → group name.
   const { contactsMap } = usePhoneBook();
+  const { contacts } = useContacts();
+  const savedNameByUid = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      if (c.userId && c.displayName) map.set(c.userId, c.displayName);
+    }
+    return map;
+  }, [contacts]);
   const [remoteName, setRemoteName] = useState('');
   useEffect(() => {
     const phone = (remote as any)?.name as string | undefined;
     const uid = remote?.identity;
+    if (uid && savedNameByUid.has(uid)) { setRemoteName(savedNameByUid.get(uid)!); return; }
     if (phone && contactsMap.has(phone)) { setRemoteName(contactsMap.get(phone)!); return; }
     if (!uid) { setRemoteName(phone || groupName); return; }
     let cancelled = false;
@@ -1061,7 +1097,7 @@ function FloatingCallView({
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remote?.identity, contactsMap]);
+  }, [remote?.identity, contactsMap, savedNameByUid]);
 
   const avatarName = remoteName || groupName;
 

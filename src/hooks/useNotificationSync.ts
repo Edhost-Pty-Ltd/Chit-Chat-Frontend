@@ -98,6 +98,7 @@ export function useNotificationSync(userId: string | null, pushNotification: Pus
 
             // Check if this is a new message (not from current user)
             if (
+              lastMsg.sendId &&
               lastMsg.senderId !== userId &&
               (!lastKnownTime || lastMsgTime > lastKnownTime)
             ) {
@@ -140,7 +141,6 @@ export function useNotificationSync(userId: string | null, pushNotification: Pus
                 };
 
                 console.log('[useNotificationSync] Pushing notification:', notificationData);
-                console.log('[useNotificationSync] pushNotification function:', typeof pushNotification, pushNotification ? 'defined' : 'undefined');
 
                 // Push notification via ref to avoid stale closure
                 try {

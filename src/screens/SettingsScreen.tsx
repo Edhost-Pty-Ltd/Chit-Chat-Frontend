@@ -41,7 +41,10 @@ const buildSettingsSections = (): {
     },
     {
       items: [
-        { id: 'devices',    icon: 'phone-portrait-outline', label: 'Linked Devices'  },
+        // Linked Devices is gated behind a feature flag (hidden until ready).
+        ...(FEATURE_FLAGS.linkedDevices
+          ? [{ id: 'devices', icon: 'phone-portrait-outline' as IoniconName, label: 'Linked Devices' }]
+          : []),
         { id: 'appearance', icon: 'color-palette-outline',  label: 'Appearance'      },
       ],
     },
@@ -88,7 +91,6 @@ export default function SettingsScreen() {
     if (id === 'account')       navigation.navigate('AccountSettings');
     if (id === 'privacy')       navigation.navigate('PrivacySettings');
     if (id === 'notifications') navigation.navigate('NotificationSettings');
-    if (id === 'devices')       navigation.navigate('LinkedDevices');
   };
 
   return (

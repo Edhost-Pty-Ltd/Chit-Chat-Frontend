@@ -59,6 +59,7 @@ export default function OutgoingCallScreen() {
   // state) so they take effect synchronously and never trigger a re-render.
   const callEndedRef = useRef(false);
   const answeredRef = useRef(false);
+  const historySavedRef = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const delayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -67,6 +68,47 @@ export default function OutgoingCallScreen() {
     if (callEndedRef.current) return;
     callEndedRef.current = true;
     navigation.goBack();
+  };
+
+  // Record an unanswered outgoing call (missed/rejected) exactly once: posts the
+  // call message to the chat and saves this caller's call history. Guarded by
+  // historySavedRef so it's safe to invoke from both handleCancel (which sets
+  // callEndedRef and would otherwise make the listener skip the save) and the
+  // status listener, without duplicating the chat message.
+  const recordUnansweredCall = async (
+    status: 'missed' | 'rejected',
+    participants?: string[],
+  ) => {
+    if (historySavedRef.current) return;
+    historySavedRef.current = true;
+    if (!chatId || !user?.uid) return;
+
+    try {
+      await sendCallMessage(chatId, user.uid, callType, null, status);
+    } catch (err) {
+      console.warn('[OutgoingCall] Failed to write call message:', err);
+    }
+
+    try {
+      let participantsArr = participants;
+      if (!participantsArr) {
+        const snap = await getDoc(doc(db, 'groupCalls', callId));
+        participantsArr = (snap.exists() ? snap.data()?.participants : []) || [];
+      }
+      const calleeId = participantsArr.find((id) => id !== user.uid) || '';
+      await SignalingService.saveToCallHistory(
+        user.uid,
+        callId,
+        { userId: calleeId, displayName, photoUrl: photoUrl ?? null },
+        callType,
+        'outgoing',
+        status,
+        null,
+      );
+      console.log('[OutgoingCall] Saved outgoing call history:', status);
+    } catch (err) {
+      console.warn('[OutgoingCall] Failed to save call history:', err);
+    }
   };
 
   // User cancels the outgoing call (back button / cancel tap) before it's answered.
@@ -84,6 +126,10 @@ export default function OutgoingCallScreen() {
     } catch (err) {
       console.error('[OutgoingCall] Failed to cancel call:', err);
     }
+    // Record the cancelled call as a missed outgoing call so it appears in call
+    // history. The status listener would skip this because callEndedRef is now
+    // set, so we save it here directly (idempotent via historySavedRef).
+    await recordUnansweredCall('missed');
     navigation.goBack();
   };
 
@@ -148,42 +194,9 @@ export default function OutgoingCallScreen() {
         }
 
         // Write call message to chat + save call history for missed/declined calls
-        if (chatId && (data.status === 'declined' || data.status === 'missed' || data.status === 'cancelled')) {
+        if (data.status === 'declined' || data.status === 'missed' || data.status === 'cancelled') {
           const callStatus = data.status === 'declined' ? 'rejected' : 'missed';
-
-          try {
-            await sendCallMessage(
-              chatId,
-              user?.uid ?? '',
-              callType,
-              null, // no duration for unanswered calls
-              callStatus as 'missed' | 'rejected',
-            );
-          } catch (err) {
-            console.warn('[OutgoingCall] Failed to write call message:', err);
-          }
-
-          // Save to THIS caller's call history (outgoing, unanswered) so it
-          // shows up on the Calls screen. Don't pass chatId here — the chat
-          // message is already sent above (avoids a duplicate message).
-          if (user?.uid) {
-            try {
-              const participantsArr: string[] = data.participants || [];
-              const calleeId = participantsArr.find((id) => id !== user.uid) || '';
-              await SignalingService.saveToCallHistory(
-                user.uid,
-                callId,
-                { userId: calleeId, displayName, photoUrl: photoUrl ?? null },
-                callType,
-                'outgoing',
-                callStatus as 'missed' | 'rejected',
-                null,
-              );
-              console.log('[OutgoingCall] Saved outgoing call history:', callStatus);
-            } catch (err) {
-              console.warn('[OutgoingCall] Failed to save call history:', err);
-            }
-          }
+          await recordUnansweredCall(callStatus, data.participants || []);
         }
 
         if (data.status === 'declined') {
