@@ -42,15 +42,25 @@ console.log('[Firebase] Firebase app initialized:', app.name);
 
 // Firestore — real-time database (JS SDK)
 // On React Native the default WebChannel streaming transport frequently stalls
-// on slow / restrictive mobile networks, which makes listeners hang and appear
-// to "not load". Auto-detecting long polling lets the SDK fall back to a more
-// resilient transport when streaming isn't reliable.
+// on restrictive networks (router QoS / traffic-shaping / deep packet
+// inspection), which makes listeners hang and time out with "backend didn't
+// respond within 10 seconds" — even though plain HTTP traffic (video, etc.)
+// passes through fine.
+//
+// experimentalAutoDetectLongPolling only probes ONCE at handshake; on networks
+// where the handshake succeeds but the long-lived stream is later throttled, it
+// wrongly commits to WebChannel and then stalls. experimentalForceLongPolling
+// skips detection and always uses HTTP long-polling (ordinary request/response
+// cycles that look like normal web traffic), which reliably traverses those
+// networks and is the most robust transport on React Native.
+//
+// NOTE: the two long-polling options are mutually exclusive — do not set both.
 // initializeFirestore must run before any getFirestore() call and throws if the
 // instance already exists (e.g. on Fast Refresh), so we guard with a fallback.
 function createFirestore() {
   try {
     return initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
     });
   } catch (err) {
     // Already initialized (hot reload) — reuse the existing instance.

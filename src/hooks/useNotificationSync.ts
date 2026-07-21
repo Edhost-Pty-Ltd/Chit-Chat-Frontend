@@ -144,7 +144,6 @@ export function useNotificationSync(userId: string | null, pushNotification: Pus
                 };
 
                 console.log('[useNotificationSync] Pushing notification:', notificationData);
-                
 
                 // Push notification via ref to avoid stale closure
                 try {

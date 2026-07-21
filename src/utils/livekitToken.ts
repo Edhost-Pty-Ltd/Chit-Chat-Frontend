@@ -36,19 +36,27 @@ export async function generateLiveKitToken(opts: TokenOptions): Promise<string> 
     return result.data.token as string;
   }
 
-  // Native: pass the native Firebase ID token explicitly so the backend can
-  // resolve the caller even if the callable auth context isn't attached.
-  const { getAuth } = require('@react-native-firebase/auth');
-  const currentUser = getAuth().currentUser;
-  if (!currentUser) {
-    throw new Error('You must be signed in to start a call.');
-  }
-  const idToken = await currentUser.getIdToken();
+  // Native (iOS/Android): pass the native Firebase ID token explicitly so the
+  // backend can resolve the caller even if the callable auth context isn't attached.
+  try {
+    const auth = require('@react-native-firebase/auth').default;
+    const currentUser = auth().currentUser;
+    
+    if (!currentUser) {
+      throw new Error('You must be signed in to start a call.');
+    }
+    
+    const idToken = await currentUser.getIdToken();
 
-  // Region must match the deployed function region (africa-south1).
-  const { getApp } = require('@react-native-firebase/app');
-  const { getFunctions, httpsCallable } = require('@react-native-firebase/functions');
-  const callable = httpsCallable(getFunctions(getApp(), 'africa-south1'), 'generateLiveKitToken');
-  const result: any = await callable({ roomName, displayName, idToken });
-  return result.data.token as string;
+    // Region must match the deployed function region (africa-south1).
+    const firebaseFunctions = require('@react-native-firebase/functions').default;
+    const functions = firebaseFunctions().app.functions('africa-south1');
+    const callable = functions.httpsCallable('generateLiveKitToken');
+    
+    const result = await callable({ roomName, displayName, idToken });
+    return result.data.token as string;
+  } catch (error: any) {
+    console.error('[generateLiveKitToken] Error:', error);
+    throw new Error(`Failed to generate LiveKit token: ${error.message || 'Unknown error'}`);
+  }
 }

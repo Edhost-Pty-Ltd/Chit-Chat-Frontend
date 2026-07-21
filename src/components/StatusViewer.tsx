@@ -27,7 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEventListener } from 'expo';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import type { FireStatus } from '../types';
@@ -82,6 +82,10 @@ export function StatusViewer({
   const [showViewers, setShowViewers] = useState(false);
   const [viewers, setViewers] = useState<{ userId: string; name: string; photoURL: string | null }[]>([]);
   const [viewersLoading, setViewersLoading] = useState(false);
+  // Live viewedBy for the current status. The `statuses` prop is a snapshot
+  // captured when the viewer opens, so it won't reflect views that arrive while
+  // the owner is looking — we subscribe to the doc to keep the count/list fresh.
+  const [liveViewedBy, setLiveViewedBy] = useState<string[] | null>(null);
 
   const insets = useSafeAreaInsets();
   const { resolveName } = usePhoneBook();
@@ -110,7 +114,9 @@ export function StatusViewer({
   const currentStatus = statuses[currentIndex];
   const isOwner = currentStatus?.userId === currentUserId;
   const isExcluded = currentStatus?.excludedUsers?.includes(currentUserId) || false;
-  const viewCount = currentStatus?.viewedBy?.length || 0;
+  // Prefer the live viewedBy (owner only) over the captured prop snapshot.
+  const viewedByIds = liveViewedBy ?? currentStatus?.viewedBy ?? [];
+  const viewCount = viewedByIds.length;
   const isVideo = currentStatus?.mediaType === 'video';
 
   // Image/text display duration: 7 s (matches original behaviour).
@@ -137,6 +143,20 @@ export function StatusViewer({
     }
   }, [currentIndex, statuses.length, onClose]);
 
+  // Keep the owner's view count/list live by subscribing to the current status
+  // doc (the `statuses` prop is a snapshot taken when the viewer opened).
+  useEffect(() => {
+    if (!visible || !isOwner || !currentStatus?.statusId) {
+      setLiveViewedBy(null);
+      return;
+    }
+    const unsub = onSnapshot(doc(db, 'statuses', currentStatus.statusId), (snap) => {
+      if (snap.exists()) setLiveViewedBy(snap.data().viewedBy || []);
+    });
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, isOwner, currentStatus?.statusId]);
+
   // ── Load video when current item changes ─────────────────────────────────
   useEffect(() => {
     if (!visible || !currentStatus) return;
@@ -157,17 +177,19 @@ export function StatusViewer({
       videoReadyRef.current = false;   // block premature playToEnd
       player.replace(currentStatus.mediaUrl);
       
-      // If video has trim metadata, start at trimStart time
-      if (currentStatus.trimStart !== undefined && currentStatus.trimStart > 0) {
+      // Only seek to the client-side trim start while the video is still the
+      // ORIGINAL upload (needsTrimming === true). Once the Cloud Function has
+      // trimmed it, mediaUrl points to the already-trimmed clip that starts at
+      // 0 — seeking to trimStart there jumps past content (or beyond the end,
+      // which stalls the player and freezes the status).
+      if (
+        currentStatus.needsTrimming === true &&
+        currentStatus.trimStart !== undefined &&
+        currentStatus.trimStart > 0
+      ) {
         const startTimeSec = currentStatus.trimStart / 1000;
-        console.log('[StatusViewer] Video has trim metadata:', {
-          trimStart: currentStatus.trimStart,
-          trimEnd: currentStatus.trimEnd,
-          startTimeSec,
-        });
+        console.log('[StatusViewer] Untrimmed video, seeking to trimStart:', startTimeSec);
         player.currentTime = startTimeSec; // Convert ms to seconds
-      } else {
-        console.log('[StatusViewer] Video has no trim metadata');
       }
       
       if (!isPaused) player.play();
@@ -177,14 +199,32 @@ export function StatusViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStatus?.statusId, visible, isVideo]);
 
+  // Start playback when the player reports it's ready. This is expo-video's
+  // equivalent of an onLoad/ready callback.
+  useEventListener(player, 'statusChange', (payload: any) => {
+    // Start playback when the source is actually ready. Calling play() eagerly
+    // right after replace() (in the LOAD effect) is unreliable on a freshly
+    // mounted player — the pre-ready intent gets dropped, which is why the
+    // video froze on the first frame on reopen. Playing on readyToPlay makes
+    // it deterministic. Respect pause (e.g. viewers sheet open / long-press).
+    if (isVideo && payload?.status === 'readyToPlay' && !isPaused) {
+      try { player.play(); } catch {}
+    }
+  });
+
   // Video: update progress bar from timeUpdate; mark ready on first tick
   // Also check if we've reached trimEnd and advance
   useEventListener(player, 'timeUpdate', ({ currentTime }: { currentTime: number }) => {
     if (!isVideo) return;
     if (currentTime > 0) videoReadyRef.current = true;  // video is genuinely playing
     
-    // Check if video has trim metadata
-    const hasTrim = currentStatus.trimStart !== undefined && currentStatus.trimEnd !== undefined;
+    // Only honor client-side trim bounds while the video is still the original
+    // upload. After the Cloud Function trims it, the clip is already the right
+    // length, so we play it straight through (0 → natural end).
+    const hasTrim =
+      currentStatus.needsTrimming === true &&
+      currentStatus.trimStart !== undefined &&
+      currentStatus.trimEnd !== undefined;
     const trimStart = hasTrim ? (currentStatus.trimStart || 0) / 1000 : 0; // Convert ms to seconds
     const trimEnd = hasTrim ? (currentStatus.trimEnd || player.duration) / 1000 : player.duration;
     
@@ -295,9 +335,13 @@ export function StatusViewer({
   const touchStartXRef    = useRef(0);
   const touchStartTimeRef = useRef(0);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Points at the latest handleOpenViewers (defined further down). The JS
+  // responder tap layer calls this by coordinate because a TouchableOpacity
+  // placed over the native VideoView doesn't reliably fire onPress on Android.
+  const openViewersRef = useRef<() => void>(() => {});
 
-  const handleTouchStart = useCallback((e: GestureResponderEvent) => {
-    touchStartXRef.current    = e.nativeEvent.locationX;
+  const handleTouchStart = useCallback((_e: GestureResponderEvent) => {
+    touchStartXRef.current    = _e.nativeEvent.locationX;
     touchStartTimeRef.current = Date.now();
     longPressTimerRef.current = setTimeout(() => {
       setIsPaused(true);
@@ -310,6 +354,19 @@ export function StatusViewer({
       longPressTimerRef.current = null;
     }
     const elapsed = Date.now() - touchStartTimeRef.current;
+    const tapY = e.nativeEvent.locationY;
+
+    // Owner tapping the bottom strip (where the "N views" counter sits) → open
+    // the seen-by sheet. Checked FIRST and regardless of press duration, because
+    // the counter is a Touchable over the native VideoView and won't reliably
+    // fire onPress on Android, so the press lands on this JS tap layer instead.
+    // Owners have no reply bar, so the whole bottom strip is safe to dedicate.
+    if (isOwner && tapY > SCREEN_HEIGHT * 0.85) {
+      setIsPaused(false); // the sheet manages its own pause
+      openViewersRef.current();
+      return;
+    }
+
     if (isPaused && elapsed >= 200) {
       setIsPaused(false);
       return;
@@ -321,7 +378,7 @@ export function StatusViewer({
     } else {
       handleTapRight();
     }
-  }, [isPaused, handleTapLeft, handleTapRight]);
+  }, [isPaused, handleTapLeft, handleTapRight, isOwner]);
 
   // ── Send a reply to the status owner (WhatsApp-style) ───────────────────────
   const handleSendReply = useCallback(async () => {
@@ -374,12 +431,27 @@ export function StatusViewer({
   // number), fetching their phone/photo from their Firestore profile.
   const handleOpenViewers = useCallback(async () => {
     if (!currentStatus) return;
-    const ids = currentStatus.viewedBy || [];
-    if (ids.length === 0) return;
 
+    // Always open the sheet (even with no views) so the tap gives feedback,
+    // then read the freshest viewedBy straight from Firestore rather than the
+    // captured prop / possibly-stale live state.
     setIsPaused(true); // pause auto-advance while the sheet is open
     setShowViewers(true);
     setViewersLoading(true);
+
+    let ids = viewedByIds;
+    try {
+      const statusSnap = await getDoc(doc(db, 'statuses', currentStatus.statusId));
+      if (statusSnap.exists()) ids = statusSnap.data().viewedBy || [];
+    } catch {
+      /* fall back to viewedByIds */
+    }
+
+    if (ids.length === 0) {
+      setViewers([]);
+      setViewersLoading(false);
+      return;
+    }
 
     try {
       const results = await Promise.all(
@@ -401,12 +473,17 @@ export function StatusViewer({
     } finally {
       setViewersLoading(false);
     }
-  }, [currentStatus, resolveName]);
+  }, [currentStatus, viewedByIds, resolveName]);
 
   const handleCloseViewers = useCallback(() => {
     setShowViewers(false);
     setIsPaused(false);
   }, []);
+
+  // Keep the ref current so the tap layer always calls the latest handler.
+  useEffect(() => {
+    openViewersRef.current = handleOpenViewers;
+  }, [handleOpenViewers]);
 
   if (!visible || !currentStatus) return null;
 
@@ -415,12 +492,7 @@ export function StatusViewer({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <StatusBar hidden />
-      <View
-        style={styles.container}
-        onStartShouldSetResponder={() => true}
-        onResponderGrant={handleTouchStart}
-        onResponderRelease={handleTouchEnd}
-      >
+      <View style={styles.container}>
         {/* Layer 1: media background */}
         <View style={styles.background}>
           {isExcluded ? (
@@ -487,6 +559,19 @@ export function StatusViewer({
             <ActivityIndicator size="large" color="#ffffff" />
           </View>
         )}
+
+        {/* Layer 3: full-screen tap layer for navigation + long-press pause.
+            It sits ABOVE the media (so taps over the VideoView still register at
+            the JS bridge) but BELOW the interactive controls that follow — those
+            are rendered after this layer, so buttons like the view counter and
+            the reply bar receive their own presses instead of this layer
+            swallowing them (which previously only paused the status). */}
+        <View
+          style={StyleSheet.absoluteFill}
+          onStartShouldSetResponder={() => true}
+          onResponderGrant={handleTouchStart}
+          onResponderRelease={handleTouchEnd}
+        />
 
         {/* Layer 4: top controls (progress bars + header) — above tap zones */}
         <View style={styles.topControls} pointerEvents="box-none">
@@ -586,7 +671,6 @@ export function StatusViewer({
                 style={styles.viewsContainer}
                 onPress={handleOpenViewers}
                 activeOpacity={0.7}
-                disabled={viewCount === 0}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
                 <Ionicons name="eye-outline" size={16} color="#ffffff" />
@@ -636,8 +720,18 @@ export function StatusViewer({
           </KeyboardAvoidingView>
         )}
 
-        {/* Viewers ("seen by") bottom sheet — owner only */}
-        {showViewers && (
+        {/* Viewers ("seen by") bottom sheet — owner only.
+            Rendered in its OWN Modal (top-level native window) so it always
+            appears above every other layer. The in-tree overlay was rendering
+            correctly in React (showViewers true, viewers resolved) but was drawn
+            BEHIND elevated sibling views on Android, so nothing was visible. */}
+        <Modal
+          visible={showViewers}
+          transparent
+          animationType="slide"
+          onRequestClose={handleCloseViewers}
+          statusBarTranslucent
+        >
           <View style={styles.viewersOverlay}>
             <Pressable style={styles.viewersBackdrop} onPress={handleCloseViewers} />
             <View style={[styles.viewersSheet, { paddingBottom: insets.bottom + 16 }]}>
@@ -678,7 +772,7 @@ export function StatusViewer({
               )}
             </View>
           </View>
-        )}
+        </Modal>
       </View>
     </Modal>
   );
@@ -927,7 +1021,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   viewersOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    // flex:1 (not absoluteFill) so it fills the Modal window; otherwise the
+    // overlay collapses to content height and pins to the top of the screen.
+    flex: 1,
     justifyContent: 'flex-end',
   },
   viewersBackdrop: {

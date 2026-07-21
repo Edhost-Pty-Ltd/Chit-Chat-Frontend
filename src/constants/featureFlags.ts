@@ -6,6 +6,7 @@ export const FEATURE_FLAGS = {
   // Settings screen features
   helpSupport: false,
   about: false,
+  linkedDevices: false,
 
   // Status/Story features
   statusVideoTrimmer: true,
