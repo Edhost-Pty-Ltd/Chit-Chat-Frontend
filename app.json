@@ -93,7 +93,8 @@
           "mode": "production"
         }
       ],
-      "./plugins/withFcmNotificationColorFix"
+      "./plugins/withFcmNotificationColorFix",
+      "./plugins/withNotifeeMavenRepo"
     ],
     "android": {
       "versionCode": 4,
