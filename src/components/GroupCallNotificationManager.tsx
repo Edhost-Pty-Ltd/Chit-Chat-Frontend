@@ -14,6 +14,7 @@ import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { SignalingService } from '../services/signalingService';
+import { cancelIncomingCallNotification } from '../services/incomingCallNotification';
 import GroupCallNotification from './GroupCallNotification';
 import { RootStackParamList } from '../types';
 
@@ -41,6 +42,7 @@ export default function GroupCallNotificationManager() {
     if (notifications.length > 0) {
       const notif = notifications[0];
       setCurrentNotification(notif);
+      cancelIncomingCallNotification(notif.callId);
       // Fetch member count so we can label "1-on-1 Call" vs "Group Call" correctly.
       getDoc(doc(db, 'chats', notif.chatId))
         .then((snap) => {
@@ -74,6 +76,7 @@ export default function GroupCallNotificationManager() {
       setCurrentNotification(null);
       setCallMemberCount(2);
       setCallerPhone(null);
+      cancelIncomingCallNotification();
     }
   }, [notifications, contacts]);
 

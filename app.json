@@ -25,6 +25,7 @@
       "bitcode": false
     },
     "plugins": [
+      "@react-native-firebase/app",
       [
         "expo-build-properties",
         {
@@ -44,7 +45,6 @@
       ],
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
-      "@config-plugins/react-native-callkeep",
       "expo-contacts",
       "expo-font",
       [
@@ -126,8 +126,8 @@
         "android.permission.BLUETOOTH",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.ACCESS_MEDIA_LOCATION",
         "android.permission.READ_MEDIA_AUDIO",

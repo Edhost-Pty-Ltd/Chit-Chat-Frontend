@@ -29,7 +29,6 @@ import { CallHost } from './src/components/CallHost';
 import GroupCallNotificationManager from './src/components/GroupCallNotificationManager';
 import { BiometricGate } from './src/components/BiometricGate';
 import { usePushNotifications, type IncomingCallPushPayload } from './src/hooks/usePushNotifications';
-import { useCallKeepEvents } from './src/hooks/useCallKeepEvents';
 import { SignalingService } from './src/services/signalingService';
 import { useWritePresence } from './src/hooks/usePresence';
 import { useGlobalDelivery } from './src/hooks/useGlobalDelivery';
@@ -110,13 +109,6 @@ function PushNotificationManager() {
   return null;
 }
 
-// CallKeep native call-UI event bridge (Android killed-state answer/hang up).
-// Mounted inside CallProvider so it can drive the shared WebRTC answer flow.
-function CallKeepManager() {
-  useCallKeepEvents();
-  return null;
-}
-
 // Presence management — keeps user online/offline status synced at app level
 function PresenceManager() {
   const { user } = useHooksAuth();
@@ -168,7 +160,7 @@ function NotificationTapHandler() {
   useEffect(() => {
     // Handle notification tap when app is in FOREGROUND or BACKGROUND
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
+      const data = response.notification.request.content.data ?? {};
       console.log('[NotificationTapHandler] Notification tapped (foreground/background):', data);
 
       const type = data.type as string | undefined;
@@ -202,7 +194,7 @@ function NotificationTapHandler() {
       const response = await Notifications.getLastNotificationResponseAsync();
       
       if (response) {
-        const data = response.notification.request.content.data;
+        const data = response.notification.request.content.data ?? {};
         console.log('[NotificationTapHandler] App opened from notification (killed state):', data);
 
         const type = data.type as string | undefined;
@@ -372,7 +364,6 @@ export default function App() {
                 <ActiveCallProvider>
                   <ActivityWatcher />
                   <PushNotificationManager />
-                  <CallKeepManager />
                   <PresenceManager />
                   <GlobalDeliveryManager />
                   <NotificationTapHandler />
