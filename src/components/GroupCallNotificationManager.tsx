@@ -14,7 +14,12 @@ import { useContacts } from '../hooks/useContacts';
 import { usePhoneBook } from '../hooks/usePhoneBook';
 import { useActiveCall } from '../context/ActiveCallContext';
 import { SignalingService } from '../services/signalingService';
-import { cancelIncomingCallNotification } from '../services/incomingCallNotification';
+import {
+  cancelIncomingCallNotification,
+  registerNotifeeForegroundHandler,
+  setAnswerHandler,
+  consumePendingAnswer,
+} from '../services/incomingCallNotification';
 import GroupCallNotification from './GroupCallNotification';
 import { RootStackParamList } from '../types';
 
@@ -36,6 +41,25 @@ export default function GroupCallNotificationManager() {
   // Tracks callIds we've already written a terminal history entry for, so the
   // call-document listener below never double-writes.
   const handledCallsRef = useRef<Set<string>>(new Set());
+
+  // callId that should be auto-answered (Answer tapped on the full-screen
+  // notification, either while alive or across a cold start).
+  const [pendingAnswerCallId, setPendingAnswerCallId] = useState<string | null>(null);
+
+  // Handle Answer/Decline taps on the full-screen notification while foregrounded,
+  // and receive Answer taps that arrive while the app is alive.
+  useEffect(() => {
+    const unsubscribe = registerNotifeeForegroundHandler();
+    setAnswerHandler((callId) => setPendingAnswerCallId(callId));
+    // Cold start: the app was launched by an Answer tap — pick up the callId.
+    consumePendingAnswer().then((callId) => {
+      if (callId) setPendingAnswerCallId(callId);
+    });
+    return () => {
+      unsubscribe();
+      setAnswerHandler(null);
+    };
+  }, []);
 
   // Show the most recent notification and pre-fetch its chat member count.
   useEffect(() => {
@@ -217,6 +241,17 @@ export default function GroupCallNotificationManager() {
 
     setCurrentNotification(null);
   };
+
+  // Auto-join when the user tapped Answer on the notification: once the matching
+  // incoming call is present, run the same Join → LiveKit path automatically.
+  useEffect(() => {
+    if (!pendingAnswerCallId || !currentNotification) return;
+    if (currentNotification.callId !== pendingAnswerCallId) return;
+    console.log('[GroupCallNotificationManager] Auto-answering call:', pendingAnswerCallId);
+    setPendingAnswerCallId(null);
+    handleJoin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAnswerCallId, currentNotification]);
 
   const handleDismiss = async () => {
     if (!currentNotification) return;
