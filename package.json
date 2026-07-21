@@ -3,7 +3,6 @@
   "version": "2.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@config-plugins/react-native-callkeep": "^14.0.0",
     "@config-plugins/react-native-webrtc": "^15.0.1",
     "@expo-google-fonts/dancing-script": "^0.4.2",
     "@expo-google-fonts/merriweather": "^0.4.2",
@@ -15,6 +14,7 @@
     "@livekit/react-native": "^2.11.1",
     "@livekit/react-native-expo-plugin": "^1.0.2",
     "@livekit/react-native-webrtc": "^144.1.1",
+    "@notifee/react-native": "^9.1.8",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "^12.0.1",
     "@react-native-community/slider": "^5.2.0",
@@ -54,7 +54,6 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
-    "react-native-callkeep": "^4.3.16",
     "react-native-get-random-values": "~1.11.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
@@ -74,6 +73,7 @@
     "jest": "^29.7.0",
     "jest-environment-node": "~29.7.0",
     "jest-mock": "~29.7.0",
+    "patch-package": "^8.0.1",
     "react-test-renderer": "19.2.3",
     "ts-jest": "^29.2.0",
     "ts-node": "^10.9.2",
@@ -86,7 +86,8 @@
     "android:phone": "expo run:android --device RZCWC111P7V",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "patch-package"
   },
   "private": true
 }

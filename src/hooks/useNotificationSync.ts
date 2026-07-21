@@ -96,9 +96,12 @@ export function useNotificationSync(userId: string | null, pushNotification: Pus
 
             console.log('[useNotificationSync] Chat:', chatId, 'senderId:', lastMsg.senderId, 'currentUserId:', userId, 'lastMsgTime:', lastMsgTime, 'lastKnownTime:', lastKnownTime);
 
-            // Check if this is a new message (not from current user)
+            // Check if this is a new message (not from current user).
+            // Guard against missing senderId (e.g. system messages) — without a
+            // valid senderId, doc(db, 'users', senderId) becomes an invalid
+            // 1-segment reference and throws.
             if (
-              lastMsg.sendId &&
+              lastMsg.senderId &&
               lastMsg.senderId !== userId &&
               (!lastKnownTime || lastMsgTime > lastKnownTime)
             ) {

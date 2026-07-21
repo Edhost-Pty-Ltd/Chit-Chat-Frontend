@@ -400,12 +400,19 @@ async function getUserCallTokens(userId: string): Promise<UserCallTokens> {
     const userDoc = await dbAdmin.collection('users').doc(userId).get();
     if (!userDoc.exists) return { expoToken: null, fcmToken: null, platform: null };
     const data = userDoc.data() || {};
-    return {
+    const result = {
       expoToken: data.pushToken || null,
       fcmToken: data.fcmToken || null,
       // Prefer the platform recorded with the FCM token; fall back to the Expo one.
       platform: data.fcmTokenPlatform || data.platform || null,
     };
+    console.log(`[CALLKIT-DIAG][getUserCallTokens] user ${userId} =>`,
+      'hasExpoToken:', !!result.expoToken,
+      '| hasFcmToken:', !!result.fcmToken,
+      '| fcmTokenPlatform:', data.fcmTokenPlatform ?? '(unset)',
+      '| platform:', data.platform ?? '(unset)',
+      '| resolvedPlatform:', result.platform);
+    return result;
   } catch (error) {
     console.error(`[Push] Error fetching call tokens for user ${userId}:`, error);
     return { expoToken: null, fcmToken: null, platform: null };
@@ -443,9 +450,12 @@ async function sendCallDataFcm(
         priority: 'high',
       },
     });
-    console.log('[Push] Sent data-only call FCM to', fcmToken.slice(0, 12) + '…');
+    console.log('[CALLKIT-DIAG][sendCallDataFcm] SUCCESS — data-only FCM accepted by FCM for token',
+      fcmToken.slice(0, 12) + '…', '| callId:', payload.callId);
   } catch (error) {
-    console.error('[Push] Error sending data-only call FCM:', error);
+    // A failure here (e.g. messaging/registration-token-not-registered) means the
+    // stored fcmToken is stale — the device will never get the CallKit push.
+    console.error('[CALLKIT-DIAG][sendCallDataFcm] FAILED to send data-only call FCM:', error);
   }
 }
 
@@ -612,8 +622,12 @@ export const onCallCreated = onDocumentCreated('calls/{callId}', async (event) =
     const callerId: string | undefined = caller?.userId;
     const calleeId: string | undefined = callee?.userId;
 
+    console.log(`[CALLKIT-DIAG][onCallCreated] TRIGGERED callId=${callId}`,
+      '| caller.userId:', callerId, '| callee.userId:', calleeId, '| type:', type,
+      '| topLevel callerId:', callData.callerId, '| topLevel calleeId:', callData.calleeId);
+
     if (!callerId || !calleeId) {
-      console.log('[onCallCreated] Missing caller or callee ID');
+      console.log('[CALLKIT-DIAG][onCallCreated] ABORT — Missing caller or callee ID (nothing sent)');
       return;
     }
 
@@ -637,11 +651,17 @@ export const onCallCreated = onDocumentCreated('calls/{callId}', async (event) =
       // Android + native FCM token → data-only high-priority FCM. This wakes a
       // killed app and drives the native CallKeep full-screen call UI. We do
       // NOT also send the Expo push here, to avoid a duplicate notification.
+      console.log(`[CALLKIT-DIAG][onCallCreated] routing decision for callee ${calleeId}:`,
+        'platform===android:', platform === 'android', '| hasFcmToken:', !!fcmToken,
+        '=> transport:', (platform === 'android' && fcmToken) ? 'DATA-FCM (CallKit)' : 'EXPO-PUSH (fallback)');
       if (platform === 'android' && fcmToken) {
+        console.log('[CALLKIT-DIAG][onCallCreated] taking DATA-FCM branch → sendCallDataFcm');
         await sendCallDataFcm(fcmToken, callData2);
         console.log(`[onCallCreated] Sent data-only call FCM to Android callee ${calleeId}`);
         return;
       }
+      console.log('[CALLKIT-DIAG][onCallCreated] taking EXPO-PUSH fallback branch',
+        '(reason:', platform !== 'android' ? `platform is '${platform}' not 'android'` : 'no fcmToken stored', ')');
 
       // Otherwise (iOS, or no FCM token) → existing Expo push. iOS is
       // best-effort: in-app IncomingCallScreen when alive, system notification
@@ -717,15 +737,38 @@ export const onGroupCallCreated = onDocumentCreated('groupCalls/{callId}', async
       for (const participantId of participants) {
         if (participantId === initiatorId) continue;
 
+        // Get personalized initiator name for this specific recipient
+        // (their saved contact name, or the initiator's phone if not saved)
+        const initiatorName = await getDisplayNameForRecipient(initiatorId, participantId);
+
+        // 1-on-1 calls flow through this collection too (participants.length === 2).
+        // For an Android callee with a native FCM token, send a DATA-ONLY high-priority
+        // FCM (same transport as onCallCreated) so the native CallKeep incoming-call
+        // screen shows even when the app is backgrounded/killed. Group calls (>2) and
+        // iOS/no-token callees fall back to the Expo push below.
+        if (!isGroup) {
+          const { fcmToken, platform } = await getUserCallTokens(participantId);
+          console.log(`[CALLKIT-DIAG][onGroupCallCreated] 1-on-1 routing for callee ${participantId}:`,
+            'platform===android:', platform === 'android', '| hasFcmToken:', !!fcmToken,
+            '=> transport:', (platform === 'android' && fcmToken) ? 'DATA-FCM (CallKit)' : 'EXPO-PUSH (fallback)');
+          if (platform === 'android' && fcmToken) {
+            await sendCallDataFcm(fcmToken, {
+              callId,
+              callerId: initiatorId,
+              callerName: initiatorName,
+              callerPhotoUrl: callData.initiatorPhotoUrl || null,
+              callType: callType || 'audio',
+            });
+            console.log(`[CALLKIT-DIAG][onGroupCallCreated] Sent data-only call FCM to Android callee ${participantId}`);
+            continue; // Skip the Expo push for this callee to avoid a duplicate notification.
+          }
+        }
+
         const pushToken = await getUserPushToken(participantId);
         if (!pushToken) {
           console.log(`[onGroupCallCreated] No push token for participant ${participantId}`);
           continue;
         }
-
-        // Get personalized initiator name for this specific recipient
-        // (their saved contact name, or the initiator's phone if not saved)
-        const initiatorName = await getDisplayNameForRecipient(initiatorId, participantId);
 
         let title: string;
         let body: string;
