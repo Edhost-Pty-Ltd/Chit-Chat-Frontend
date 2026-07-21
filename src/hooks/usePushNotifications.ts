@@ -224,7 +224,11 @@ export function usePushNotifications(
   // Runs independently of expo-notifications. Dual-writes the native FCM token
   // to Firestore alongside the Expo push token; call pushes target this token.
   useEffect(() => {
-    if (!userId) return;
+    console.log('[CALLKIT-DIAG][usePushNotifications] FCM registration effect | userId:', userId ?? '(null)');
+    if (!userId) {
+      console.log('[CALLKIT-DIAG][usePushNotifications] No userId yet — FCM token NOT registered this run');
+      return;
+    }
     registerAndSaveFcmToken(userId);
     const unsubscribe = subscribeFcmTokenRefresh(userId);
     return () => unsubscribe();
