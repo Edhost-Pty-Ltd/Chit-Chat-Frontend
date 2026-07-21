@@ -17,7 +17,9 @@
         "NSLocationAlwaysUsageDescription": "Chit-Chat needs access to your location to share live location updates.",
         "NSUserNotificationsUsageDescription": "Chit-Chat needs permission to send you notifications for new messages, calls, and status updates.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       },
       "entitlements": {
         "aps-environment": "production"
@@ -93,7 +95,8 @@
           "mode": "production"
         }
       ],
-      "./plugins/withFcmNotificationColorFix"
+      "./plugins/withFcmNotificationColorFix",
+      "expo-sharing"
     ],
     "android": {
       "versionCode": 4,

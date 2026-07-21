@@ -35,6 +35,9 @@ import ChangeNumberScreen         from '../screens/ChangeNumberScreen';
 import NotificationsScreen        from '../screens/NotificationsScreen';
 import LinkedDevicesScreen        from '../screens/LinkedDevicesScreen';
 import BlockedContactsScreen      from '../screens/BlockedContactsScreen';
+import BackupScreen               from '../screens/BackupScreen';
+import ExportDataScreen           from '../screens/ExportDataScreen';
+import ImportDataScreen           from '../screens/ImportDataScreen';
 import { IncomingCallManager } from '../components';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -227,6 +230,9 @@ export default function AppNavigator() {
             <Stack.Screen name="Notifications"        component={NotificationsScreen}        />
             <Stack.Screen name="LinkedDevices"        component={LinkedDevicesScreen}        />
             <Stack.Screen name="BlockedContacts"      component={BlockedContactsScreen}      />
+            <Stack.Screen name="Backup"               component={BackupScreen}               />
+            <Stack.Screen name="ExportData"           component={ExportDataScreen}           />
+            <Stack.Screen name="ImportData"           component={ImportDataScreen}           />
           </>
         ) : (
           // ── Unauthenticated screens (or authenticated without profile) ───

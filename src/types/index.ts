@@ -190,6 +190,9 @@ export type RootStackParamList = {
   Notifications: undefined;
   LinkedDevices: undefined;
   BlockedContacts: undefined;
+  Backup: undefined;
+  ExportData: undefined;
+  ImportData: undefined;
   GroupCall: {
     roomName: string;
     displayName: string;

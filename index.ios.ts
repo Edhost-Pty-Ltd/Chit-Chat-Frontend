@@ -1,5 +1,8 @@
+// MUST be the first import — installs the secure-random polyfill before App
+// (and crypto-js) is evaluated. See src/polyfills.native.ts.
+import './src/polyfills';
 import { registerRootComponent } from 'expo';
 import App from './App';
 
-// iOS-specific entry point - no web polyfills needed
+// iOS-specific entry point
 registerRootComponent(App);
