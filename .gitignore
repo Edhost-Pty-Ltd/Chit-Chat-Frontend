@@ -105,3 +105,6 @@ CALLER_INFO_FIX.md
 #  - .kiro/specs/**: Kiro spec docs (requirements/design/tasks) used by collaborators
 !AGENTS.md
 !.kiro/specs/**/*.md
+
+# Firebase local deploy cache
+.firebase/
