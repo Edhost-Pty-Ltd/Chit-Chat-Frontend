@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support — Chit-Chat</title>
+<style>
+  :root {
+    --bg: #0B1220;
+    --panel: #121B2E;
+    --accent: #4FD1C5;
+    --accent-soft: rgba(79, 209, 197, 0.12);
+    --text: #E8EDF4;
+    --text-dim: #9AA7BD;
+    --border: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at 20% 0%, #16233d 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 560px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 40px 36px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid rgba(79, 209, 197, 0.25);
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: 26px;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--text-dim);
+    margin: 0 0 32px;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 18px 0;
+    border-top: 1px solid var(--border);
+  }
+  .row:first-of-type { border-top: none; }
+  .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+  .value a {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 16px;
+    border-bottom: 1px solid var(--accent);
+    padding-bottom: 1px;
+  }
+  .value a:hover { color: var(--accent); }
+  footer {
+    margin-top: 32px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">● Chit-Chat Support</span>
+    <h1>Need a hand?</h1>
+    <p class="sub">We usually reply within 1–2 business days. Reach out below and tell us what device and app version you're using so we can help faster.</p>
+
+    <div class="row">
+      <span class="label">Email</span>
+      <span class="value"><a href="mailto:chitchatmj@outlook.com">chitchatmj@outlook.com</a></span>
+    </div>
+
+    <div class="row">
+      <span class="label">Common topics</span>
+      <span class="value" style="color: var(--text-dim); font-size: 14px; line-height: 1.6;">
+        Sign-in issues · Message delivery · Call quality · Account deletion
+      </span>
+    </div>
+
+    <footer>Chit-Chat · A Thabelo Digital Solutions product</footer>
+  </div>
+</body>
+</html>

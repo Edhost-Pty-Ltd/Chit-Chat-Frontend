@@ -385,6 +385,7 @@ export default function SignInScreen() {
                         keyboardType="number-pad"
                         maxLength={1}
                         textAlign="center"
+                        allowFontScaling={false}
                         selectTextOnFocus
                       />
                     ))}
@@ -574,19 +575,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
     textAlign: 'center',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     ...Platform.select({
-      ios: {
-        paddingTop: 16,
-      },
       android: {
         textAlignVertical: 'center',
-        lineHeight: 58,
+        includeFontPadding: false,
       },
-      default: {
-        lineHeight: 58,
-      }
+      default: {},
     }),
-    paddingHorizontal: 0,
     backgroundColor: 'rgba(30,156,240,0.06)',
     borderWidth: 1,
     borderColor: 'rgba(30,156,240,0.18)',
