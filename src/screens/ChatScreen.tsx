@@ -390,6 +390,9 @@ export default function ChatScreen() {
   // ── Voice recorder ─────────────────────────────────────────────
   const recorder = useVoiceRecorder();
 
+  // ── Check if recording is active ────────────────────────────────
+  const isRecording = recorder.state.status === 'recording';
+
   // ── Outgoing call ──────────────────────────────────────────────
   const outgoingCall = useOutgoingCall();
 
@@ -2275,9 +2278,6 @@ export default function ChatScreen() {
     }
   }, [userId, chatId, isGroup, displayName, user, navigation]);
 
-  // ── Check if recording is active ────────────────────────────────
-  const isRecording = recorder.state.status === 'recording';
-
   // ── Add member to group ─────────────────────────────────────────
   const handleAddMember = useCallback(async (contact: { userId: string; displayName: string }) => {
     setAddMemberPickerOpen(false);
@@ -3158,7 +3158,11 @@ export default function ChatScreen() {
   return (
     <>
       <SafeAreaView style={[styles.root, { backgroundColor: COLORS.sky1 }]} edges={['left', 'right']}>
-        <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView 
+          style={styles.root} 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}
+        >
           <AppBg />
 
           {/* ── Top bar ── */}
@@ -3536,7 +3540,7 @@ export default function ChatScreen() {
               </TouchableOpacity>
 
               {/* Input bar - always show */}
-              <View style={[styles.inputBar, { paddingBottom: (Platform.OS === 'ios' ? 28 : 10) + insets.bottom }]}>
+              <View style={[styles.inputBar, { paddingBottom: Platform.OS === 'ios' ? 28 + insets.bottom : 12 + insets.bottom }]}>
                 {isRecording ? (
                   <View style={styles.recordingOverlayContainer}>
                     <VoiceRecordingOverlay
@@ -3597,7 +3601,7 @@ export default function ChatScreen() {
             </View>
           ) : (
             /* Normal Input Bar */
-            <View style={[styles.inputBar, { paddingBottom: (Platform.OS === 'ios' ? 28 : 10) + insets.bottom }]}>
+            <View style={[styles.inputBar, { paddingBottom: Platform.OS === 'ios' ? 28 + insets.bottom : 12 + insets.bottom }]}>
             {isRecording ? (
               <View style={styles.voiceRecordingBar}>
                 {/* Delete button */}
@@ -5540,10 +5544,13 @@ const styles = StyleSheet.create({
   },
 
   inputBar: {
-    flexDirection: 'row', alignItems: 'flex-end',
-    paddingHorizontal: 8, paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 10,
-    gap: 4, ...GLASS.header,
+    flexDirection: 'row', 
+    alignItems: 'flex-end',
+    paddingHorizontal: 8, 
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 4,
+    gap: 4, 
+    ...GLASS.header,
   },
   inputSideBtn: { width: 38, height: 42, alignItems: 'center', justifyContent: 'center' },
   inputFieldWrap: { 
@@ -5555,9 +5562,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(30,156,240,0.25)',
     paddingHorizontal: 14, 
-    height: 42 
+    minHeight: 42,
+    maxHeight: 100,
   },
-  inputField: { flex: 1, fontSize: 14, color: COLORS.text, padding: 0, margin: 0, height: 42 },
+  inputField: { 
+    flex: 1, 
+    fontSize: 14, 
+    color: COLORS.text, 
+    paddingVertical: Platform.OS === 'android' ? 8 : 10,
+    paddingHorizontal: 0,
+    margin: 0,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+  },
   emojiBtn: { paddingLeft: 8, alignSelf: 'center' },
   sendBtn: { width: 42, height: 42, borderRadius: 21, ...SHADOW.button },
   sendBtnInner: { flex: 1, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
