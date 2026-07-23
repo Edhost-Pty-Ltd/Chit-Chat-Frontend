@@ -2729,10 +2729,10 @@ export default function ChatScreen() {
               timestamp={item.timestamp}
             />
            ) : item.type === 'call' ? (
-  <View style={[styles.callBubble, styles.callBubbleIn]}>
-    <AppText style={styles.callTitle}>{item.text}</AppText>
-    <AppText style={styles.callTime}>{formatTime(item.timestamp)}</AppText>
-  </View>
+  <LinearGradient colors={GRADIENTS.chatSent} style={[styles.bubble, styles.bubbleIn]}>
+    <AppText fixedColor style={styles.bubbleTextIn}>{item.text}</AppText>
+    <AppText fixedColor style={styles.timeIn}>{formatTime(item.timestamp)}</AppText>
+  </LinearGradient>
 
 
             
@@ -2923,10 +2923,10 @@ export default function ChatScreen() {
               tickIcon={tickIcon}
             />
               ) : item.type === 'call' ? (
-  <View style={[styles.callBubble, styles.callBubbleOut]}>
-    <AppText style={[styles.callTitle, { color: textColor }]}>{item.text}</AppText>
-    <View style={styles.callTimeWithTick}>
-      <AppText style={styles.callTime}>{formatTime(item.timestamp)}</AppText>
+  <View style={[styles.bubble, styles.bubbleOut]}>
+    <AppText style={[styles.bubbleTextOut, { color: textColor, fontFamily }]}>{item.text}</AppText>
+    <View style={styles.timeOutRow}>
+      <AppText style={styles.timeOut}>{formatTime(item.timestamp)}</AppText>
       <AppIcon
         name={tickIcon.icon}
         size={13}
@@ -5445,61 +5445,6 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   timeOut: { fontSize: 10, color: COLORS.sub },
-
-    // ── Call messages ──────────────────────────────────────────────────────────
-  callBubble: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    maxWidth: '75%',
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 10,
-  },
-  callBubbleIn: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderBottomLeftRadius: 4,
-    ...SHADOW.card,
-  },
-  callBubbleOut: {
-    backgroundColor: 'rgba(180,225,245,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(30,156,240,0.18)',
-    borderBottomRightRadius: 4,
-    ...SHADOW.card,
-  },
-  callIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  callContent: {
-    flex: 1,
-    gap: 2,
-  },
-  callTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#fff',
-  },
-  callDuration: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  callTime: {
-    fontSize: 10,
-    color: COLORS.sub,
-    marginLeft: 4,
-  },
-  callTimeWithTick: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-
 
   // Voice / image
   imagePlaceholder: {
